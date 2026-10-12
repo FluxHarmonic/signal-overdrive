@@ -1,0 +1,30 @@
+#!/bin/sh
+# scripts/readme-html  write docs/readme.html: README.md as one page (cmark,
+# through guix shell), with the screenshots and the recording from
+# docs/shots/ shown after it. scripts/host serves it as /readme.html.
+set -eu
+cd "$(dirname "$0")/.."
+BODY="$(guix shell cmark-gfm -- cmark-gfm --unsafe -e table README.md)"
+[ -n "$BODY" ] || { echo "readme-html: cmark produced nothing; refusing"; exit 1; }
+{
+  cat <<'HEAD'
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signal Overdrive: the prototype</title>
+<style>
+body { background: #0D0A1A; color: #CCE6FF; font: 16px/1.5 ui-sans-serif, system-ui, sans-serif; max-width: 980px; margin: 2em auto; padding: 0 1em; }
+a { color: #4DF2D9; } h1, h2 { color: #FF59D9; } code { color: #FFCC33; }
+table { border-collapse: collapse; } td, th { border: 1px solid #2E1C4D; padding: 2px 8px; }
+img { image-rendering: pixelated; max-width: 100%; border: 1px solid #2E1C4D; margin: 6px 0; }
+</style></head><body>
+HEAD
+  printf '%s\n' "$BODY"
+  echo '<h2>Screenshots</h2>'
+  for f in docs/shots/*.png docs/shots/*.gif; do
+    [ -f "$f" ] || continue
+    n="$(basename "$f")"
+    printf '<p><img src="shots/%s" alt="%s"></p>\n' "$n" "$n"
+  done
+  echo '<p><a href="./">Play it</a></p></body></html>'
+} > docs/readme.html
+echo "readme-html: docs/readme.html, $(wc -c < docs/readme.html) bytes"

@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signal Overdrive: the prototype</title>
+<style>
+body { background: #0D0A1A; color: #CCE6FF; font: 16px/1.5 ui-sans-serif, system-ui, sans-serif; max-width: 980px; margin: 2em auto; padding: 0 1em; }
+a { color: #4DF2D9; } h1, h2 { color: #FF59D9; } code { color: #FFCC33; }
+table { border-collapse: collapse; } td, th { border: 1px solid #2E1C4D; padding: 2px 8px; }
+img { image-rendering: pixelated; max-width: 100%; border: 1px solid #2E1C4D; margin: 6px 0; }
+</style></head><body>
+<h1>Signal Overdrive (feel prototype)</h1>
+<p>An F-Zero style racer in the Crash The Stack world, built to answer one
+question: does it feel good enough to become a game? You're Zero, a data
+courier. Your cargo's integrity is the energy meter: boosting spends it,
+walls cost it, the checksum lane restores it, and at zero the cargo is
+corrupt and the run is over.</p>
+<p>The track is a Mode 7 ground plane (a fragment shader projecting a tiled
+track toward the horizon), the machines are sprites, and every frame goes
+through the Flux Harmonic palette and Bayer dither pass.</p>
+<h2>Play it</h2>
+<ul>
+<li>https://10.11.0.2:8855/ (self-signed certificate) or http://10.11.0.2:8856/ on wg0</li>
+<li>Native: <code>scripts/dev sigil build</code>, then <code>scripts/dev ./build/dev/bin/mode7-racer</code> from this directory</li>
+</ul>
+<h2>What is in it</h2>
+<ul>
+<li>Two tracks: <code>oval</code>, a wide, gentle test track (the default), and <code>loop</code>, curves of
+every tightness and a hairpin. Both have boost pads, the repair strip (the
+&quot;checksum lane&quot;) and ICE patches.</li>
+<li>A 3-lap race against five rivals in three machine designs. They follow the
+racing line, bump, and move across to block you. Live place, a countdown
+with a start card, and a finish panel with every machine's race time.</li>
+<li>The integrity meter. Boosts (from lap 2) spend it, walls cost it, and the
+checksum lane refills it. It drains in white with what you just spent, and
+pop-ups say why. At zero the cargo is corrupt.</li>
+<li>ICE patches (orange and red static). Crossing one scrambles your steering
+for 1.4 s.</li>
+<li>A sense of speed: the view widens and pulls back as you go faster, with
+streaks from the horizon and a punch when you boost.</li>
+<li>Placeholder sound, synthesized: an engine that follows your speed, a boost
+whoosh, a wall scrape. On the web it starts at your first key or tap.</li>
+<li>The best lap's ghost, see-through, from your second lap on (per track, for
+the session).</li>
+<li>The uplink gate over the start line.</li>
+</ul>
+<p>Screenshots and a short recording are in <code>docs/shots/</code>, and on the hosted
+site under <code>/shots/</code>.</p>
+<h2>Controls</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Keyboard</th>
+<th>Gamepad</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Steer</td>
+<td>Left/Right or A/D</td>
+<td>Left stick or d-pad</td>
+</tr>
+<tr>
+<td>Accelerate</td>
+<td>Up or W</td>
+<td>A or right trigger</td>
+</tr>
+<tr>
+<td>Brake</td>
+<td>Down or S</td>
+<td>B or left trigger</td>
+</tr>
+<tr>
+<td>Boost (from lap 2)</td>
+<td>Space</td>
+<td>X</td>
+</tr>
+<tr>
+<td>Drift (hold)</td>
+<td>Shift or C</td>
+<td>LB or RB</td>
+</tr>
+<tr>
+<td>Start</td>
+<td>Enter or Space</td>
+<td>Start or A</td>
+</tr>
+<tr>
+<td>Restart</td>
+<td>R</td>
+<td>Back</td>
+</tr>
+<tr>
+<td>Tuning overlay</td>
+<td>Tab</td>
+<td></td>
+</tr>
+<tr>
+<td>Palette, dither</td>
+<td>P, /</td>
+<td></td>
+</tr>
+<tr>
+<td>FPS and CPU readout</td>
+<td>F3</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p><strong>On a phone</strong> the machine accelerates by itself. Three schemes, picked with
+the SCHEME button (top left) or <code>?touch=zones|drag|stick</code>:</p>
+<ul>
+<li><strong>zones</strong> (the default): a thumb on the left half steers left, on the right
+half steers right; both thumbs brake; the BOOST button boosts.</li>
+<li><strong>drag</strong>: one finger anywhere steers by how far it has slid sideways from
+where it landed (60 px is full lock); a second finger boosts as it lands
+and drifts while held.</li>
+<li><strong>stick</strong>: a floating stick under the left thumb (sideways steers, pull
+down to brake); a thumb landing on the right half boosts, and drifts
+while held.</li>
+</ul>
+<h2>Tuning</h2>
+<p>Tab opens the overlay: Up/Down pick a knob, Left/Right change it (hold to
+repeat), 0 resets it. The overlay's last line is the query string for the
+current values, and every knob takes a URL parameter of the same name, so
+&quot;grip 8.5 felt right&quot; is <code>?grip=8.5</code>. Natively, the same as
+<code>--grip=8.5</code>. Knobs that change the race (track, laps, rivals, rival pace) restart
+it on the grid.</p>
+<p>Other parameters: <code>?track=oval|loop</code> (the same as <code>track=0|1</code>), <code>?mute</code>,
+<code>?touch=zones|drag|stick</code>, <code>?autopilot</code> (the player drives the racing line),
+<code>?start</code> (skip the title), <code>?fps</code> (the F3 readout from the start).</p>
+<p>The knobs, from <code>mode7-racer --knobs</code> (units are world texels, seconds and radians; a texel is about 25 cm, so 560 texels/s is 504 km/h):</p>
+<table>
+<thead>
+<tr>
+<th>Knob (URL parameter)</th>
+<th>Group</th>
+<th>Default</th>
+<th>Range</th>
+<th>Step</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>accel</code> ACCEL</td>
+<td>handling</td>
+<td>300</td>
+<td>50 to 1200</td>
+<td>10</td>
+</tr>
+<tr>
+<td><code>top</code> TOP SPEED</td>
+<td>handling</td>
+<td>560</td>
+<td>200 to 1200</td>
+<td>10</td>
+</tr>
+<tr>
+<td><code>brake</code> BRAKE</td>
+<td>handling</td>
+<td>700</td>
+<td>100 to 2000</td>
+<td>50</td>
+</tr>
+<tr>
+<td><code>coast</code> COAST DRAG</td>
+<td>handling</td>
+<td>70</td>
+<td>0 to 400</td>
+<td>5</td>
+</tr>
+<tr>
+<td><code>steer</code> STEER</td>
+<td>handling</td>
+<td>2.5</td>
+<td>0.5 to 6</td>
+<td>0.05</td>
+</tr>
+<tr>
+<td><code>steer-high</code> STEER AT TOP</td>
+<td>handling</td>
+<td>0.62</td>
+<td>0.1 to 1.5</td>
+<td>0.02</td>
+</tr>
+<tr>
+<td><code>steer-in</code> STEER RAMP IN</td>
+<td>handling</td>
+<td>8</td>
+<td>1 to 60</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>steer-out</code> STEER RETURN</td>
+<td>handling</td>
+<td>12</td>
+<td>1 to 60</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>grip</code> GRIP</td>
+<td>handling</td>
+<td>7</td>
+<td>0.5 to 30</td>
+<td>0.25</td>
+</tr>
+<tr>
+<td><code>drift</code> DRIFT GRIP</td>
+<td>handling</td>
+<td>0.3</td>
+<td>0 to 1</td>
+<td>0.02</td>
+</tr>
+<tr>
+<td><code>drift-steer</code> DRIFT STEER</td>
+<td>handling</td>
+<td>1.4</td>
+<td>1 to 3</td>
+<td>0.05</td>
+</tr>
+<tr>
+<td><code>transfer</code> TRANSFER</td>
+<td>handling</td>
+<td>0.75</td>
+<td>0 to 1</td>
+<td>0.05</td>
+</tr>
+<tr>
+<td><code>boost-speed</code> BOOST SPEED</td>
+<td>handling</td>
+<td>1.35</td>
+<td>1 to 2</td>
+<td>0.05</td>
+</tr>
+<tr>
+<td><code>boost-accel</code> BOOST ACCEL</td>
+<td>handling</td>
+<td>700</td>
+<td>0 to 3000</td>
+<td>50</td>
+</tr>
+<tr>
+<td><code>boost-time</code> BOOST TIME</td>
+<td>handling</td>
+<td>1.3</td>
+<td>0.2 to 4</td>
+<td>0.1</td>
+</tr>
+<tr>
+<td><code>boost-cost</code> BOOST COST</td>
+<td>handling</td>
+<td>12</td>
+<td>0 to 50</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>pad-time</code> PAD TIME</td>
+<td>handling</td>
+<td>0.9</td>
+<td>0 to 3</td>
+<td>0.1</td>
+</tr>
+<tr>
+<td><code>bounce</code> WALL BOUNCE</td>
+<td>handling</td>
+<td>0.55</td>
+<td>0 to 1.2</td>
+<td>0.05</td>
+</tr>
+<tr>
+<td><code>wall-drag</code> WALL DRAG</td>
+<td>handling</td>
+<td>0.3</td>
+<td>0 to 1</td>
+<td>0.05</td>
+</tr>
+<tr>
+<td><code>wall-damage</code> WALL DAMAGE</td>
+<td>handling</td>
+<td>0.045</td>
+<td>0 to 0.3</td>
+<td>0.005</td>
+</tr>
+<tr>
+<td><code>repair</code> REPAIR RATE</td>
+<td>handling</td>
+<td>24</td>
+<td>0 to 100</td>
+<td>2</td>
+</tr>
+<tr>
+<td><code>ice-time</code> ICE SCRAMBLE TIME</td>
+<td>handling</td>
+<td>1.4</td>
+<td>0 to 5</td>
+<td>0.1</td>
+</tr>
+<tr>
+<td><code>radius</code> RADIUS</td>
+<td>handling</td>
+<td>9</td>
+<td>4 to 30</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>overspeed-drag</code> OVERSPEED DRAG</td>
+<td>handling</td>
+<td>240</td>
+<td>0 to 2000</td>
+<td>20</td>
+</tr>
+<tr>
+<td><code>track</code> TRACK (0 OVAL 1 LOOP)</td>
+<td>race</td>
+<td>0</td>
+<td>0 to 1</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>laps</code> LAPS</td>
+<td>race</td>
+<td>3</td>
+<td>1 to 9</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>rivals</code> RIVALS</td>
+<td>race</td>
+<td>5</td>
+<td>0 to 5</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>rival-pace</code> RIVAL PACE</td>
+<td>race</td>
+<td>0.97</td>
+<td>0.7 to 1.2</td>
+<td>0.01</td>
+</tr>
+<tr>
+<td><code>boost-lap</code> BOOST FROM LAP</td>
+<td>race</td>
+<td>2</td>
+<td>1 to 9</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>bump</code> BUMP</td>
+<td>race</td>
+<td>0.6</td>
+<td>0 to 1</td>
+<td>0.05</td>
+</tr>
+<tr>
+<td><code>fov</code> FOV</td>
+<td>camera</td>
+<td>1.15</td>
+<td>0.6 to 2</td>
+<td>0.05</td>
+</tr>
+<tr>
+<td><code>cam-height</code> CAM HEIGHT</td>
+<td>camera</td>
+<td>40</td>
+<td>6 to 90</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>cam-dist</code> CAM DIST</td>
+<td>camera</td>
+<td>92</td>
+<td>20 to 240</td>
+<td>2</td>
+</tr>
+<tr>
+<td><code>pitch</code> PITCH</td>
+<td>camera</td>
+<td>0.16</td>
+<td>-0.3 to 0.7</td>
+<td>0.01</td>
+</tr>
+<tr>
+<td><code>horizon</code> HORIZON</td>
+<td>camera</td>
+<td>80</td>
+<td>30 to 180</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>cam-lag</code> CAM LAG</td>
+<td>camera</td>
+<td>0.35</td>
+<td>0 to 0.95</td>
+<td>0.05</td>
+</tr>
+<tr>
+<td><code>sprite-size</code> MACHINE SIZE</td>
+<td>camera</td>
+<td>18</td>
+<td>8 to 60</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>speed-fov</code> FOV AT SPEED</td>
+<td>camera</td>
+<td>0.18</td>
+<td>0 to 0.8</td>
+<td>0.02</td>
+</tr>
+<tr>
+<td><code>speed-pull</code> PULL BACK AT SPEED</td>
+<td>camera</td>
+<td>12</td>
+<td>0 to 60</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>speed-lines</code> SPEED LINES</td>
+<td>look</td>
+<td>1</td>
+<td>0 to 1</td>
+<td>0.1</td>
+</tr>
+<tr>
+<td><code>fog</code> FOG</td>
+<td>look</td>
+<td>1</td>
+<td>0 to 1</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>fog-start</code> FOG START</td>
+<td>look</td>
+<td>900</td>
+<td>100 to 4000</td>
+<td>50</td>
+</tr>
+<tr>
+<td><code>fog-end</code> FOG END</td>
+<td>look</td>
+<td>2800</td>
+<td>200 to 8000</td>
+<td>100</td>
+</tr>
+<tr>
+<td><code>far-start</code> FAR FADE FROM</td>
+<td>look</td>
+<td>1.4</td>
+<td>0.5 to 8</td>
+<td>0.1</td>
+</tr>
+<tr>
+<td><code>far-end</code> FAR FADE TO</td>
+<td>look</td>
+<td>3.2</td>
+<td>0.5 to 12</td>
+<td>0.1</td>
+</tr>
+<tr>
+<td><code>dither</code> DITHER</td>
+<td>look</td>
+<td>1</td>
+<td>0 to 1</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>spread</code> SPREAD</td>
+<td>look</td>
+<td>8</td>
+<td>0 to 64</td>
+<td>4</td>
+</tr>
+<tr>
+<td><code>lut</code> DITHER BY LOOKUP</td>
+<td>look</td>
+<td>1</td>
+<td>0 to 1</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>palette</code> PALETTE</td>
+<td>look</td>
+<td>0</td>
+<td>0 to 1</td>
+<td>1</td>
+</tr>
+</tbody>
+</table>
+<h2>How it's built</h2>
+<ul>
+<li><code>src/racer/mode7/</code> the Mode 7 camera and renderer (nothing racing-specific;
+the seed of a later substratic-mode7 package)</li>
+<li><code>src/racer/handling.sgl</code> one machine's handling, pure, with tests</li>
+<li><code>src/racer/track.sgl</code> where a point is on a track; <code>track/oval-data.sgl</code> and <code>track/loop-data.sgl</code> are generated</li>
+<li><code>src/racer/race.sgl</code> the grid, laps, rivals, the finish and corrupt cargo</li>
+<li><code>src/racer/scene.sgl</code> the frame: the Mode 7 pass, the dither pass, the HUD</li>
+<li><code>src/racer/lut.sgl</code> the dither pass by lookup texture (<code>scripts/art/gen-lut.mjs</code>); <code>dither.sgl</code> is Phantom Burn's exact pass</li>
+<li><code>src/racer/sound.sgl</code> the synthesized sound; <code>shell/audio.sgl</code> pushes it to the device</li>
+<li><code>scripts/touch-check.mjs</code> drives the touch schemes in a headless phone viewport;
+<code>scripts/shot-web.mjs</code> takes web screenshots; <code>scripts/host</code> serves the build on wg0</li>
+<li><code>scripts/art/</code> the generators for every image in <code>assets/racer/</code> (node, no dependencies)</li>
+</ul>
+<p>Tests: <code>scripts/dev sigil test --sgl test/test-handling.sgl</code> (and
+<code>test-track</code>, <code>test-camera</code>, <code>test-race</code>, <code>test-sound</code>).</p>
+<h2>Screenshots</h2>
+<p><img src="shots/1-title.png" alt="1-title.png"></p>
+<p><img src="shots/2-race.png" alt="2-race.png"></p>
+<p><img src="shots/3-pad-and-ice.png" alt="3-pad-and-ice.png"></p>
+<p><img src="shots/4-finish.png" alt="4-finish.png"></p>
+<p><img src="shots/5-tuning.png" alt="5-tuning.png"></p>
+<p><img src="shots/recording-race.gif" alt="recording-race.gif"></p>
+<p><a href="./">Play it</a></p></body></html>

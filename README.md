@@ -15,6 +15,30 @@ through the Flux Harmonic palette and Bayer dither pass.
 - https://10.11.0.2:8855/ (self-signed certificate) or http://10.11.0.2:8856/ on wg0
 - Native: `scripts/dev sigil build`, then `scripts/dev ./build/dev/bin/mode7-racer` from this directory
 
+## What is in it
+
+- Two tracks: `oval`, a wide, gentle test track (the default), and `loop`, curves of
+  every tightness and a hairpin. Both have boost pads, the repair strip (the
+  "checksum lane") and ICE patches.
+- A 3-lap race against five rivals in three machine designs. They follow the
+  racing line, bump, and move across to block you. Live place, a countdown
+  with a start card, and a finish panel with every machine's race time.
+- The integrity meter. Boosts (from lap 2) spend it, walls cost it, and the
+  checksum lane refills it. It drains in white with what you just spent, and
+  pop-ups say why. At zero the cargo is corrupt.
+- ICE patches (orange and red static). Crossing one scrambles your steering
+  for 1.4 s.
+- A sense of speed: the view widens and pulls back as you go faster, with
+  streaks from the horizon and a punch when you boost.
+- Placeholder sound, synthesized: an engine that follows your speed, a boost
+  whoosh, a wall scrape. On the web it starts at your first key or tap.
+- The best lap's ghost, see-through, from your second lap on (per track, for
+  the session).
+- The uplink gate over the start line.
+
+Screenshots and a short recording are in `docs/shots/`, and on the hosted
+site under `/shots/`.
+
 ## Controls
 
 | | Keyboard | Gamepad |
@@ -117,7 +141,11 @@ The knobs, from `mode7-racer --knobs` (units are world texels, seconds and radia
 - `src/racer/track.sgl` where a point is on a track; `track/oval-data.sgl` and `track/loop-data.sgl` are generated
 - `src/racer/race.sgl` the grid, laps, rivals, the finish and corrupt cargo
 - `src/racer/scene.sgl` the frame: the Mode 7 pass, the dither pass, the HUD
+- `src/racer/lut.sgl` the dither pass by lookup texture (`scripts/art/gen-lut.mjs`); `dither.sgl` is Phantom Burn's exact pass
+- `src/racer/sound.sgl` the synthesized sound; `shell/audio.sgl` pushes it to the device
+- `scripts/touch-check.mjs` drives the touch schemes in a headless phone viewport;
+  `scripts/shot-web.mjs` takes web screenshots; `scripts/host` serves the build on wg0
 - `scripts/art/` the generators for every image in `assets/racer/` (node, no dependencies)
 
 Tests: `scripts/dev sigil test --sgl test/test-handling.sgl` (and
-`test-track`, `test-camera`, `test-race`).
+`test-track`, `test-camera`, `test-race`, `test-sound`).
