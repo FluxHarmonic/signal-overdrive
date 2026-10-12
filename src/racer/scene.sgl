@@ -1,0 +1,333 @@
+;;; (racer scene) - A frame: the Mode 7 pass (sky, ground, the machines as
+;;; sprites, far to near) into the 480x270 view, the palette-and-dither post
+;;; pass, the view on the window at its fit, then the HUD and the tuning
+;;; overlay at the window's own pixel scale.
+;;;
+;;; The sprite sheet (scripts/art/gen-machines.mjs) is in rows 80 px tall,
+;;; a cell's ground point 48 px down and centred across: row 0 the player
+;;; from behind in 80 px cells, five lean frames (hard left, left, centre,
+;;; right, hard right) then the same five boosting; rows 1-3 one rival
+;;; colour each in 128 px cells, 16 directions (0 seen from behind, then
+;;; clockwise in 22.5 degree steps: the machine turned that far to its right
+;;; of the line of sight); row 4 the shadow in an 80 px cell. The player's
+;;; body is 64 px wide, a rival's 58 (PLAYER-BODY, RIVAL-BODY): a machine is
+;;; drawn sprite-size texels wide whichever cell it comes from.
+
+(define-library (racer scene)
+  (import (sigil core)
+          (sigil math)
+          (sigil string)
+          (sigil list)
+          (sigil graphics)
+          (substratic view fit)
+          (substratic view present)
+          (substratic text font)
+          (racer mode7 camera)
+          (racer mode7 render)
+          (racer dither)
+          (racer track)
+          (racer handling)
+          (racer race)
+          (racer tuning))
+
+  (export VIEW-W VIEW-H scene-init! scene-ready? scene-frame! scene-camera
+          scene-world-ms speed-kmh lap-clock)
+
+  (begin
+    (define VIEW-W 480)
+    (define VIEW-H 270)
+    (define PLAYER-CELL-W 80)
+    (define RIVAL-CELL-W 128)
+    (define CELL-H 80)
+    (define ANCHOR-Y 48)
+    (define PLAYER-BODY 64.0)
+    (define RIVAL-BODY 58.0)
+
+    (define *view* #f)
+    (define *post* #f)
+    (define *view-tex* #f)
+    (define *post-pipe* #f)
+    (define *tri* #f)
+    (define *sheet* #f)
+    (define *presenter* #f)
+    (define *palette* #f)
+    (define *spread* -1.0)
+    (define *world-ms* 0.0)
+    (define (scene-world-ms) *world-ms*)
+    (define (scene-ready?) (and *view* #t))
+
+    (define (bytes-of floats)
+      (let ((bv (make-bytevector (* 4 (length floats)) 0)))
+        (let loop ((fs floats) (k 0))
+          (unless (null? fs)
+            (bytevector-ieee-single-set! bv k (exact->inexact (car fs)) 'little)
+            (loop (cdr fs) (+ k 4))))
+        bv))
+
+    ;; Textures from the shell (each loaded natively or fetched on the web).
+    (define (scene-init! atlas tmap tavg sky sheet)
+      (mode7-init! VIEW-W VIEW-H)
+      (mode7-set-world! atlas tmap tavg 32.0 64.0 128.0 3.2)
+      (mode7-set-sky! sky 96.0 0.30 0.55 0.85)
+      (set-texture-sampling! sheet 'nearest 'clamp)
+      (set! *sheet* sheet)
+      (let ((pl (make-vertex-layout '((position float2)))))
+        (set! *tri* (make-mesh pl (bytes-of '(-1.0 -1.0 3.0 -1.0 -1.0 3.0))))
+        (set! *post-pipe* (make-pipeline pl
+                                         (string-append (glsl-header) POST-VERTEX)
+                                         (string-append (glsl-header) POST-FRAGMENT)
+                                         '(depth-test #f depth-write #f cull none))))
+      (set! *view* (make-render-target VIEW-W VIEW-H 'nearest 'depth))
+      (set! *post* (make-render-target VIEW-W VIEW-H 'nearest 'depth))
+      (set! *view-tex* (render-target->texture *view*))
+      (set! *presenter* (make-presenter VIEW-W VIEW-H)))
+
+    ;; The post pass's palette and spread, when they change.
+    (define (sync-post! tuning)
+      (let ((pal (if (> (tuning-ref tuning 'palette) 0.5) 'crash 'embers))
+            (spread (tuning-ref tuning 'spread)))
+        (unless (and (eq? pal *palette*) (= spread *spread*))
+          (set! *palette* pal)
+          (set! *spread* spread)
+          (let ((colors (palette-colors pal)))
+            (set-pipeline-uniform! *post-pipe* 'pal (palette-uniform colors))
+            (set-pipeline-uniform! *post-pipe* 'params
+                                   (list spread 4.0 (exact->inexact (length colors)) (exact->inexact VIEW-H)))
+            ;; rows counted from the top: the pass's gl_FragCoord row 0 is
+            ;; the picture's bottom on a render target (Phantom's finding)
+            (set-pipeline-uniform! *post-pipe* 'opts (list 1.0 1.0 0.0 0.0))))))
+
+    ;; --- the camera --------------------------------------------------------------------
+
+    ;; The camera behind the player, at cam-heading (the shell eases it
+    ;; toward the machine's heading: the cam lag).
+    (define (scene-camera tuning m cam-heading)
+      (cam-behind (make-cam 0.0 0.0 (tuning-ref tuning 'cam-height) cam-heading
+                            (tuning-ref tuning 'pitch) (tuning-ref tuning 'fov)
+                            (tuning-ref tuning 'horizon) VIEW-W VIEW-H)
+                  (machine-x m) (machine-y m) cam-heading (tuning-ref tuning 'cam-dist)))
+
+    ;; --- sprites -------------------------------------------------------------------------
+
+    (define PI 3.141592653589793)
+    (define (wrap-angle a)
+      (cond ((> a PI) (wrap-angle (- a (* 2.0 PI))))
+            ((< a (- PI)) (wrap-angle (+ a (* 2.0 PI))))
+            (else a)))
+
+    (define (smoothstep a b x)
+      (let ((t (max 0.0 (min 1.0 (/ (- x a) (- b a))))))
+        (* t t (- 3.0 (* 2.0 t)))))
+
+    ;; (depth draw-thunk) for one machine, or #f when it is not in view.
+    (define (machine-sprite c tuning m cell-col cell-row player?)
+      (let ((p (camera-project c (machine-x m) (machine-y m) 0.0 4.0)))
+        (and p
+             (let* ((cw (if player? PLAYER-CELL-W RIVAL-CELL-W))
+                    (body (if player? PLAYER-BODY RIVAL-BODY))
+                    ;; screen pixels per sheet pixel
+                    (k (/ (* (projected-scale p) (tuning-ref tuning 'sprite-size)) body))
+                    (w (* k cw))
+                    (h (* k CELL-H))
+                    (x (round (- (projected-x p) (* 0.5 w))))
+                    (y (round (- (projected-y p) (* k ANCHOR-Y))))
+                    ;; the shadow's cell, the player's size, on the same ground point
+                    (sw (round (* k PLAYER-CELL-W)))
+                    (sx (round (- (projected-x p) (* 0.5 sw))))
+                    (w (round w)) (h (round h))
+                    (fog (if (> (tuning-ref tuning 'fog) 0.5)
+                             (* 0.85 (smoothstep (tuning-ref tuning 'fog-start) (tuning-ref tuning 'fog-end) (projected-depth p)))
+                             0.0))
+                    (fc '(0.18 0.11 0.30))
+                    (u0 (* cell-col cw)) (v0 (* cell-row CELL-H)))
+               (and (> w 1.0) (< x VIEW-W) (> (+ x w) 0.0) (< y VIEW-H) (> (+ y h) 0.0)
+                    (list (projected-depth p)
+                          (lambda ()
+                            (mode7-draw-sprite! *sheet* sx y sw h 0.0 (* 4 CELL-H) PLAYER-CELL-W (* 5 CELL-H) fog fc)
+                            (mode7-draw-sprite! *sheet* x y w h u0 v0 (+ u0 cw) (+ v0 CELL-H) fog fc))))))))
+
+    (define (player-frame m cam-heading)
+      (let* ((yaw (wrap-angle (- (machine-heading m) cam-heading)))
+             (v (+ (machine-lean m) (* 2.5 yaw)))
+             (k (cond ((< v -0.7) 0) ((< v -0.22) 1) ((<= v 0.22) 2) ((<= v 0.7) 3) (else 4))))
+        (+ k (if (> (machine-boost m) 0.0) 5 0))))
+
+    (define (rival-dir c m)
+      (let* ((dx (- (machine-x m) (cam-x c)))
+             (dy (- (machine-y m) (cam-y c)))
+             (view (atan dx (- dy)))
+             (rel (wrap-angle (- (machine-heading m) view)))
+             (k (exact (round (/ rel (/ PI 8.0))))))
+        (modulo k 16)))
+
+    (define (draw-machines! c tuning r cam-heading)
+      (let* ((pm (racer-machine (race-player r)))
+             (items (cons (machine-sprite c tuning pm (player-frame pm cam-heading) 0 #t)
+                          (map (lambda (x)
+                                 (let ((m (racer-machine x)))
+                                   (machine-sprite c tuning m (rival-dir c m) (+ 1 (racer-colour x)) #f)))
+                               (race-rivals r))))
+             (items (filter (lambda (x) x) items)))
+        ;; far to near
+        (let draw ((items items))
+          (unless (null? items)
+            (let far ((best (car items)) (rest (cdr items)) (others '()))
+              (if (null? rest)
+                  (begin ((cadr best)) (draw others))
+                  (if (> (car (car rest)) (car best))
+                      (far (car rest) (cdr rest) (cons best others))
+                      (far best (cdr rest) (cons (car rest) others)))))))))
+
+    ;; --- the HUD ---------------------------------------------------------------------------
+
+    (define (speed-kmh m) (exact (round (* 0.9 (machine-speed m)))))
+
+    (define (two n) (if (< n 10) (string-append "0" (number->string n)) (number->string n)))
+    ;; ticks as M:SS.CC
+    (define (lap-clock ticks)
+      (if (not ticks)
+          "-:--.--"
+          (let* ((cs (exact (floor (/ (* ticks 100) 60))))
+                 (m (quotient cs 6000))
+                 (s (quotient (modulo cs 6000) 100))
+                 (c (modulo cs 100)))
+            (string-append (number->string m) ":" (two s) "." (two c)))))
+
+    (define (ordinal n)
+      (string-append (number->string n) (case n ((1) "ST") ((2) "ND") ((3) "RD") (else "TH"))))
+
+    ;; HUD drawing in view pixels, on the window at the fit's scale.
+    (define *fit* #f)
+    (define (hs) (max 1 (exact (floor (fit-scale *fit*)))))
+    (define (hx vx) (+ (fit-x *fit*) (* vx (fit-scale *fit*))))
+    (define (hy vy) (+ (fit-y *fit*) (* vy (fit-scale *fit*))))
+    (define (rgb hex)
+      (let ((d (lambda (k) (/ (string->number (substring hex k (+ k 2)) 16) 255.0))))
+        (set-color (d 1) (d 3) (d 5))))
+    (define (rect! vx vy w h hex)
+      (rgb hex)
+      (draw-filled-rect (hx vx) (hy vy) (* w (fit-scale *fit*)) (* h (fit-scale *fit*))))
+    (define (text! s vx vy hex . size)
+      (let ((k (if (pair? size) (car size) 1)))
+        (rgb "#0D0A1A")
+        (draw-text s (+ (hx vx) (hs)) (+ (hy vy) (hs)) (* k (hs)))
+        (rgb hex)
+        (draw-text s (hx vx) (hy vy) (* k (hs)))))
+    (define (text-w s . size) (/ (text-width s (* (if (pair? size) (car size) 1) (hs))) (fit-scale *fit*)))
+    (define (centred! s vy hex . size)
+      (let ((k (if (pair? size) (car size) 1)))
+        (text! s (round (/ (- VIEW-W (text-w s k)) 2)) vy hex k)))
+
+    ;; The integrity meter: a bar of 2-pixel cells, cyan high, amber
+    ;; middling, red low; flashing white for a few frames after a hit.
+    (define (meter! vx vy integrity flash tick)
+      (let* ((cells 50)
+             (lit (exact (ceiling (* cells (/ integrity INTEGRITY-MAX)))))
+             (col (cond ((> integrity 55.0) "#4DF2D9") ((> integrity 25.0) "#FF9F1A") (else "#FF5959")))
+             (col (if (and (< integrity 25.0) (odd? (quotient tick 8))) "#CC3340" col))
+             (col (if (> flash 0) "#FAFCFF" col)))
+        (rect! (- vx 1) (- vy 1) (+ (* cells 3) 1) 8 "#0D0A1A")
+        (let loop ((i 0))
+          (when (< i cells)
+            (rect! (+ vx (* i 3)) vy 2 6 (if (< i lit) col "#21173D"))
+            (loop (+ i 1))))))
+
+    (define (hud! tuning r info)
+      (let* ((p (race-player r))
+             (m (racer-machine p))
+             (laps (race-laps tuning))
+             (phase (race-phase r))
+             (tick (race-tick r)))
+        ;; top left: the lap and its time
+        (text! (string-append "LAP " (number->string (max 1 (racer-lap p))) "/" (number->string laps)) 8 8 "#CCE6FF" 2)
+        (text! (lap-clock (if (and (eq? phase 'race) (> (racer-lap p) 0)) (- tick (racer-lap-start p)) 0)) 8 26 "#CCE6FF")
+        (text! (string-append "LAST " (lap-clock (racer-last-lap p))) 8 36 "#7380A6")
+        (text! (string-append "BEST " (lap-clock (cdr (assq 'best info)))) 8 46 "#FFCC33")
+        ;; top right: place and speed
+        (let ((pl (ordinal (racer-place p))))
+          (text! pl (- VIEW-W 8 (text-w pl 2)) 8 "#FF59D9" 2))
+        (let ((sp (string-append (number->string (speed-kmh m)) " KM/H")))
+          (text! sp (- VIEW-W 8 (text-w sp)) 26 "#CCE6FF"))
+        ;; the integrity meter, top centre
+        (centred! "INTEGRITY" 6 "#7380A6")
+        (meter! (- (/ VIEW-W 2) 75) 15 (machine-integrity m) (cdr (assq 'flash info)) tick)
+        (cond ((> (machine-boost m) 0.0) (centred! "BOOST" 25 "#FFCC33"))
+              ((machine-on-repair m) (centred! "CHECKSUM LANE: REPAIRING" 25 "#4DF2D9"))
+              ((and (eq? phase 'race) (>= (racer-lap p) (race-tuning-ref tuning 'boost-lap))
+                    (> (machine-integrity m) (handling-ref tuning 'boost-cost)))
+               (centred! "BOOST READY" 25 "#7380A6")))
+        (case phase
+          ((title)
+           (centred! "SIGNAL OVERDRIVE" 70 "#FF59D9" 3)
+           (centred! "COURIER ZERO. ONE PACKAGE. DON'T LET IT CORRUPT." 98 "#CCE6FF")
+           (when (odd? (quotient tick 30)) (centred! (cdr (assq 'start-line info)) 120 "#FFCC33" 2)))
+          ((countdown)
+           (let ((n (+ 1 (quotient (race-countdown r) 60))))
+             (centred! (number->string n) 90 "#FFCC33" 4)))
+          ((race)
+           (when (< (race-clock r) 60) (centred! "GO" 90 "#4DF2D9" 4)))
+          ((finished)
+           (centred! "DELIVERED." 76 "#4DF2D9" 3)
+           (centred! (string-append "PLACE " (ordinal (racer-place p)) "   BEST LAP " (lap-clock (racer-best-lap p))) 104 "#CCE6FF")
+           (centred! (cdr (assq 'restart-line info)) 120 "#FFCC33"))
+          ((corrupt)
+           (centred! "CARGO CORRUPT." 80 "#FF5959" 3)
+           (centred! (cdr (assq 'restart-line info)) 108 "#FFCC33")))))
+
+    ;; --- the tuning overlay ------------------------------------------------------------------
+
+    (define (overlay! tuning sel)
+      (let* ((rows 24)
+             (n (length KNOBS))
+             (top (max 0 (min (- n rows) (- sel (quotient rows 2)))))
+             (x 8) (y 60))
+        (rect! (- x 4) (- y 6) 196 (+ (* rows 8) 34) "#0D0A1A")
+        (text! "TUNING  UP/DOWN PICK  LEFT/RIGHT SET  0 RESET" x (- y 2) "#7380A6")
+        (let loop ((i top) (row 0))
+          (when (and (< i n) (< row rows))
+            (let* ((k (list-ref KNOBS i))
+                   (v (tuning-ref tuning (knob-key k)))
+                   (changed (> (abs (- v (knob-default k))) 1e-9))
+                   (col (cond ((= i sel) "#FFCC33") (changed "#4DF2D9") (else "#CCE6FF"))))
+              (when (= i sel) (rect! (- x 2) (+ y 8 (* row 8)) 190 8 "#2E1C4D"))
+              (text! (knob-label k) x (+ y 9 (* row 8)) col)
+              (text! (tuning-format-value v) (+ x 130) (+ y 9 (* row 8)) col))
+            (loop (+ i 1) (+ row 1))))
+        (let ((q (tuning-query tuning)))
+          (text! (if (string=? q "") "?(DEFAULTS)" (string-append "?" q)) x (+ y 12 (* rows 8)) "#FF59D9"))))
+
+    ;; --- a frame ------------------------------------------------------------------------------
+
+    (define (look! tuning)
+      (mode7-set-look! (list (cons 'fog-start (tuning-ref tuning 'fog-start))
+                             (cons 'fog-end (tuning-ref tuning 'fog-end))
+                             (cons 'fog? (> (tuning-ref tuning 'fog) 0.5))
+                             (cons 'far-start (tuning-ref tuning 'far-start))
+                             (cons 'fog-color '(0.18 0.11 0.30))
+                             (cons 'sky-top '(0.05 0.04 0.10))
+                             (cons 'sky-low '(0.18 0.11 0.30))))
+      (mode7-set-far! (tuning-ref tuning 'far-end)))
+
+    ;; info: (best . ticks) (flash . frames) (start-line . text)
+    ;; (restart-line . text) (overlay . selected-row-or-#f).
+    (define (scene-frame! tuning r cam-heading info win-w win-h integer-only)
+      (sync-post! tuning)
+      (look! tuning)
+      (let* ((m (racer-machine (race-player r)))
+             (c (scene-camera tuning m cam-heading))
+             (dither? (> (tuning-ref tuning 'dither) 0.5))
+             (f (view-fit win-w win-h VIEW-W VIEW-H integer-only: integer-only)))
+        (set! *fit* f)
+        (begin-frame)
+        (with-3d-pass *view* (list 0.05 0.04 0.10 1.0)
+          (mode7-draw-ground! c)
+          (draw-machines! c tuning r cam-heading))
+        (when dither?
+          (with-3d-pass *post* #f
+            (draw-mesh *post-pipe* *tri* *view-tex*)))
+        (view-present! *presenter* (if dither? *post* *view*) f)
+        (set-blend-mode 'normal)
+        (hud! tuning r info)
+        (let ((sel (cdr (assq 'overlay info))))
+          (when sel (overlay! tuning sel)))
+        (end-frame)))))

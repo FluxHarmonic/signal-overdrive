@@ -16,14 +16,15 @@
 ;;;     drift-steer.
 ;;;  2. the velocity is split along the new heading (forward) and across it
 ;;;     (lateral).
-;;;  3. forward: the throttle adds accel * (1 - v/top), so speed eases into
-;;;     top speed; a boost raises top by boost-speed and adds boost-accel.
+;;;  3. forward: the throttle adds accel * (1 - v/top), v the total speed,
+;;;     so speed eases into top speed and a slide counts against it; a boost raises top by boost-speed and adds boost-accel.
 ;;;     Above top (a boost ending) it sheds overspeed-drag. Off the throttle
 ;;;     it coasts down at `coast`; the brake takes `brake`.
 ;;;  4. grip: the lateral speed decays at `grip` per second (grip * drift
-;;;     while drift is held: the slide); a share `transfer` of what grip
-;;;     takes away becomes forward speed, so a clean turn keeps its speed
-;;;     and a slide scrubs it.
+;;;     while drift is held: the slide); a share `transfer` of the energy
+;;;     grip takes from the lateral motion goes into the forward speed, so
+;;;     a clean turn keeps most of its speed, a slide scrubs it, and no turn
+;;;     ever adds speed.
 ;;;  5. move, then the walls: past hw - radius the machine is put back on
 ;;;     the wall, its speed into the wall reflected at `bounce` and its
 ;;;     speed along the wall scrubbed by `wall-drag` scaled by the impact;
@@ -76,7 +77,7 @@
         (wall-drag . 0.30)       ; along-wall speed lost at a 300 texel/s impact
         (wall-damage . 0.045)    ; integrity per texel/s of impact speed
         (repair . 24.0)          ; integrity per second on the strip
-        (radius . 10.0)))        ; the machine's half-width against walls
+        (radius . 9.0)))         ; the machine's half-width against walls
 
     (define (handling-keys) (map car default-handling))
     (define (handling-ref h key)
@@ -152,9 +153,14 @@
              ;; 3. forward
              (throttle (clamp 0.0 1.0 (input-throttle in)))
              (accel (+ (P 'accel) (if boosting (P 'boost-accel) 0.0)))
+             ;; the throttle eases off on the TOTAL speed, so a slide's
+             ;; sideways motion counts against top speed too (on the
+             ;; forward speed alone, a lossless slide plus the throttle
+             ;; pumped past top: 794 against 560, measured)
+             (total (sqrt (+ (* vf vf) (* vl vl))))
              (vf (if (> vf top-eff)
                      (max top-eff (- vf (* (P 'overspeed-drag) dt)))
-                     (+ vf (* throttle accel (max 0.0 (- 1.0 (/ vf top-eff))) dt))))
+                     (+ vf (* throttle accel (max 0.0 (- 1.0 (/ total top-eff))) dt))))
              (vf (if (< throttle 0.05)
                      (if (> vf 0.0) (max 0.0 (- vf (* (P 'coast) dt))) (min 0.0 (+ vf (* (P 'coast) dt))))
                      vf))
@@ -163,9 +169,14 @@
              ;; 4. grip
              (g (* (P 'grip) (if drift (P 'drift) 1.0)))
              (keep (exp (- (* g dt))))
-             (lost (* vl (- 1.0 keep)))
-             (vl (- vl lost))
-             (vf (+ vf (* (abs lost) (P 'transfer) (if (>= vf 0.0) 1.0 -1.0))))
+             (vl2 (* vl keep))
+             ;; transfer moves a share of the lateral motion's energy into
+             ;; the forward speed: never more than it took, so a turn can
+             ;; keep speed but never add it (adding the lost speed linearly
+             ;; did: lateral speed counts quadratically in the total)
+             (gain (* (P 'transfer) (- (* vl vl) (* vl2 vl2))))
+             (vf (let ((m (sqrt (+ (* vf vf) gain)))) (if (>= vf 0.0) m (- m))))
+             (vl vl2)
              (vx (+ (* vf fx) (* vl rx)))
              (vy (+ (* vf fy) (* vl ry)))
              ;; 5. move, walls

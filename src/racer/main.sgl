@@ -1,0 +1,23 @@
+;;; (racer main) - The entry, and the seam between the two targets:
+;;; (racer shell web) on the web config, (racer shell native) otherwise.
+
+(define-library (racer main)
+  (import (sigil core))
+  (cond-expand
+    (wasm (import (racer shell web)))
+    (else (import (racer shell native))))
+
+  (export main sigil-web-dispatch-event)
+
+  (begin
+    (cond-expand
+      (wasm
+       (define (main . args)
+         (web-main))
+       (define (sigil-web-dispatch-event type payload)
+         (web-dispatch type payload)))
+      (else
+       (define (main . args)
+         (apply native-main args))
+       (define (sigil-web-dispatch-event type payload)
+         0)))))

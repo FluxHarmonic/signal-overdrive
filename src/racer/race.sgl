@@ -1,0 +1,285 @@
+;;; (racer race) - A race on the loop: the grid, the countdown, laps and lap
+;;; times, the rivals and their racing line, bumps between machines, and the
+;;; two ends: the finish, and the cargo corrupted.
+;;;
+;;; Pure and deterministic, on Substratic's fixed 1/60 s tick: (race-step
+;;; tuning r controls) is the next race. controls is the player's
+;;; (racer handling) input plus a start press. tuning is the association
+;;; list (racer tuning) keeps: the handling's knobs and the race's own
+;;; (laps, rivals, rival-pace, boost-lap).
+;;;
+;;; Phases: title (the grid, waiting for a start), countdown (3 s, no
+;;; throttle), race, finished (every lap done), corrupt (integrity hit 0).
+;;; From finished or corrupt, a start after a second begins a new race.
+;;;
+;;; Laps: a machine starts behind the line on lap 0; crossing the line
+;;; (s wrapping from the last quarter to the first, having passed the
+;;; halfway point since the last crossing) begins the next lap, so lap 1
+;;; starts as the field crosses the line. Running the wrong way and back
+;;; over the line counts nothing.
+
+(define-library (racer race)
+  (import (sigil core)
+          (sigil struct)
+          (sigil math)
+          (sigil list)
+          (racer track)
+          (racer handling))
+
+  (export race race? race-new race-step race-start
+          race-phase race-tick race-player race-rivals race-clock race-countdown race-events
+          racer racer? racer-machine racer-lap racer-lap-start racer-last-lap racer-best-lap
+          racer-halfway racer-finished racer-place racer-name racer-colour racer-progress
+          race-laps race-place-of race-tuning-ref RACE-DEFAULTS
+          ai-input)
+
+  (begin
+    (define DT (/ 1.0 60.0))
+
+    (define RACE-DEFAULTS
+      '((laps . 3.0)
+        (rivals . 3.0)
+        (rival-pace . 0.97)     ; a rival's top speed as a share of yours
+        (boost-lap . 2.0)       ; the first lap a boost press works on
+        (bump . 0.6)))          ; restitution between two machines
+
+    (define (race-tuning-ref tuning key)
+      (let ((e (assq key tuning)))
+        (if e (cdr e)
+            (let ((d (assq key RACE-DEFAULTS)))
+              (if d (cdr d) (handling-ref tuning key))))))
+
+    ;; lap: 0 behind the line, then the lap being driven. lap-start: the
+    ;; tick it began. finished: the tick the last lap ended, or #f.
+    ;; progress: laps * length + s, for the places.
+    (define-struct racer
+      (machine default: #f)
+      (lap default: 0) (lap-start default: 0)
+      (last-lap default: #f) (best-lap default: #f)
+      (halfway default: #t)
+      (finished default: #f)
+      (place default: 1)
+      (name default: "ZERO")
+      (colour default: 0)
+      (pace default: 1.0)
+      (lane default: 0.0)
+      (progress default: 0.0))
+
+    ;; clock: ticks since the start (the race's time). events: this
+    ;; tick's, as (who . event) pairs; who is 'player or a rival's index.
+    (define-struct race
+      (phase default: 'title)
+      (tick default: 0)
+      (clock default: 0)
+      (countdown default: 0)
+      (player default: #f)
+      (rivals default: '())
+      (over-tick default: 0)
+      (events default: '()))
+
+    (define (race-laps tuning) (exact (round (race-tuning-ref tuning 'laps))))
+
+    (define RIVAL-NAMES '("VEX" "NULL" "KESTREL" "SPOOL" "HALCYON"))
+
+    ;; The grid: two columns behind the line, the player in the second row
+    ;; on the right, rivals ahead and beside.
+    (define (grid-machine t row col)
+      (let* ((s (wrap-s t (- -36.0 (* row 44.0))))
+             (u (if (= col 0) -0.38 0.38))
+             (p (track-point t s u))
+             (heading (atan (list-ref p 2) (- (list-ref p 3)))))
+        ;; heading from the tangent: forward is (sin h, -cos h)
+        (machine (make-machine (car p) (cadr p) heading) hint: (track-index-at t s) s: s)))
+
+    (define (race-new tuning)
+      (let* ((t (loop-track))
+             (n (max 0 (min 5 (exact (round (race-tuning-ref tuning 'rivals))))))
+             (pace (race-tuning-ref tuning 'rival-pace))
+             (slots '((0 . 0) (0 . 1) (1 . 0) (2 . 0) (2 . 1)))
+             (rivals (let loop ((i 0) (acc '()))
+                       (if (= i n)
+                           (reverse acc)
+                           (let ((slot (list-ref slots i)))
+                             (loop (+ i 1)
+                                   (cons (racer machine: (grid-machine t (car slot) (cdr slot))
+                                                name: (list-ref RIVAL-NAMES i)
+                                                colour: (modulo i 3)
+                                                ;; each a little different
+                                                pace: (* pace (- 1.0 (* 0.012 i)))
+                                                lane: (* 0.25 (- (modulo (* i 7) 3) 1)))
+                                         acc)))))))
+        (race player: (racer machine: (grid-machine t 1 1) name: "ZERO")
+              rivals: rivals
+              phase: 'title)))
+
+    (define (race-start tuning r)
+      (race (race-new tuning) phase: 'countdown countdown: 180 tick: (race-tick r)))
+
+    ;; --- the rivals' driving -----------------------------------------------------------
+
+    ;; Steer toward a point on the racing line ahead, further ahead the
+    ;; faster; ease off when the turn ahead is sharp.
+    (define (ai-input t m lane boost-ok)
+      (let* ((speed (machine-speed m))
+             (look (+ 70.0 (* 0.32 speed)))
+             (s (machine-s m))
+             (target-s (+ s look))
+             (i (track-index-at t target-s))
+             (u (max -0.7 (min 0.7 (+ (track-line t i) lane))))
+             (p (track-point t target-s u))
+             (dx (- (car p) (machine-x m)))
+             (dy (- (cadr p) (machine-y m)))
+             (want (atan dx (- dy)))
+             (diff (let wrap ((a (- want (machine-heading m))))
+                     (cond ((> a 3.141592653589793) (wrap (- a 6.283185307179586)))
+                           ((< a -3.141592653589793) (wrap (+ a 6.283185307179586)))
+                           (else a))))
+             (steer (max -1.0 (min 1.0 (* diff 3.2))))
+             (sharp (abs diff)))
+        (input steer: steer
+               throttle: (if (> sharp 0.45) 0.4 1.0)
+               brake: (if (and (> sharp 0.7) (> speed 260.0)) 0.6 0.0)
+               boost: #f drift: (> sharp 0.32) boost-ok: boost-ok)))
+
+    ;; --- laps ------------------------------------------------------------------------------
+
+    (define (lap-step t tick laps r m was-s)
+      (let* ((l (track-length t))
+             (s (machine-s m))
+             (halfway (or (racer-halfway r) (and (> s (* 0.4 l)) (< s (* 0.6 l)))))
+             (crossed (and halfway (> was-s (* 0.75 l)) (< s (* 0.25 l))))
+             (r (racer r machine: m halfway: (if crossed #f halfway))))
+        (if (not crossed)
+            (racer r progress: (+ (* (max 0 (- (racer-lap r) 1)) l) (if (= (racer-lap r) 0) (- s l) s)))
+            (let* ((lap (+ (racer-lap r) 1))
+                   (time (and (> (racer-lap r) 0) (- tick (racer-lap-start r))))
+                   (best (if (and time (or (not (racer-best-lap r)) (< time (racer-best-lap r))))
+                             time (racer-best-lap r)))
+                   (done (and (> lap laps) (not (racer-finished r)))))
+              (racer r lap: (if (> lap laps) laps lap) lap-start: tick
+                     last-lap: (or time (racer-last-lap r)) best-lap: best
+                     finished: (if done tick (racer-finished r))
+                     progress: (+ (* (- lap 1) l) s))))))
+
+    ;; --- bumps -----------------------------------------------------------------------------
+
+    ;; Two machines closer than two radii: pushed apart along the line
+    ;; between them and their speeds along it exchanged (equal masses) with
+    ;; restitution `bump`.
+    (define (bump-pair tuning a b)
+      (let* ((rad (race-tuning-ref tuning 'radius))
+             (dx (- (machine-x b) (machine-x a)))
+             (dy (- (machine-y b) (machine-y a)))
+             (d (sqrt (+ (* dx dx) (* dy dy)))))
+        (if (or (>= d (* 2.0 rad)) (< d 1e-6))
+            (cons a b)
+            (let* ((nx (/ dx d)) (ny (/ dy d))
+                   (push (* 0.5 (- (* 2.0 rad) d)))
+                   (va (+ (* (machine-vx a) nx) (* (machine-vy a) ny)))
+                   (vb (+ (* (machine-vx b) nx) (* (machine-vy b) ny)))
+                   (e (race-tuning-ref tuning 'bump))
+                   (closing (- va vb)))
+              (if (<= closing 0.0)
+                  (cons (machine a x: (- (machine-x a) (* nx push)) y: (- (machine-y a) (* ny push)))
+                        (machine b x: (+ (machine-x b) (* nx push)) y: (+ (machine-y b) (* ny push))))
+                  (let* ((j (* 0.5 (+ 1.0 e) closing)))
+                    (cons (machine a x: (- (machine-x a) (* nx push)) y: (- (machine-y a) (* ny push))
+                                   vx: (- (machine-vx a) (* j nx)) vy: (- (machine-vy a) (* j ny))
+                                   events: (cons (cons 'bump closing) (machine-events a)))
+                          (machine b x: (+ (machine-x b) (* nx push)) y: (+ (machine-y b) (* ny push))
+                                   vx: (+ (machine-vx b) (* j nx)) vy: (+ (machine-vy b) (* j ny))
+                                   events: (cons (cons 'bump closing) (machine-events b))))))))))
+
+    ;; Every pair once; returns the list of machines.
+    (define (bump-all tuning ms)
+      (let ((v (list->vector ms)))
+        (let outer ((i 0))
+          (when (< i (vector-length v))
+            (let inner ((j (+ i 1)))
+              (when (< j (vector-length v))
+                (let ((ab (bump-pair tuning (vector-ref v i) (vector-ref v j))))
+                  (vector-set! v i (car ab))
+                  (vector-set! v j (cdr ab)))
+                (inner (+ j 1))))
+            (outer (+ i 1))))
+        (vector->list v)))
+
+    ;; --- a step ----------------------------------------------------------------------------
+
+    (define (race-place-of r who)
+      (if (eq? who 'player)
+          (racer-place (race-player r))
+          (racer-place (list-ref (race-rivals r) who))))
+
+    ;; Insertion sort, largest key first (six machines at most).
+    (define (sort-desc xs key)
+      (let insert-all ((xs xs) (out '()))
+        (if (null? xs)
+            out
+            (insert-all (cdr xs)
+                        (let ins ((o out))
+                          (cond ((null? o) (list (car xs)))
+                                ((> (key (car xs)) (key (car o))) (cons (car xs) o))
+                                (else (cons (car o) (ins (cdr o))))))))))
+
+    (define (places racers)
+      ;; finished ones by their finish tick, then by progress
+      (let* ((key (lambda (x) (if (racer-finished x) (- 1e12 (racer-finished x)) (racer-progress x))))
+             (sorted (sort-desc racers key)))
+        ;; (sigil list)'s list-index is (list-index value list) by equal?,
+        ;; not SRFI-1's predicate form; this one is by eq?
+        (map (lambda (x) (racer x place: (let find ((l sorted) (k 1)) (if (eq? (car l) x) k (find (cdr l) (+ k 1))))))
+             racers)))
+
+    (define (race-step tuning r controls start?)
+      (let* ((t (loop-track))
+             (tick (+ (race-tick r) 1))
+             (r (race r tick: tick events: '())))
+        (case (race-phase r)
+          ((title) (if start? (race-start tuning r) r))
+          ((finished corrupt)
+           (if (and start? (> (- tick (race-over-tick r)) 60))
+               (race-start tuning r)
+               (drive tuning t r NO-INPUT #f)))
+          ((countdown)
+           (let ((r (race r countdown: (- (race-countdown r) 1))))
+             (if (<= (race-countdown r) 0)
+                 (race r phase: 'race clock: 0)
+                 r)))
+          (else (drive tuning t r controls #t)))))
+
+    ;; Every machine one tick on: the player by its controls, the rivals by
+    ;; the line (a finished machine coasts on the line).
+    (define (drive tuning t r controls racing?)
+      (let* ((tick (race-tick r))
+             (laps (race-laps tuning))
+             (boost-lap (race-tuning-ref tuning 'boost-lap))
+             (p (race-player r))
+             (p-in (if (racer-finished p)
+                       (ai-input t (racer-machine p) 0.0 #f)
+                       (input controls boost-ok: (>= (racer-lap p) boost-lap))))
+             (pm (machine-step tuning t (racer-machine p) p-in DT))
+             (rms (map (lambda (x)
+                         (let ((h (handling-set tuning 'top (* (racer-pace x) (handling-ref tuning 'top)))))
+                           (machine-step h t (racer-machine x)
+                                         (ai-input t (racer-machine x) (racer-lane x) #f) DT)))
+                       (race-rivals r)))
+             (bumped (bump-all tuning (cons pm rms)))
+             (pm (car bumped))
+             (rms (cdr bumped))
+             (p2 (lap-step t tick laps p pm (machine-s (racer-machine p))))
+             (rs2 (map (lambda (x m) (lap-step t tick laps x m (machine-s (racer-machine x))))
+                       (race-rivals r) rms))
+             (all (places (cons p2 rs2)))
+             (p2 (car all)) (rs2 (cdr all))
+             (events (append (map (lambda (e) (cons 'player e)) (machine-events (racer-machine p2)))
+                             (let loop ((xs rs2) (i 0) (acc '()))
+                               (if (null? xs) acc
+                                   (loop (cdr xs) (+ i 1)
+                                         (append (map (lambda (e) (cons i e)) (machine-events (racer-machine (car xs)))) acc))))))
+             (r (race r player: p2 rivals: rs2 clock: (+ (race-clock r) (if racing? 1 0)) events: events)))
+        (cond ((not racing?) r)
+              ((<= (machine-integrity (racer-machine p2)) 0.0)
+               (race r phase: 'corrupt over-tick: tick))
+              ((racer-finished p2) (race r phase: 'finished over-tick: tick))
+              (else r))))))

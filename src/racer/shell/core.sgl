@@ -1,0 +1,241 @@
+;;; (racer shell core) - What both shells share: the race on Substratic's
+;;; fixed clock, the input it reads (keys, a gamepad, the page's touch
+;;; schemes), the tuning and its overlay, the best lap in the store, the
+;;; camera's lag, and the frame.
+;;;
+;;; Controls (the README has them all):
+;;;   steer       Left/Right or A/D; a pad's left stick or d-pad
+;;;   accelerate  Up or W; a pad's A or right trigger
+;;;   brake       Down or S; a pad's B or left trigger
+;;;   boost       Space; a pad's X (from lap 2)
+;;;   drift       Shift or C; a pad's LB or RB
+;;;   start       Enter or Space; a pad's Start or A; a tap on a phone
+;;;   restart     R; a pad's Back
+;;;   tuning      Tab: the overlay (Up/Down pick a knob, Left/Right set
+;;;               it, 0 resets it); P the palette; / the dither
+
+(define-library (racer shell core)
+  (import (sigil core)
+          (sigil math)
+          (sigil string)
+          (sigil list)
+          (substratic time clock)
+          (substratic input keys)
+          (substratic input sticks)
+          (substratic input pad)
+          (substratic store kv)
+          (racer track)
+          (racer handling)
+          (racer race)
+          (racer tuning)
+          (racer scene))
+
+  (export core-boot! core-frame! core-keys core-sticks core-pad core-param! core-touch!
+          core-tap! core-race core-tuning core-describe GAME-NAME)
+
+  (begin
+    (define GAME-NAME "signal-overdrive")
+    (define BEST-KEY "best-lap")
+
+    (define *tuning* (tuning-defaults))
+    (define *race* #f)
+    (define *clock* (clock-new))
+    (define *keys* (make-keys))
+    (define *sticks* (make-sticks))
+    (define *pad* (make-pad))
+    (define *best* #f)
+    (define *cam-heading* #f)
+    (define *flash* 0)
+    (define *overlay* #f)         ; the selected knob's row while the overlay is open
+    (define *platform* 'desktop)
+    (define *tapped* #f)
+    ;; the page's touch scheme sends its whole state at once:
+    ;; steer throttle brake boost drift
+    (define *touch* (list 0.0 0.0 0.0 #f #f))
+    (define *touch-boost-was* #f)
+    (define *repeat* 0)
+
+    (define (core-keys) *keys*)
+    (define (core-sticks) *sticks*)
+    (define (core-pad) *pad*)
+    (define (core-race) *race*)
+    (define (core-tuning) *tuning*)
+
+    (define (say . parts) (display (apply string-append "signal-overdrive: " parts)) (newline))
+
+    (define (core-boot! platform)
+      (set! *platform* platform)
+      (set-store-app! GAME-NAME)
+      (set-store-prefix! "signal-overdrive:")
+      (set! *best* (let ((b (store-read-datum BEST-KEY))) (and (exact-integer? b) b)))
+      (set! *race* (race-new *tuning*)))
+
+    ;; A URL parameter or a command-line --key=value: a knob; or
+    ;; autopilot (the player drives the racing line, for checks and
+    ;; screenshots) or start (no title: the countdown at once); or ignored.
+    (define *autopilot* #f)
+    (define *start-now* #f)
+    (define (core-param! kv)
+      (cond ((string=? kv "autopilot") (set! *autopilot* #t) (say "autopilot on"))
+            ((string=? kv "start") (set! *start-now* #t))
+            (else
+             (let ((t (tuning-parse! *tuning* kv)))
+               (when t
+                 (set! *tuning* t)
+                 (set! *race* (race-new *tuning*))
+                 (say "tuning " kv))))))
+
+    ;; "steer,throttle,brake,boost,drift" from the page (0/1 for the last two).
+    (define (core-touch! payload)
+      (let* ((parts (let split ((s payload) (acc '()))
+                      (let ((i (let find ((k 0)) (cond ((>= k (string-length s)) #f) ((char=? (string-ref s k) #\,) k) (else (find (+ k 1)))))))
+                        (if i (split (substring s (+ i 1) (string-length s)) (cons (substring s 0 i) acc))
+                            (reverse (cons s acc))))))
+             (num (lambda (k) (or (and (> (length parts) k) (string->number (list-ref parts k))) 0.0))))
+        (set! *touch* (list (num 0) (num 1) (num 2) (> (num 3) 0.5) (> (num 4) 0.5)))))
+
+    ;; A tap on the page (a start on the title and end screens).
+    (define (core-tap!) (set! *tapped* #t))
+
+    ;; --- input ------------------------------------------------------------------------------
+
+    (define (axis neg pos)
+      (cond ((and (keys-held? *keys* neg) (not (keys-held? *keys* pos))) -1.0)
+            ((and (keys-held? *keys* pos) (not (keys-held? *keys* neg))) 1.0)
+            (else 0.0)))
+    (define (held? . ks) (let loop ((ks ks)) (and (pair? ks) (or (keys-held? *keys* (car ks)) (loop (cdr ks))))))
+    (define (pressed? . ks) (let loop ((ks ks)) (and (pair? ks) (or (keys-pressed? *keys* (car ks)) (loop (cdr ks))))))
+    (define (clamp1 v) (max -1.0 (min 1.0 v)))
+    (define (trigger name) (max 0.0 (/ (+ 1.0 (pad-axis *pad* name)) 2.0)))   ; -1..1 at rest -1
+
+    (define *boost-latch* #f)
+    ;; One tick's controls: the player's (racer handling) input.
+    (define (controls)
+      (let* ((ps (stick-analog (pad-axis *pad* 'lx) 0.0 0.18))
+             (overlay? *overlay*)
+             (steer (clamp1 (+ (if overlay? 0.0 (+ (axis 'left 'right) (axis 'a 'd)))
+                               (cond ((pad-held? *pad* 'left) -1.0) ((pad-held? *pad* 'right) 1.0) (else 0.0))
+                               (car ps)
+                               (car *touch*))))
+             (throttle (max (if (and (not overlay?) (held? 'up 'w)) 1.0 0.0)
+                            (if (pad-held? *pad* 'a) 1.0 0.0)
+                            (trigger 'rt)
+                            (cadr *touch*)))
+             (brake (max (if (and (not overlay?) (held? 'down 's)) 1.0 0.0)
+                         (if (pad-held? *pad* 'b) 1.0 0.0)
+                         (trigger 'lt)
+                         (caddr *touch*)))
+             (boost-now (or (held? 'space) (pad-held? *pad* 'x) (cadddr *touch*)))
+             ;; a press is the first tick it is held
+             (boost (and boost-now (not *boost-latch*)))
+             (drift (or (held? 'shift 'c) (pad-held? *pad* 'lb) (pad-held? *pad* 'rb) (list-ref *touch* 4))))
+        (set! *boost-latch* boost-now)
+        (if *autopilot*
+            (let ((m (racer-machine (race-player *race*))))
+              (ai-input (loop-track) m 0.0 #t))
+            (make-input steer throttle brake boost drift))))
+
+    (define (start-asked?)
+      (let ((t (or *tapped* *start-now*)))
+        (set! *tapped* #f)
+        (set! *start-now* #f)
+        (or t (pressed? 'return 'space) (pad-pressed? *pad* 'start) (pad-pressed? *pad* 'a))))
+
+    ;; --- the overlay and the other keys ------------------------------------------------------
+
+    (define (overlay-keys!)
+      (when (pressed? 'tab)
+        (set! *overlay* (if *overlay* #f 0))
+        (say "overlay " (if *overlay* "on" "off")))
+      (when (pressed? 'p)
+        (set! *tuning* (tuning-set *tuning* 'palette (if (> (tuning-ref *tuning* 'palette) 0.5) 0.0 1.0))))
+      (when (pressed? 'slash)
+        (set! *tuning* (tuning-set *tuning* 'dither (if (> (tuning-ref *tuning* 'dither) 0.5) 0.0 1.0))))
+      (when *overlay*
+        (let ((n (length KNOBS)))
+          (when (pressed? 'up) (set! *overlay* (modulo (- *overlay* 1) n)))
+          (when (pressed? 'down) (set! *overlay* (modulo (+ *overlay* 1) n)))
+          (let* ((k (list-ref KNOBS *overlay*))
+                 (key (knob-key k))
+                 (dir (cond ((held? 'left) -1) ((held? 'right) 1) (else 0))))
+            ;; a press steps once; holding repeats after a quarter second
+            (if (= dir 0)
+                (set! *repeat* 0)
+                (begin
+                  (when (or (= *repeat* 0) (and (> *repeat* 15) (even? *repeat*)))
+                    (set! *tuning* (tuning-step *tuning* key dir))
+                    (after-knob! key))
+                  (set! *repeat* (+ *repeat* 1))))
+            (when (pressed? '0)
+              (set! *tuning* (tuning-set *tuning* key (knob-default k)))
+              (after-knob! key))))))
+
+    ;; A knob the race is built from (laps, rivals, their pace) restarts it
+    ;; on the grid; the rest apply at once.
+    (define (after-knob! key)
+      (say "tuning " (symbol->string key) "=" (tuning-format-value (tuning-ref *tuning* key))
+           " query ?" (tuning-query *tuning*))
+      (when (memq key '(laps rivals rival-pace))
+        (set! *race* (race-new *tuning*))))
+
+    ;; --- a frame ----------------------------------------------------------------------------
+
+    (define (record-best!)
+      (let ((b (racer-best-lap (race-player *race*))))
+        (when (and b (or (not *best*) (< b *best*)))
+          (set! *best* b)
+          (store-write-datum! BEST-KEY b)
+          (say "best lap " (lap-clock b)))))
+
+    (define (step! n)
+      (let loop ((i 0))
+        (when (< i n)
+          (let* ((was (race-phase *race*))
+                 (start (start-asked?))
+                 (in (controls))
+                 (r (race-step *tuning* *race* in start)))
+            (set! *race* r)
+            (for-each (lambda (e)
+                        (when (and (eq? (car e) 'player) (pair? (cdr e)) (eq? (cadr e) 'wall))
+                          (set! *flash* 6)))
+                      (race-events r))
+            (record-best!)
+            (unless (eq? was (race-phase r))
+              (say "phase " (symbol->string (race-phase r))
+                   (if (memq (race-phase r) '(finished corrupt))
+                       (string-append " place " (number->string (racer-place (race-player r)))
+                                      " best " (lap-clock (racer-best-lap (race-player r))))
+                       "")))
+            ;; the camera eases toward the machine's heading
+            (let* ((h (machine-heading (racer-machine (race-player r))))
+                   (ch (or *cam-heading* h))
+                   (lag (tuning-ref *tuning* 'cam-lag)))
+              (set! *cam-heading* (if (eq? (race-phase r) 'title) h (+ ch (* (- h ch) (- 1.0 lag)))))))
+          (set! *flash* (max 0 (- *flash* 1)))
+          (loop (+ i 1)))))
+
+    (define (core-describe)
+      (let ((m (racer-machine (race-player *race*))))
+        (string-append "phase " (symbol->string (race-phase *race*))
+                       " lap " (number->string (racer-lap (race-player *race*)))
+                       " s " (number->string (exact (round (machine-s m))))
+                       " speed " (number->string (speed-kmh m))
+                       " integrity " (number->string (exact (round (machine-integrity m)))))))
+
+    (define (core-frame! dt win-w win-h integer-only)
+      (set! *clock* (clock-advance *clock* dt))
+      (overlay-keys!)
+      (when (or (pressed? 'r) (pad-pressed? *pad* 'back))
+        (set! *race* (race-start *tuning* *race*))
+        (set! *cam-heading* #f)
+        (say "restart"))
+      (step! (clock-steps *clock*))
+      (scene-frame! *tuning* *race* (or *cam-heading* 0.0)
+                    (list (cons 'best *best*)
+                          (cons 'flash *flash*)
+                          (cons 'start-line (if (eq? *platform* 'web) "PRESS ENTER OR TAP" "PRESS ENTER"))
+                          (cons 'restart-line (if (eq? *platform* 'web) "ENTER OR TAP TO RUN IT AGAIN" "ENTER TO RUN IT AGAIN"))
+                          (cons 'overlay *overlay*))
+                    win-w win-h integer-only)
+      (keys-end-frame! *keys*)
+      (pad-end-frame! *pad*))))

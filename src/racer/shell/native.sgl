@@ -1,0 +1,72 @@
+;;; (racer shell native) - The desktop: a sigil-desktop window at whole
+;;; scales of the 480x270 view (x3 the first time, then remembered), the
+;;; textures read from assets/racer/ (run it from the package root).
+;;;
+;;;   signal-overdrive [--KNOB=VALUE ...] [--autopilot] [--start] [--quit-after S]
+;;;
+;;; Every knob of (racer tuning) can be set from the command line exactly
+;;; as from the URL: --grip=8.5 --top=600. --autopilot drives the player on
+;;; the racing line (for checks); --start skips the title; --quit-after
+;;; quits after S seconds of wall time.
+
+(define-library (racer shell native)
+  (import (sigil core)
+          (sigil io)
+          (sigil process)
+          (sigil string)
+          (sigil time)
+          (sigil desktop)
+          (sigil graphics)
+          (sigil graphics image)
+          (substratic view window)
+          (substratic input keys)
+          (substratic input pad)
+          (substratic store kv)
+          (racer scene)
+          (racer shell core))
+
+  (export native-main)
+
+  (begin
+    (define KEYS '(left right up down a d w s c space return shift tab p slash r 0 escape))
+
+    (define (texture name)
+      (let* ((img (load-image (string-append "assets/racer/" name)))
+             (tex (load-texture img)))
+        (image-free! img)
+        tex))
+
+    (define (loop scaler quit-after)
+      (lambda ()
+        (gfx-setup)
+        (set-viewport #f)
+        (set-letterbox-color 0.0 0.0 0.0)
+        (scene-init! (texture "track-atlas.png") (texture "track-map.png") (texture "track-avg.png")
+                     (texture "sky.png") (texture "machines.png"))
+        (let ((t0 (current-second)))
+          (let frame ((n 0))
+            (let ((dt (wait-frame)))
+              (window-scaler-frame! scaler)
+              (pad-poll! (core-pad))
+              (keys-poll! (core-keys) KEYS)
+              (when (keys-pressed? (core-keys) 'escape) (request-quit))
+              (when (and quit-after (> (- (current-second) t0) quit-after)) (request-quit))
+              (core-frame! dt (frame-width) (frame-height) #t)
+              (when (= n 1) (display "signal-overdrive: ready") (newline))
+              (when (= 0 (modulo n 300)) (display (string-append "signal-overdrive: " (core-describe))) (newline))
+              (unless (quit-requested?) (frame (+ n 1))))))))
+
+    (define (native-main . _args)
+      (let ((args (cdr (command-line))))
+        (core-boot! 'desktop)
+        (for-each (lambda (a)
+                    (when (and (> (string-length a) 2) (string=? (substring a 0 2) "--"))
+                      (core-param! (substring a 2 (string-length a)))))
+                  args)
+        (let* ((qa (member "--quit-after" args))
+               (quit-after (and qa (pair? (cdr qa)) (string->number (cadr qa))))
+               (scaler (make-window-scaler VIEW-W VIEW-H min-scale: 2 max-scale: 6
+                                           remember: (lambda (v) (store-write-datum! "scale" v))))
+               (k (window-open-scale scaler (store-read-datum "scale"))))
+          (run-game "Signal Overdrive" (* k VIEW-W) (* k VIEW-H) (loop scaler quit-after)))
+        0))))

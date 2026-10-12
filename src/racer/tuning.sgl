@@ -1,0 +1,141 @@
+;;; (racer tuning) - Every knob in one table: the handling's, the race's,
+;;; the camera's and the look's. The overlay (Tab) shows and edits them, the
+;;; URL sets them (?grip=8.5&top=600), and the overlay prints the query
+;;; string that reproduces the current values, so "grip 8.5 felt right"
+;;; becomes a link.
+;;;
+;;; A tuning is an association list (key . value), the form (racer
+;;; handling) and (racer race) read; this module builds it, steps it and
+;;; prints it.
+
+(define-library (racer tuning)
+  (import (sigil core)
+          (sigil string)
+          (sigil list)
+          (racer handling))
+
+  (export KNOBS knob-key knob-group knob-min knob-max knob-step knob-default knob-label
+          tuning-defaults tuning-ref tuning-set tuning-step tuning-parse! tuning-query
+          tuning-format-value tuning-changed)
+
+  (begin
+    ;; (key group min max step label); the default is the handling's for a
+    ;; handling key, else the fifth element below.
+    (define CAMERA-KNOBS
+      ;; key          group    min    max    step  default label
+      '((fov          camera   0.6    2.0    0.05  1.15    "FOV")
+        (cam-height   camera   6.0    90.0   1.0   26.0    "CAM HEIGHT")
+        (cam-dist     camera   20.0   240.0  2.0   92.0    "CAM DIST")
+        (pitch        camera   -0.3   0.7    0.01  0.12    "PITCH")
+        (horizon      camera   30.0   180.0  1.0   92.0    "HORIZON")
+        (cam-lag      camera   0.0    0.95   0.05  0.35    "CAM LAG")
+        (sprite-size  camera   8.0    60.0   1.0   18.0    "MACHINE SIZE")
+        (fog          look     0.0    1.0    1.0   1.0     "FOG")
+        (fog-start    look     100.0  4000.0 50.0  900.0   "FOG START")
+        (fog-end      look     200.0  8000.0 100.0 2800.0  "FOG END")
+        (far-start    look     0.5    8.0    0.1   1.4     "FAR FADE FROM")
+        (far-end      look     0.5    12.0   0.1   3.2     "FAR FADE TO")
+        (dither       look     0.0    1.0    1.0   1.0     "DITHER")
+        (spread       look     0.0    64.0   4.0   8.0     "SPREAD")
+        (palette      look     0.0    1.0    1.0   0.0     "PALETTE")))
+
+    (define RACE-KNOBS
+      '((laps         race     1.0    9.0    1.0   3.0     "LAPS")
+        (rivals       race     0.0    5.0    1.0   3.0     "RIVALS")
+        (rival-pace   race     0.7    1.2    0.01  0.97    "RIVAL PACE")
+        (boost-lap    race     1.0    9.0    1.0   2.0     "BOOST FROM LAP")
+        (bump         race     0.0    1.0    0.05  0.6     "BUMP")))
+
+    (define HANDLING-KNOBS
+      '((accel        handling 50.0   1200.0 10.0  "ACCEL")
+        (top          handling 200.0  1200.0 10.0  "TOP SPEED")
+        (brake        handling 100.0  2000.0 50.0  "BRAKE")
+        (coast        handling 0.0    400.0  5.0   "COAST DRAG")
+        (steer        handling 0.5    6.0    0.05  "STEER")
+        (steer-high   handling 0.1    1.5    0.02  "STEER AT TOP")
+        (grip         handling 0.5    30.0   0.25  "GRIP")
+        (drift        handling 0.0    1.0    0.02  "DRIFT GRIP")
+        (drift-steer  handling 1.0    3.0    0.05  "DRIFT STEER")
+        (transfer     handling 0.0    1.0    0.05  "TRANSFER")
+        (boost-speed  handling 1.0    2.0    0.05  "BOOST SPEED")
+        (boost-accel  handling 0.0    3000.0 50.0  "BOOST ACCEL")
+        (boost-time   handling 0.2    4.0    0.1   "BOOST TIME")
+        (boost-cost   handling 0.0    50.0   1.0   "BOOST COST")
+        (pad-time     handling 0.0    3.0    0.1   "PAD TIME")
+        (bounce       handling 0.0    1.2    0.05  "WALL BOUNCE")
+        (wall-drag    handling 0.0    1.0    0.05  "WALL DRAG")
+        (wall-damage  handling 0.0    0.3    0.005 "WALL DAMAGE")
+        (repair       handling 0.0    100.0  2.0   "REPAIR RATE")
+        (radius       handling 4.0    30.0   1.0   "RADIUS")
+        (overspeed-drag handling 0.0  2000.0 20.0  "OVERSPEED DRAG")))
+
+    ;; The table, every row (key group min max step default label), in the
+    ;; overlay's order: handling first (the point of the prototype).
+    (define KNOBS
+      (append (map (lambda (k)
+                     (list (car k) (cadr k) (caddr k) (cadddr k) (list-ref k 4)
+                           (handling-ref default-handling (car k)) (list-ref k 5)))
+                   HANDLING-KNOBS)
+              RACE-KNOBS
+              CAMERA-KNOBS))
+
+    (define (knob-key k) (car k))
+    (define (knob-group k) (cadr k))
+    (define (knob-min k) (caddr k))
+    (define (knob-max k) (cadddr k))
+    (define (knob-step k) (list-ref k 4))
+    (define (knob-default k) (list-ref k 5))
+    (define (knob-label k) (list-ref k 6))
+    (define (knob-of key) (let loop ((ks KNOBS)) (cond ((null? ks) #f) ((eq? (caar ks) key) (car ks)) (else (loop (cdr ks))))))
+
+    (define (tuning-defaults) (map (lambda (k) (cons (knob-key k) (knob-default k))) KNOBS))
+
+    (define (tuning-ref t key)
+      (let ((e (assq key t)))
+        (if e (cdr e) (let ((k (knob-of key))) (if k (knob-default k) 0.0)))))
+
+    (define (tuning-set t key v)
+      (let ((k (knob-of key)))
+        (if (not k)
+            t
+            (let ((v (max (knob-min k) (min (knob-max k) (exact->inexact v)))))
+              (map (lambda (e) (if (eq? (car e) key) (cons key v) e)) t)))))
+
+    ;; One step of the knob up (dir 1) or down (-1), rounded to the step so
+    ;; repeated steps do not drift.
+    (define (tuning-step t key dir)
+      (let* ((k (knob-of key))
+             (st (knob-step k))
+             (v (+ (tuning-ref t key) (* dir st))))
+        (tuning-set t key (* st (round (/ v st))))))
+
+    ;; A URL parameter "key=value": #t when it named a knob.
+    (define (tuning-parse! t kv)
+      (let* ((i (let loop ((i 0)) (cond ((>= i (string-length kv)) #f) ((char=? (string-ref kv i) #\=) i) (else (loop (+ i 1))))))
+             (key (and i (string->symbol (substring kv 0 i))))
+             (v (and i (string->number (substring kv (+ i 1) (string-length kv))))))
+        (if (and key v (knob-of key))
+            (tuning-set t key v)
+            #f)))
+
+    (define (tuning-format-value v)
+      (let* ((r (/ (round (* v 1000.0)) 1000.0))
+             (s (number->string r)))
+        (if (and (> (string-length s) 2) (string=? (substring s (- (string-length s) 2) (string-length s)) ".0"))
+            (substring s 0 (- (string-length s) 2))
+            s)))
+
+    ;; The knobs that differ from their defaults, as ((key . value) ...).
+    (define (tuning-changed t)
+      (filter (lambda (e) (let ((k (knob-of (car e))))
+                            (and k (> (abs (- (cdr e) (knob-default k))) 1e-9))))
+              t))
+
+    ;; "grip=8.5&top=600" for the changed knobs, "" when none.
+    (define (tuning-query t)
+      (let loop ((es (tuning-changed t)) (acc ""))
+        (if (null? es)
+            acc
+            (loop (cdr es)
+                  (string-append acc (if (string=? acc "") "" "&")
+                                 (symbol->string (caar es)) "=" (tuning-format-value (cdar es)))))))))

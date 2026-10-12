@@ -1,0 +1,82 @@
+;;; (racer shell web) - The browser: one frame per requestAnimationFrame
+;;; dispatch, the page's events in between.
+;;;
+;;; The page forwards every URL parameter as ("param", "KEY=VALUE"); a
+;;; knob's name sets the knob (?grip=8.5&top=600). The page's touch scheme
+;;; (index.template.html) sends ("touch", "steer,throttle,brake,boost,drift")
+;;; whenever it changes, and ("tap", "") for a tap.
+;;;
+;;; The textures are fetched at boot; the game draws from the first frame
+;;; after all five have arrived, and then prints "signal-overdrive: ready".
+
+(define-library (racer shell web)
+  (import (sigil core)
+          (sigil string)
+          (sigil graphics)
+          (sigil graphics image)
+          (sigil browser gles3)
+          (substratic input events)
+          (substratic input pad)
+          (racer scene)
+          (racer shell core))
+
+  (export web-main web-dispatch)
+
+  (begin
+    (define NAMES '("track-atlas.png" "track-map.png" "track-avg.png" "sky.png" "machines.png"))
+    (define *fetches* '())
+    (define *started* #f)
+    (define *last-ms* #f)
+    (define *frames* 0)
+
+    (define (say . parts) (display (apply string-append "signal-overdrive: " parts)) (newline))
+
+    (define (frame-dt payload)
+      (let* ((ms (or (string->number payload) 0.0))
+             (dt (if *last-ms* (/ (- ms *last-ms*) 1000.0) (/ 1.0 60.0))))
+        (set! *last-ms* ms)
+        (if (or (< dt 0.0) (> dt 0.25)) (/ 1.0 60.0) dt)))
+
+    (define (texture name)
+      (let* ((h (cdr (assoc name *fetches*)))
+             (img (load-image-from-memory (gles3-image-ptr h) (gles3-image-size h)))
+             (tex (load-texture img)))
+        (image-free! img)
+        tex))
+
+    (define (fetched?)
+      (let loop ((fs *fetches*))
+        (or (null? fs) (and (gles3-image-ready? (cdar fs)) (loop (cdr fs))))))
+
+    (define (tick! payload)
+      (gles3-resize-to-display)
+      (let ((dt (frame-dt payload)))
+        (cond (*started*
+               (core-frame! dt (gles3-canvas-width) (gles3-canvas-height) #f)
+               (set! *frames* (+ *frames* 1))
+               (when (= *frames* 2) (say "ready"))
+               (when (= 0 (modulo *frames* 600)) (say (core-describe))))
+              ((fetched?)
+               (scene-init! (texture "track-atlas.png") (texture "track-map.png") (texture "track-avg.png")
+                            (texture "sky.png") (texture "machines.png"))
+               (set! *started* #t)))))
+
+    (define (web-main)
+      (unless (gles3-use-canvas "#stage")
+        (error "signal-overdrive: no WebGL2 context for #stage"))
+      (core-boot! 'web)
+      (gles3-resize-to-display)
+      (gfx-setup)
+      (set! *fetches* (map (lambda (n) (cons n (gles3-fetch-image (string-append "assets/racer/" n)))) NAMES))
+      (gles3-start-loop "signal-overdrive-tick")
+      0)
+
+    (define (web-dispatch type payload)
+      (cond ((string=? type "frame") (tick! payload) 0)
+            ((string=? type "param") (say "param " payload) (core-param! payload) 0)
+            ((string=? type "touch") (core-touch! payload) 1)
+            ((string=? type "tap") (core-tap!) 1)
+            ((string=? type "pointerdown") (core-tap!) 0)
+            ((pad-dispatch! (core-pad) type payload) 1)
+            ((input-dispatch! (core-keys) (core-sticks) type payload) 1)
+            (else 0)))))

@@ -1,0 +1,142 @@
+;;; (racer dither) - Copied verbatim from Phantom Burn's (phantom dither) at
+;;; 07a765d (src/phantom/dither.sgl), only the library name changed, so the
+;;; racer's post pass and its generated art share Phantom's palette and dither
+;;; bit for bit. Phantom's header follows.
+;;;
+;;; The look's last step (D26, D27): every pixel of the
+;;; 480x270 frame snapped to the palette through an ordered Bayer dither.
+;;;
+;;; This is Crash's own ordered dither (scripts/art/dither's o4x4 branch;
+;;; the design's bayer.sh is it against an explicit palette) as a fragment
+;;; shader, and it is meant to give the same pixels: for a pixel (r g b)
+;;; in 0..255 at column x and row y (row 0 at the top), the threshold is
+;;; t = ((M[y mod n][x mod n] + 0.5) / n^2 - 0.5) * spread, added to all
+;;; three channels, each clamped to 0..255, and the pixel becomes the
+;;; palette colour nearest in squared RGB distance, the first in palette
+;;; order on a tie. With n = 4 every quantity in that sum is a multiple of
+;;; 1/16 below 2^18, so a GPU's float32 computes it exactly and agrees
+;;; with bayer.sh bit for bit (scripts/gate-dither checks it). At n = 8
+;;; the squared distances can need more bits than float32 has, so 8x8 is
+;;; the same algorithm but not bit-exact.
+;;;
+;;; The palettes are listed in the order `convert PALETTE.png
+;;; -unique-colors` gives, which is bayer.sh's order and so its tie
+;;; order. `embers` (51) is the ruled one (look-palette-ramped-embers.png,
+;;; experimental); `ramped` (47) is the one before the warm near-blacks;
+;;; `crash` (29) is Crash The Stack's own (its assets/palette.png at
+;;; 262a0e0), with no dark ramps at all.
+;;;
+;;; The spread: 8 on every device (David, 2026-09-25: "even on phone it
+;;; looks good with a spread of 8, it accentuates the pattern without losing
+;;; the darker shadows"; before that he had 8 to 16 on the desktop and 40 on
+;;; the phone). The auto spread by pixel size (render.sgl) stays behind the
+;;; / key. Any multiple of 4 up to 64 keeps the 4x4 pass bit-exact (every
+;;; term stays a multiple of 1/64 below 2^18), so the game rounds to one.
+;;;
+;;; The pass: a full-screen triangle drawn into a second 480x270 target,
+;;; reading the 3D target by texelFetch (one texel per pixel, so the
+;;; sampler's filter never applies).
+
+(define-library (racer dither)
+  (import (sigil core))
+
+  (export PALETTES palette-names palette-colors palette-uniform
+          POST-VERTEX POST-FRAGMENT PALETTE-MAX
+          dither-spread-default dither-size-default)
+
+  (begin
+
+    (define PALETTE-MAX 60)       ; 60 vec4s + params + opts = 992 bytes, under the 1 KiB block
+    (define dither-spread-default 8.0)
+    (define dither-size-default 4)
+
+    (define PALETTES
+      '((embers
+         "#0D0A1A" "#241104" "#261804" "#3D1D07" "#3B1F1A" "#3D281A" "#17122E" "#21173D"
+         "#2A2D3A" "#402807" "#74391A" "#7A4D1A" "#4A5A2B" "#2E1D48" "#2E1C4D" "#3D1A40"
+         "#1A3840" "#1F3A4D" "#333648" "#7A2E70" "#3D4052" "#2A7270" "#AD541A" "#B6721A"
+         "#F2731A" "#CC3340" "#9E5761" "#FF5959" "#1A8C4D" "#FF9F1A" "#FFCC33" "#B89E5C"
+         "#583681" "#5C4D8C" "#636D81" "#6B7085" "#1A73D9" "#8C40B3" "#814EBA" "#B641A0"
+         "#B36BFF" "#FF59D9" "#3AACA0" "#7380A6" "#4DF2D9" "#8A8FA0" "#93A4BA" "#DBE0E6"
+         "#CCE6FF" "#F0F0F0" "#FAFCFF")
+        (ramped
+         "#0D0A1A" "#3B1F1A" "#3D281A" "#17122E" "#21173D" "#2A2D3A" "#74391A" "#7A4D1A"
+         "#4A5A2B" "#2E1D48" "#2E1C4D" "#3D1A40" "#1A3840" "#1F3A4D" "#333648" "#7A2E70"
+         "#3D4052" "#2A7270" "#AD541A" "#B6721A" "#F2731A" "#CC3340" "#9E5761" "#FF5959"
+         "#1A8C4D" "#FF9F1A" "#FFCC33" "#B89E5C" "#583681" "#5C4D8C" "#636D81" "#6B7085"
+         "#1A73D9" "#8C40B3" "#814EBA" "#B641A0" "#B36BFF" "#FF59D9" "#3AACA0" "#7380A6"
+         "#4DF2D9" "#8A8FA0" "#93A4BA" "#DBE0E6" "#CCE6FF" "#F0F0F0" "#FAFCFF")
+        (crash
+         "#0D0A1A" "#17122E" "#21173D" "#2A2D3A" "#4A5A2B" "#2E1C4D" "#1F3A4D" "#3D4052"
+         "#F2731A" "#CC3340" "#9E5761" "#FF5959" "#1A8C4D" "#FF9F1A" "#FFCC33" "#B89E5C"
+         "#5C4D8C" "#6B7085" "#1A73D9" "#8C40B3" "#B36BFF" "#FF59D9" "#7380A6" "#4DF2D9"
+         "#8A8FA0" "#DBE0E6" "#CCE6FF" "#F0F0F0" "#FAFCFF")))
+
+    (define (palette-names) (map car PALETTES))
+
+    (define (hex-digit c)
+      (let ((i (char->integer (char-upcase c))))
+        (if (<= 48 i 57) (- i 48) (+ 10 (- i 65)))))
+
+    (define (hex-byte s k)
+      (+ (* 16 (hex-digit (string-ref s k))) (hex-digit (string-ref s (+ k 1)))))
+
+    ;; The palette's colours as (r g b) lists in 0..255, or #f for an
+    ;; unknown name.
+    (define (palette-colors name)
+      (let ((p (assq name PALETTES)))
+        (and p (map (lambda (h) (list (hex-byte h 1) (hex-byte h 3) (hex-byte h 5))) (cdr p)))))
+
+    ;; The value for the shader's `pal` uniform: PALETTE-MAX vec4s, the
+    ;; colours first (0..255, alpha 1), the rest zero.
+    (define (palette-uniform colors)
+      (let loop ((cs colors) (k 0) (acc '()))
+        (cond ((>= k PALETTE-MAX) (reverse acc))
+              ((null? cs) (loop cs (+ k 1) (cons (list 0.0 0.0 0.0 0.0) acc)))
+              (else (let ((c (car cs)))
+                      (loop (cdr cs) (+ k 1)
+                            (cons (list (* 1.0 (car c)) (* 1.0 (cadr c)) (* 1.0 (caddr c)) 1.0) acc)))))))
+
+    (define POST-VERTEX
+      "in vec2 position;
+void main() { gl_Position = vec4(position, 0.0, 1.0); }
+")
+
+    ;; params: x spread, y matrix size (4 or 8), z palette colour count,
+    ;; w the frame height. opts: x 1 when row 0 of gl_FragCoord is the
+    ;; picture's bottom (so rows are counted from the top as bayer.sh
+    ;; counts them), y 1 to dither, 0 to copy the frame through untouched.
+    (define POST-FRAGMENT
+      "uniform vec4 pal[60];
+uniform vec4 params;
+uniform vec4 opts;
+uniform sampler2D src;
+out vec4 frag_color;
+const int B4[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
+const int B8[64] = int[64](0, 32, 8, 40, 2, 34, 10, 42, 48, 16, 56, 24, 50, 18, 58, 26,
+                           12, 44, 4, 36, 14, 46, 6, 38, 60, 28, 52, 20, 62, 30, 54, 22,
+                           3, 35, 11, 43, 1, 33, 9, 41, 51, 19, 59, 27, 49, 17, 57, 25,
+                           15, 47, 7, 39, 13, 45, 5, 37, 63, 31, 55, 23, 61, 29, 53, 21);
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec4 texel = texelFetch(src, p, 0);
+  if (opts.y < 0.5) { frag_color = vec4(texel.rgb, 1.0); return; }
+  vec3 c = floor(texel.rgb * 255.0 + 0.5);
+  int x = p.x;
+  int y = opts.x > 0.5 ? int(params.w) - 1 - p.y : p.y;
+  int n = int(params.y);
+  float b = n == 8 ? float(B8[(y % 8) * 8 + (x % 8)]) : float(B4[(y % 4) * 4 + (x % 4)]);
+  float t = ((b + 0.5) / float(n * n) - 0.5) * params.x;
+  vec3 q = clamp(c + vec3(t), 0.0, 255.0);
+  int count = int(params.z);
+  float best = 1e30;
+  vec3 pick = pal[0].rgb;
+  for (int i = 0; i < 60; i++) {
+    if (i >= count) break;
+    vec3 d = q - pal[i].rgb;
+    float e = d.x * d.x + d.y * d.y + d.z * d.z;
+    if (e < best) { best = e; pick = pal[i].rgb; }
+  }
+  frag_color = vec4(pick / 255.0, 1.0);
+}
+")))

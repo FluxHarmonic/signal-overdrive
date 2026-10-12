@@ -109,6 +109,23 @@
            (lose (run-free (handling-set H 'transfer 0.0) m (make-input 0.0 0.0 0.0 #f #f) 10)))
       (assert-true (> (machine-forward-speed keep) (+ (machine-forward-speed lose) 30.0)))))
 
+  (test "turning at full lock never takes the speed past top, at any transfer, drifting or not"
+    ;; two defects this guards: a linear transfer (lost sideways speed added
+    ;; to forward speed) gained speed in every turn, 942 against a top of
+    ;; 560 on the loop; and a throttle easing off on forward speed alone let
+    ;; a lossless drift pump to 794
+    (for-each
+      (lambda (tr)
+        (for-each
+          (lambda (drift)
+            (let loop ((m (moving (P 'top))) (i 0) (worst 0.0))
+              (if (< i 600)
+                  (let ((m2 (run-free (handling-set H 'transfer tr) m (make-input 1.0 1.0 0.0 #f drift) 1)))
+                    (loop m2 (+ i 1) (max worst (machine-speed m2))))
+                  (assert-true (<= worst (+ (P 'top) 1.0))))))
+          '(#f #t)))
+      '(0.0 0.5 0.75 1.0)))
+
   (test "drift: the slide lasts longer and the heading turns faster"
     (let* ((m (machine (moving 300.0) vy: 200.0))
            (grip (run-free H m (make-input 1.0 1.0 0.0 #f #f) 20))

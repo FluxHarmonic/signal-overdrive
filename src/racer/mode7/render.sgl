@@ -1,0 +1,245 @@
+;;; (racer mode7 render) - The Mode 7 ground plane and the sky, as one
+;;; full-screen fragment shader, and sprites as quads, on sigil-graphics'
+;;; 3D path.
+;;;
+;;; The ground is a tiled world: an atlas of square tiles (any number per
+;;; row), an index map (one texel per tile, R + 256 * G the tile's index in
+;;; the atlas), and the atlas's averages (one texel per tile, the tile's
+;;; mean colour). Per pixel the shader unprojects onto the ground exactly as
+;;; (racer mode7 camera)'s camera-unproject does, finds the tile and the
+;;; texel by texelFetch (point sampling, no filter), fades toward the tile's
+;;; average where one pixel covers several texels (the far ground's
+;;; shimmer), and toward the fog colour with distance. Beyond the map's edge
+;;; it draws tile 0.
+;;;
+;;; Above the horizon: a vertical gradient and up to three skyline layers
+;;; stacked in one texture (each `layer-h` rows, the bottom row on the
+;;; horizon), scrolled sideways with the heading at their own parallax rate
+;;; (pixels per radian = focal length * rate; rate 1 turns with the ground).
+;;;
+;;; Four textures: atlas, index map, averages, sky (the 3D path's four
+;;; slots). Sprites use one more, any sheet. All within sokol's 64 samplers.
+;;;
+;;; Usage, inside a with-3d-pass on a 'depth target:
+;;;   (mode7-init! w h)                      once, after gfx-setup
+;;;   (mode7-set-world! atlas map avg tile per-row map-tiles)
+;;;   (mode7-set-sky! sky layer-h rate-far rate-mid rate-near)
+;;;   (mode7-set-look! alist)                fog, colours, the far fade
+;;;   (mode7-draw-ground! cam)               a (racer mode7 camera) cam
+;;;   (mode7-draw-sprite! sheet x y w h u0 v0 u1 v1 fog)
+;;;
+;;; Nothing here knows about racing: this and (racer mode7 camera) are the
+;;; seed of a substratic-mode7 package.
+
+(define-library (racer mode7 render)
+  (import (sigil core)
+          (sigil graphics)
+          (racer mode7 camera))
+
+  (export mode7-init! mode7-set-world! mode7-set-sky! mode7-set-look! mode7-draw-ground!
+          mode7-draw-sprite! mode7-ready? mode7-set-far!)
+
+  (begin
+    (define GROUND-VERTEX
+      "uniform vec4 view;
+in vec2 position;
+out vec2 v_screen;
+void main() {
+  gl_Position = vec4(position, 0.0, 1.0);
+  v_screen = vec2((position.x + 1.0) * 0.5 * view.x, (1.0 - position.y) * 0.5 * view.y);
+}
+")
+
+    ;; cam: x y height heading. proj: focal cy pitch horizon. view: w h,
+    ;; z the time in seconds. fog: start end (along the view, texels),
+    ;; z on, w the far fade's start (texels per pixel). world: tile size,
+    ;; map size in tiles, atlas tiles per row, the far fade's end. sky:
+    ;; layer height, the three rates. Colours 0..1.
+    (define GROUND-FRAGMENT
+      "uniform vec4 cam;
+uniform vec4 proj;
+uniform vec4 view;
+uniform vec4 fog;
+uniform vec4 world;
+uniform vec4 skyp;
+uniform vec4 fogc;
+uniform vec4 skytop;
+uniform vec4 skylow;
+uniform sampler2D atlas;
+uniform sampler2D tmap;
+uniform sampler2D tavg;
+uniform sampler2D sky;
+in vec2 v_screen;
+out vec4 frag_color;
+
+vec3 skyline(float px, float py) {
+  float horizon = proj.w;
+  float lh = skyp.x;
+  vec3 c = mix(skylow.rgb, skytop.rgb, clamp((horizon - py) / horizon, 0.0, 1.0));
+  int w = textureSize(sky, 0).x;
+  for (int k = 0; k < 3; k++) {
+    float rate = k == 0 ? skyp.y : (k == 1 ? skyp.z : skyp.w);
+    float ly = lh - (horizon - py);
+    if (ly < 0.0 || ly >= lh) continue;
+    int lx = int(floor(px + cam.w * proj.x * rate));
+    lx = ((lx % w) + w) % w;
+    vec4 s = texelFetch(sky, ivec2(lx, k * int(lh) + int(floor(ly))), 0);
+    if (s.a > 0.5) c = s.rgb;
+  }
+  return c;
+}
+
+void main() {
+  float px = v_screen.x;
+  float py = v_screen.y;
+  float f = proj.x;
+  float sx = px - 0.5 * view.x;
+  float sy = proj.y - py;
+  float cp = cos(proj.z);
+  float sp = sin(proj.z);
+  float rz = sy * cp - f * sp;
+  if (rz >= 0.0) { frag_color = vec4(skyline(px, py), 1.0); return; }
+  float ra = f * cp + sy * sp;
+  float t = cam.z / -rz;
+  vec2 fw = vec2(sin(cam.w), -cos(cam.w));
+  vec2 rt = vec2(cos(cam.w), sin(cam.w));
+  vec2 g = cam.xy + t * (ra * fw + sx * rt);
+  float tile = world.x;
+  vec2 tc = floor(g / tile);
+  int idx = 0;
+  if (tc.x >= 0.0 && tc.y >= 0.0 && tc.x < world.y && tc.y < world.y) {
+    vec4 m = texelFetch(tmap, ivec2(tc), 0);
+    idx = int(m.r * 255.0 + 0.5) + 256 * int(m.g * 255.0 + 0.5);
+  }
+  int per = int(world.z);
+  ivec2 cell = ivec2(idx % per, idx / per);
+  ivec2 inner = ivec2(floor(g - tc * tile));
+  vec3 c = texelFetch(atlas, cell * int(tile) + inner, 0).rgb;
+  // texels per pixel: across (t) and along (the ground receding)
+  float foot = max(t, ra * t * t * cp / cam.z);
+  if (world.w > fog.w) {
+    vec3 a = texelFetch(tavg, cell, 0).rgb;
+    c = mix(c, a, smoothstep(fog.w, world.w, foot));
+  }
+  if (fog.z > 0.5) {
+    float along = t * ra;
+    c = mix(c, fogc.rgb, smoothstep(fog.x, fog.y, along) * fogc.a);
+  }
+  frag_color = vec4(c, 1.0);
+}
+")
+
+    (define SPRITE-VERTEX
+      "uniform vec4 rect;
+uniform vec4 uvr;
+uniform vec4 view;
+in vec2 position;
+out vec2 v_uv;
+void main() {
+  vec2 p = rect.xy + position * rect.zw;
+  gl_Position = vec4(p.x / view.x * 2.0 - 1.0, 1.0 - p.y / view.y * 2.0, 0.0, 1.0);
+  v_uv = mix(uvr.xy, uvr.zw, position);
+}
+")
+
+    (define SPRITE-FRAGMENT
+      "uniform vec4 tint;
+uniform sampler2D sheet;
+in vec2 v_uv;
+out vec4 frag_color;
+void main() {
+  vec4 c = texelFetch(sheet, ivec2(floor(v_uv)), 0);
+  if (c.a < 0.5) discard;
+  frag_color = vec4(mix(c.rgb, tint.rgb, tint.a), 1.0);
+}
+")
+
+    (define *ground* #f)
+    (define *tri* #f)
+    (define *sprite* #f)
+    (define *quad* #f)
+    (define *w* 480)
+    (define *h* 270)
+    (define *atlas* #f) (define *map* #f) (define *avg* #f) (define *sky* #f)
+    (define *t0* #f)
+
+    (define (f32 v) (exact->inexact v))
+    (define (v4 a b c d) (list (f32 a) (f32 b) (f32 c) (f32 d)))
+
+    (define (mode7-ready?) (and *ground* *atlas* *sky* #t))
+
+    (define (bytes-of floats)
+      (let ((bv (make-bytevector (* 4 (length floats)) 0)))
+        (let loop ((fs floats) (k 0))
+          (unless (null? fs)
+            (bytevector-ieee-single-set! bv k (f32 (car fs)) 'little)
+            (loop (cdr fs) (+ k 4))))
+        bv))
+
+    (define (mode7-init! w h)
+      (set! *w* w)
+      (set! *h* h)
+      (let ((pl (make-vertex-layout '((position float2)))))
+        ;; one triangle covering clip space
+        (set! *tri* (make-mesh pl (bytes-of '(-1.0 -1.0 3.0 -1.0 -1.0 3.0))))
+        ;; the unit quad, two triangles, (0,0) top left
+        (set! *quad* (make-mesh pl (bytes-of '(0.0 0.0 1.0 0.0 1.0 1.0 0.0 0.0 1.0 1.0 0.0 1.0))))
+        (set! *ground* (make-pipeline pl
+                                      (string-append (glsl-header) GROUND-VERTEX)
+                                      (string-append (glsl-header) GROUND-FRAGMENT)
+                                      '(depth-test #f depth-write #f cull none)))
+        (set! *sprite* (make-pipeline pl
+                                      (string-append (glsl-header) SPRITE-VERTEX)
+                                      (string-append (glsl-header) SPRITE-FRAGMENT)
+                                      '(depth-test #f depth-write #f cull none))))
+      (set-pipeline-uniform! *ground* 'view (v4 w h 0 0))
+      (set-pipeline-uniform! *sprite* 'view (v4 w h 0 0))
+      (mode7-set-look! '()))
+
+    (define (nearest! tex) (set-texture-sampling! tex 'nearest 'clamp) tex)
+
+    ;; tile: texels a side; per-row: tiles per atlas row; map-tiles: the
+    ;; index map's size in tiles (square).
+    (define (mode7-set-world! atlas tmap tavg tile per-row map-tiles far-end)
+      (set! *atlas* (nearest! atlas))
+      (set! *map* (nearest! tmap))
+      (set! *avg* (nearest! tavg))
+      (set! *world-args* (list tile map-tiles per-row))
+      (mode7-set-far! far-end))
+
+    ;; Where the far fade reaches the tile's average: texels per pixel.
+    (define *world-args* '(32.0 128.0 64.0))
+    (define (mode7-set-far! far-end)
+      (set-pipeline-uniform! *ground* 'world
+                             (v4 (car *world-args*) (cadr *world-args*) (caddr *world-args*) far-end)))
+
+    (define (mode7-set-sky! sky layer-h rate-far rate-mid rate-near)
+      (set! *sky* (nearest! sky))
+      (set-pipeline-uniform! *ground* 'skyp (v4 layer-h rate-far rate-mid rate-near)))
+
+    ;; Keys: fog-start fog-end fog? (#t/#f) fog-amount far-start far-end
+    ;; fog-color sky-top sky-low (each (r g b) in 0..1).
+    (define (mode7-set-look! look)
+      (let ((get (lambda (k d) (let ((e (assq k look))) (if e (cdr e) d)))))
+        (set-pipeline-uniform! *ground* 'fog
+                               (v4 (get 'fog-start 700.0) (get 'fog-end 2400.0)
+                                   (if (get 'fog? #t) 1.0 0.0) (get 'far-start 1.6)))
+        (let ((fc (get 'fog-color '(0.18 0.11 0.30))))
+          (set-pipeline-uniform! *ground* 'fogc (v4 (car fc) (cadr fc) (caddr fc) (get 'fog-amount 1.0))))
+        (let ((t (get 'sky-top '(0.05 0.04 0.10))) (l (get 'sky-low '(0.18 0.11 0.30))))
+          (set-pipeline-uniform! *ground* 'skytop (v4 (car t) (cadr t) (caddr t) 1.0))
+          (set-pipeline-uniform! *ground* 'skylow (v4 (car l) (cadr l) (caddr l) 1.0)))))
+
+    (define (mode7-draw-ground! c)
+      (set-pipeline-uniform! *ground* 'cam (v4 (cam-x c) (cam-y c) (cam-height c) (cam-heading c)))
+      (set-pipeline-uniform! *ground* 'proj (v4 (cam-focal c) (cam-cy c) (cam-pitch c) (cam-horizon c)))
+      (draw-mesh *ground* *tri* *atlas* *map* *avg* *sky*))
+
+    ;; A sprite: the sheet's texels (u0, v0)..(u1, v1) (u1 < u0 mirrors it)
+    ;; over the screen rect (x, y, w, h), mixed toward the fog colour by fog.
+    (define *fogc* '(0.18 0.11 0.30))
+    (define (mode7-draw-sprite! sheet x y w h u0 v0 u1 v1 fog fog-color)
+      (set-pipeline-uniform! *sprite* 'rect (v4 x y w h))
+      (set-pipeline-uniform! *sprite* 'uvr (v4 u0 v0 u1 v1))
+      (set-pipeline-uniform! *sprite* 'tint (v4 (car fog-color) (cadr fog-color) (caddr fog-color) fog))
+      (draw-mesh *sprite* *quad* sheet))))
