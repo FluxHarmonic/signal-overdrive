@@ -139,10 +139,10 @@ const ZONES = {
   start: 0,
   // boost pads: [s0, s1, u0, u1]
   boost: [
-    [at(0.050), at(0.050) + 56, -0.55, 0.05],
-    [at(0.205), at(0.205) + 56, -0.10, 0.55],
-    [at(0.560), at(0.560) + 56, -0.30, 0.30],
-    [at(0.760), at(0.760) + 56, 0.00, 0.60],
+    [at(0.050), at(0.050) + 100, -0.55, 0.05],
+    [at(0.205), at(0.205) + 100, -0.10, 0.55],
+    [at(0.560), at(0.560) + 100, -0.30, 0.30],
+    [at(0.760), at(0.760) + 100, 0.00, 0.60],
   ],
   // the repair strip ("checksum lane") on the left of the run to the line
   repair: [[at(0.905), at(0.985), -1.0, -0.42]],
@@ -202,10 +202,12 @@ while (PUDDLES.length < 70) {
 }
 
 function floor(x, y) {
-  // the grid floor: lines every 32 texels, a dot between them
+  // the grid floor: lines every 32 texels, brighter every 128 (the lines
+  // sweeping past are much of the sense of speed), a dot between them
   const gx = x & 31, gy = y & 31;
   let c = C.BG;
-  if (gx === 0 || gy === 0) c = C.WIRE_DARK;
+  if ((x & 127) === 0 || (y & 127) === 0) c = C.TEAL;
+  else if (gx === 0 || gy === 0) c = C.TEAL_DARK;
   else if ((gx === 16 && gy === 16)) c = C.BAR_C;
   for (const p of PUDDLES) {
     const e = ((x - p.x) / p.rx) ** 2 + ((y - p.y) / p.ry) ** 2;
@@ -226,7 +228,9 @@ function road(x, y, s, d) {
   const px = x & 63, py = y & 63;
   if (px === 0 || py === 0) return C.SLATE;
   if (px === 1 || py === 1) return C.STATIC_B;
-  return bayerOn(0.28, x, y) ? C.SLATE : C.SIDE_DARK;
+  // the plates in two close tones, chequered: a pattern that streams past
+  const odd = ((x >> 6) + (y >> 6)) & 1;
+  return bayerOn(0.28, x, y) ? (odd ? C.SIDE_DARK : C.SLATE) : (odd ? C.SLATE : C.SIDE_DARK);
 }
 
 const counts = { road: 0, barrier: 0, floor: 0 };
@@ -306,7 +310,7 @@ function tileKey(tx, ty) {
   const plain = new Canvas(TILE, TILE);
   for (let j = 0; j < TILE; j++) for (let i = 0; i < TILE; i++) {
     const gx = i & 31, gy = j & 31;
-    plain.set(i, j, gx === 0 || gy === 0 ? C.WIRE_DARK : gx === 16 && gy === 16 ? C.BAR_C : C.BG);
+    plain.set(i, j, gx === 0 || gy === 0 ? C.TEAL_DARK : gx === 16 && gy === 16 ? C.BAR_C : C.BG);
   }
   const rows = [];
   for (let j = 0; j < TILE; j++) rows.push(Buffer.from(plain.px.buffer, j * TILE * 4, TILE * 4).toString("base64"));

@@ -330,4 +330,10 @@
         (hud! tuning r info)
         (let ((sel (cdr (assq 'overlay info))))
           (when sel (overlay! tuning sel)))
+        ;; F3: frames per second and the frame's interval, smoothed
+        (let ((fps (cdr (assq 'fps info))))
+          (when fps
+            (text! (string-append (number->string (exact (round (car fps)))) " FPS "
+                                  (number->string (/ (round (* 10.0 (cdr fps))) 10.0)) " MS")
+                   8 (- VIEW-H 14) "#4DF2D9")))
         (end-frame)))))

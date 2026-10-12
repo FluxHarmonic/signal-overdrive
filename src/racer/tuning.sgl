@@ -24,10 +24,10 @@
     (define CAMERA-KNOBS
       ;; key          group    min    max    step  default label
       '((fov          camera   0.6    2.0    0.05  1.15    "FOV")
-        (cam-height   camera   6.0    90.0   1.0   26.0    "CAM HEIGHT")
+        (cam-height   camera   6.0    90.0   1.0   40.0    "CAM HEIGHT")
         (cam-dist     camera   20.0   240.0  2.0   92.0    "CAM DIST")
-        (pitch        camera   -0.3   0.7    0.01  0.12    "PITCH")
-        (horizon      camera   30.0   180.0  1.0   92.0    "HORIZON")
+        (pitch        camera   -0.3   0.7    0.01  0.16    "PITCH")
+        (horizon      camera   30.0   180.0  1.0   80.0    "HORIZON")
         (cam-lag      camera   0.0    0.95   0.05  0.35    "CAM LAG")
         (sprite-size  camera   8.0    60.0   1.0   18.0    "MACHINE SIZE")
         (fog          look     0.0    1.0    1.0   1.0     "FOG")

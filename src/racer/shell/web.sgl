@@ -28,6 +28,7 @@
     (define *started* #f)
     (define *last-ms* #f)
     (define *frames* 0)
+    (define *trace-touch* #f)
 
     (define (say . parts) (display (apply string-append "signal-overdrive: " parts)) (newline))
 
@@ -73,8 +74,15 @@
 
     (define (web-dispatch type payload)
       (cond ((string=? type "frame") (tick! payload) 0)
-            ((string=? type "param") (say "param " payload) (core-param! payload) 0)
-            ((string=? type "touch") (core-touch! payload) 1)
+            ((string=? type "param")
+             (say "param " payload)
+             (when (string=? payload "trace-touch") (set! *trace-touch* #t))
+             (core-param! payload) 0)
+            ((string=? type "touch")
+             (when *trace-touch* (say "touch " payload))
+             (core-touch! payload) 1)
+            ;; the touch check's question: what is the player doing now?
+            ((string=? type "probe") (say (core-probe)) 1)
             ((string=? type "tap") (core-tap!) 1)
             ((string=? type "pointerdown") (core-tap!) 0)
             ((pad-dispatch! (core-pad) type payload) 1)

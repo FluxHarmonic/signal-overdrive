@@ -31,7 +31,7 @@
           (racer scene))
 
   (export core-boot! core-frame! core-keys core-sticks core-pad core-param! core-touch!
-          core-tap! core-race core-tuning core-describe GAME-NAME)
+          core-tap! core-race core-tuning core-describe core-probe core-knobs-markdown GAME-NAME)
 
   (begin
     (define GAME-NAME "signal-overdrive")
@@ -78,6 +78,7 @@
     (define (core-param! kv)
       (cond ((string=? kv "autopilot") (set! *autopilot* #t) (say "autopilot on"))
             ((string=? kv "start") (set! *start-now* #t))
+            ((string=? kv "fps") (set! *fps-on* #t))
             (else
              (let ((t (tuning-parse! *tuning* kv)))
                (when t
@@ -222,6 +223,32 @@
           (set! *flash* (max 0 (- *flash* 1)))
           (loop (+ i 1)))))
 
+    ;; The player, for the touch check: what a gesture did, from the game.
+    (define (core-probe)
+      (let ((m (racer-machine (race-player *race*)))
+            (r3 (lambda (v) (number->string (/ (round (* v 1000.0)) 1000.0)))))
+        (string-append "probe heading " (r3 (machine-heading m))
+                       " speed " (number->string (exact (round (machine-speed m))))
+                       " boost " (r3 (machine-boost m))
+                       " integrity " (r3 (machine-integrity m)))))
+
+    ;; The knob table as markdown, for the README (native --knobs).
+    (define (core-knobs-markdown)
+      (apply string-append
+             "| Knob (URL parameter) | Group | Default | Range | Step |\n|---|---|---|---|---|\n"
+             (map (lambda (k)
+                    (string-append "| `" (symbol->string (knob-key k)) "` " (knob-label k)
+                                   " | " (symbol->string (knob-group k))
+                                   " | " (tuning-format-value (knob-default k))
+                                   " | " (tuning-format-value (knob-min k)) " to " (tuning-format-value (knob-max k))
+                                   " | " (tuning-format-value (knob-step k)) " |\n"))
+                  KNOBS)))
+
+    ;; Frames per second, smoothed, for the F3 readout (?fps shows it from the start).
+    (define *fps-on* #f)
+    (define *fps* 60.0)
+    (define *frame-ms* 16.7)
+
     (define (core-describe)
       (let ((m (racer-machine (race-player *race*))))
         (string-append "phase " (symbol->string (race-phase *race*))
@@ -232,6 +259,10 @@
 
     (define (core-frame! dt win-w win-h integer-only)
       (set! *clock* (clock-advance *clock* dt))
+      (when (> dt 0.0)
+        (set! *fps* (+ (* 0.95 *fps*) (* 0.05 (/ 1.0 dt))))
+        (set! *frame-ms* (+ (* 0.95 *frame-ms*) (* 0.05 (* 1000.0 dt)))))
+      (when (pressed? 'f3) (set! *fps-on* (not *fps-on*)))
       (overlay-keys!)
       (when (or (pressed? 'r) (pad-pressed? *pad* 'back))
         (set! *race* (race-start *tuning* *race*))
@@ -243,7 +274,8 @@
                           (cons 'flash *flash*)
                           (cons 'start-line (if (eq? *platform* 'web) "PRESS ENTER OR TAP" "PRESS ENTER"))
                           (cons 'restart-line (if (eq? *platform* 'web) "ENTER OR TAP TO RUN IT AGAIN" "ENTER TO RUN IT AGAIN"))
-                          (cons 'overlay *overlay*))
+                          (cons 'overlay *overlay*)
+                          (cons 'fps (and *fps-on* (cons *fps* *frame-ms*))))
                     win-w win-h integer-only)
       (keys-end-frame! *keys*)
       (pad-end-frame! *pad*))))

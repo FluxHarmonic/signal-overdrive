@@ -3,11 +3,14 @@
 ;;; textures read from assets/racer/ (run it from the package root).
 ;;;
 ;;;   signal-overdrive [--KNOB=VALUE ...] [--autopilot] [--start] [--quit-after S]
+;;;                    [--shots DIR --shot-times "T1,T2,..."] [--knobs]
 ;;;
 ;;; Every knob of (racer tuning) can be set from the command line exactly
 ;;; as from the URL: --grip=8.5 --top=600. --autopilot drives the player on
 ;;; the racing line (for checks); --start skips the title; --quit-after
-;;; quits after S seconds of wall time.
+;;; quits after S seconds of wall time. --shots writes DIR/shot-T.png when
+;;; the race clock passes each T seconds (so an autopilot run shoots the same
+;;; places every time), then quits. --knobs prints the knob table as markdown.
 
 (define-library (racer shell native)
   (import (sigil core)
@@ -22,19 +25,41 @@
           (substratic input keys)
           (substratic input pad)
           (substratic store kv)
+          (substratic image capture)
+          (sigil fs)
+          (racer race)
           (racer scene)
           (racer shell core))
 
   (export native-main)
 
   (begin
-    (define KEYS '(left right up down a d w s c space return shift tab p slash r 0 escape))
+    (define KEYS '(left right up down a d w s c space return shift tab p slash r 0 escape f3))
 
     (define (texture name)
       (let* ((img (load-image (string-append "assets/racer/" name)))
              (tex (load-texture img)))
         (image-free! img)
         tex))
+
+    (define (split-commas s)
+      (let loop ((cs (string->list s)) (cur '()) (acc '()))
+        (cond ((null? cs) (reverse (if (null? cur) acc (cons (list->string (reverse cur)) acc))))
+              ((char=? (car cs) #\,) (loop (cdr cs) '() (cons (list->string (reverse cur)) acc)))
+              (else (loop (cdr cs) (cons (car cs) cur) acc)))))
+
+    ;; the shots still to take: (seconds ...), and where
+    (define *shots* '())
+    (define *shot-dir* #f)
+    (define (shots! w h)
+      (when (and *shot-dir* (pair? *shots*)
+                 (>= (race-clock (core-race)) (* 60 (car *shots*))))
+        (let ((png (capture-frame-png w h))
+              (f (string-append *shot-dir* "/shot-" (number->string (car *shots*)) ".png")))
+          (when png (write-file-bytes f png))
+          (display (string-append "signal-overdrive: shot " f (if png "" " FAILED"))) (newline)
+          (set! *shots* (cdr *shots*))
+          (when (null? *shots*) (request-quit)))))
 
     (define (loop scaler quit-after)
       (lambda ()
@@ -52,6 +77,7 @@
               (when (keys-pressed? (core-keys) 'escape) (request-quit))
               (when (and quit-after (> (- (current-second) t0) quit-after)) (request-quit))
               (core-frame! dt (frame-width) (frame-height) #t)
+              (shots! (frame-width) (frame-height))
               (when (= n 1) (display "signal-overdrive: ready") (newline))
               (when (= 0 (modulo n 300)) (display (string-append "signal-overdrive: " (core-describe))) (newline))
               (unless (quit-requested?) (frame (+ n 1))))))))
@@ -59,10 +85,17 @@
     (define (native-main . _args)
       (let ((args (cdr (command-line))))
         (core-boot! 'desktop)
+        (when (member "--knobs" args)
+          (display (core-knobs-markdown))
+          (exit 0))
         (for-each (lambda (a)
                     (when (and (> (string-length a) 2) (string=? (substring a 0 2) "--"))
                       (core-param! (substring a 2 (string-length a)))))
                   args)
+        (let ((d (member "--shots" args)) (t (member "--shot-times" args)))
+          (when (and d (pair? (cdr d)) t (pair? (cdr t)))
+            (set! *shot-dir* (cadr d))
+            (set! *shots* (map string->number (split-commas (cadr t))))))
         (let* ((qa (member "--quit-after" args))
                (quit-after (and qa (pair? (cdr qa)) (string->number (cadr qa))))
                (scaler (make-window-scaler VIEW-W VIEW-H min-scale: 2 max-scale: 6

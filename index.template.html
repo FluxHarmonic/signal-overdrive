@@ -132,7 +132,10 @@
       if (s !== last) { last = s; send("touch", s); }
       boostPulse = false;
     }
-    function idle() { touches = {}; boostBtn = false; last = ""; send("touch", "0,0,0,0,0");
+    // fingers up: still accelerating (every scheme does it by itself);
+    // focus lost: everything off
+    function idle(e) { touches = {}; boostBtn = false; last = "";
+      send("touch", e && e.type === "blur" ? "0,0,0,0,0" : "0,1,0,0,0");
       el("so-zl").classList.remove("on"); el("so-zr").classList.remove("on"); ring.style.display = knob.style.display = "none"; }
 
     var canvas = el("stage");
