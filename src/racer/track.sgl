@@ -1,0 +1,174 @@
+;;; (racer track) - Where a point is on the track: how far along it, how far
+;;; from the centreline, and whether it is on a boost pad or the repair strip.
+;;;
+;;; A track is its centreline sampled at even arc lengths (the generator's
+;;; samples, (racer track loop-data)): per sample x y, the unit tangent,
+;;; the half-width and the racing line. A probe finds the nearest sample
+;;; (near a hint when one is given, so a probe per machine per tick costs a
+;;; few dozen distance checks), projects the point onto the segments either
+;;; side of it, and answers:
+;;;   s    arc length from the start line, 0..length
+;;;   d    signed distance from the centreline, + to the right of travel
+;;;   hw   the half-width there
+;;;   tx ty the unit tangent of the segment it projected onto
+;;;   i    the nearest sample (the next probe's hint)
+;;;
+;;; World coordinates are texels, y down (the map image's own). Pure: no
+;;; state but the track itself.
+
+(define-library (racer track)
+  (import (sigil core)
+          (sigil struct)
+          (sigil math)
+          (racer track loop-data))
+
+  (export track track? track-n track-length track-step track-samples track-cumulative
+          track-boost track-repair
+          make-track loop-track
+          track-x track-y track-tx track-ty track-hw track-line track-s
+          probe probe? probe-s probe-d probe-hw probe-tx probe-ty probe-i
+          track-probe track-point track-index-at wrap-s s-ahead
+          zone-hit? track-on-boost? track-on-repair?)
+
+  (begin
+    (define FIELDS 6)
+    (define HINT-WINDOW 10)
+
+    (define-struct track
+      (n default: 0)
+      (length default: 0.0)
+      (step default: 16.0)
+      (samples default: #f)       ; flat vector, FIELDS per sample
+      (cumulative default: #f)    ; s at each sample, n + 1 entries
+      (boost default: '())
+      (repair default: '()))
+
+    (define-struct probe
+      (s default: 0.0) (d default: 0.0) (hw default: 0.0)
+      (tx default: 1.0) (ty default: 0.0) (i default: 0))
+
+    (define (field t i k) (vector-ref (track-samples t) (+ (* i FIELDS) k)))
+    (define (track-x t i) (field t i 0))
+    (define (track-y t i) (field t i 1))
+    (define (track-tx t i) (field t i 2))
+    (define (track-ty t i) (field t i 3))
+    (define (track-hw t i) (field t i 4))
+    (define (track-line t i) (field t i 5))
+    (define (track-s t i) (vector-ref (track-cumulative t) i))
+
+    (define (make-track samples step boost repair)
+      (let* ((n (quotient (vector-length samples) FIELDS))
+             (cum (make-vector (+ n 1) 0.0)))
+        (let loop ((i 1))
+          (when (<= i n)
+            (let* ((a (- i 1)) (b (modulo i n))
+                   (ax (vector-ref samples (* a FIELDS))) (ay (vector-ref samples (+ (* a FIELDS) 1)))
+                   (bx (vector-ref samples (* b FIELDS))) (by (vector-ref samples (+ (* b FIELDS) 1))))
+              (vector-set! cum i (+ (vector-ref cum a) (sqrt (+ (square (- bx ax)) (square (- by ay))))))
+              (loop (+ i 1)))))
+        (track n: n length: (vector-ref cum n) step: step samples: samples cumulative: cum
+               boost: boost repair: repair)))
+
+    (define *loop* #f)
+    (define (loop-track)
+      (unless *loop*
+        (set! *loop* (make-track LOOP-SAMPLES LOOP-STEP LOOP-BOOST LOOP-REPAIR)))
+      *loop*)
+
+    (define (wrap-i t i) (modulo i (track-n t)))
+    (define (wrap-s t s)
+      (let ((l (track-length t)))
+        (cond ((< s 0.0) (wrap-s t (+ s l)))
+              ((>= s l) (wrap-s t (- s l)))
+              (else s))))
+
+    (define (dist2 t i x y)
+      (+ (square (- (track-x t i) x)) (square (- (track-y t i) y))))
+
+    ;; The nearest sample: within HINT-WINDOW of the hint, or over all of them.
+    (define (nearest t x y hint)
+      (if hint
+          (let loop ((k (- HINT-WINDOW)) (best hint) (bd (dist2 t hint x y)))
+            (if (> k HINT-WINDOW)
+                best
+                (let* ((i (wrap-i t (+ hint k))) (d (dist2 t i x y)))
+                  (if (< d bd) (loop (+ k 1) i d) (loop (+ k 1) best bd)))))
+          (let loop ((i 1) (best 0) (bd (dist2 t 0 x y)))
+            (if (>= i (track-n t))
+                best
+                (let ((d (dist2 t i x y)))
+                  (if (< d bd) (loop (+ i 1) i d) (loop (+ i 1) best bd)))))))
+
+    ;; Project (x, y) on the segment from sample a to the next one:
+    ;; (dist2 s d hw tx ty).
+    (define (project t a x y)
+      (let* ((b (wrap-i t (+ a 1)))
+             (ax (track-x t a)) (ay (track-y t a))
+             (sx (- (track-x t b) ax)) (sy (- (track-y t b) ay))
+             (l2 (+ (* sx sx) (* sy sy)))
+             (l (sqrt l2))
+             (u (max 0.0 (min 1.0 (/ (+ (* (- x ax) sx) (* (- y ay) sy)) l2))))
+             (px (+ ax (* sx u))) (py (+ ay (* sy u)))
+             (tx (/ sx l)) (ty (/ sy l))
+             (ex (- x px)) (ey (- y py)))
+        (list (+ (* ex ex) (* ey ey))
+              (+ (track-s t a) (* u l))
+              ;; right of travel is the tangent turned clockwise on the map: (-ty, tx)
+              (+ (* ex (- ty)) (* ey tx))
+              (+ (* (track-hw t a) (- 1.0 u)) (* (track-hw t b) u))
+              tx ty)))
+
+    (define (track-probe t x y hint)
+      (let* ((i (nearest t x y hint))
+             (p1 (project t (wrap-i t (- i 1)) x y))
+             (p2 (project t i x y))
+             (p (if (< (car p1) (car p2)) p1 p2)))
+        (probe s: (wrap-s t (list-ref p 1)) d: (list-ref p 2) hw: (list-ref p 3)
+               tx: (list-ref p 4) ty: (list-ref p 5) i: i)))
+
+    ;; The sample at or before arc length s.
+    (define (track-index-at t s)
+      (let* ((s (wrap-s t s))
+             (guess (min (- (track-n t) 1) (exact (floor (/ s (track-step t)))))))
+        (let loop ((i guess))
+          (cond ((and (> i 0) (> (track-s t i) s)) (loop (- i 1)))
+                ((and (< i (- (track-n t) 1)) (<= (track-s t (+ i 1)) s)) (loop (+ i 1)))
+                (else i)))))
+
+    ;; The point at arc length s, u half-widths right of the centreline:
+    ;; (x y tx ty).
+    (define (track-point t s u)
+      (let* ((s (wrap-s t s))
+             (i (track-index-at t s))
+             (j (wrap-i t (+ i 1)))
+             (seg (- (track-s t (+ i 1)) (track-s t i)))
+             (f (if (> seg 0.0) (/ (- s (track-s t i)) seg) 0.0))
+             (x (+ (track-x t i) (* f (- (track-x t j) (track-x t i)))))
+             (y (+ (track-y t i) (* f (- (track-y t j) (track-y t i)))))
+             (tx0 (+ (track-tx t i) (* f (- (track-tx t j) (track-tx t i)))))
+             (ty0 (+ (track-ty t i) (* f (- (track-ty t j) (track-ty t i)))))
+             (tl (sqrt (+ (* tx0 tx0) (* ty0 ty0))))
+             (tx (/ tx0 tl)) (ty (/ ty0 tl))
+             (hw (+ (track-hw t i) (* f (- (track-hw t j) (track-hw t i))))))
+        (list (+ x (* (- ty) u hw)) (+ y (* tx u hw)) tx ty)))
+
+    ;; How far ahead b is of a along the loop, in -length/2..length/2.
+    (define (s-ahead t a b)
+      (let* ((l (track-length t)) (d (- b a)))
+        (cond ((> d (/ l 2.0)) (- d l))
+              ((< d (- (/ l 2.0))) (+ d l))
+              (else d))))
+
+    ;; Is (s, u) inside a zone (s0 s1 u0 u1)?
+    (define (zone-hit? t z s u)
+      (let ((ds (wrap-s t (- s (car z)))))
+        (and (<= ds (- (cadr z) (car z)))
+             (>= u (caddr z)) (<= u (cadddr z)))))
+
+    (define (any-zone? t zs p)
+      (let ((u (/ (probe-d p) (probe-hw p))))
+        (let loop ((zs zs))
+          (and (pair? zs) (or (zone-hit? t (car zs) (probe-s p) u) (loop (cdr zs)))))))
+
+    (define (track-on-boost? t p) (any-zone? t (track-boost t) p))
+    (define (track-on-repair? t p) (any-zone? t (track-repair t) p))))

@@ -1,0 +1,56 @@
+;;; The Mode 7 camera: the horizon row, and projection and unprojection
+;;; agreeing (the ground shader unprojects; the sprites project).
+
+(import (sigil test)
+        (sigil math)
+        (racer mode7 camera))
+
+(define (near? a b eps) (< (abs (- a b)) eps))
+
+(define C (make-cam 1000.0 2000.0 24.0 0.7 0.15 1.2 80.0 480 270))
+
+(test-group "mode7 camera"
+  (test "rows above the horizon are sky, rows below are ground"
+    (assert-false (camera-unproject C 240.0 79.0))
+    (assert-true (pair? (camera-unproject C 240.0 81.0)))
+    (assert-true (pair? (camera-unproject C 10.0 269.0))))
+
+  (test "a ground point projects back to the pixel it was unprojected from"
+    (for-each
+      (lambda (px py)
+        (let* ((g (camera-unproject C px py))
+               (p (camera-project C (car g) (cdr g) 0.0 0.01)))
+          (assert-true (near? px (projected-x p) 1e-6))
+          (assert-true (near? py (projected-y p) 1e-6))))
+      '(0.0 240.0 479.0 120.0 360.0)
+      '(269.0 200.0 90.0 81.5 140.0)))
+
+  (test "the ground straight ahead lies along the heading"
+    (let* ((g (camera-unproject C 240.0 200.0))
+           (dx (- (car g) (cam-x C))) (dy (- (cdr g) (cam-y C)))
+           (along (+ (* dx (sin 0.7)) (* dy (- (cos 0.7)))))
+           (side (+ (* dx (cos 0.7)) (* dy (sin 0.7)))))
+      (assert-true (> along 0.0))
+      (assert-true (near? side 0.0 1e-6))))
+
+  (test "screen right is the heading's right"
+    (let* ((g (camera-unproject C 400.0 200.0))
+           (dx (- (car g) (cam-x C))) (dy (- (cdr g) (cam-y C))))
+      (assert-true (> (+ (* dx (cos 0.7)) (* dy (sin 0.7))) 0.0))))
+
+  (test "nearer rows are nearer ground, and a point behind the camera does not project"
+    (let ((d (lambda (py) (let ((g (camera-unproject C 240.0 py)))
+                            (sqrt (+ (square (- (car g) (cam-x C))) (square (- (cdr g) (cam-y C)))))))))
+      (assert-true (< (d 260.0) (d 200.0) (d 100.0))))
+    (assert-false (camera-project C (- (cam-x C) (* 50.0 (sin 0.7))) (+ (cam-y C) (* 50.0 (cos 0.7))) 0.0 0.01)))
+
+  (test "pitch moves the optical centre, never the horizon"
+    (let ((c2 (cam C pitch: 0.4)))
+      (assert-false (camera-unproject c2 240.0 79.0))
+      (assert-true (pair? (camera-unproject c2 240.0 81.0)))
+      (assert-true (> (cam-cy c2) (cam-cy C)))))
+
+  (test "cam-behind puts the camera dist back along the heading"
+    (let ((c (cam-behind C 500.0 500.0 0.0 40.0)))
+      (assert-true (near? (cam-x c) 500.0 1e-9))
+      (assert-true (near? (cam-y c) 540.0 1e-9)))))

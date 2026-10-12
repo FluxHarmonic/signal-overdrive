@@ -1,0 +1,206 @@
+;;; The handling: acceleration, top speed, coasting and the brake, steering,
+;;; grip and the drift, the boost and its integrity cost, boost pads, walls
+;;; (the bounce and the integrity they cost) and the repair strip.
+;;;
+;;; Most cases run on a corridor: a thin loop whose first side runs east
+;;; along y = 0 from x 0 to 1000, half-width 50, with a boost pad at s 100
+;;; to 150 and a repair strip on the left from s 300 to 500.
+
+(import (sigil test)
+        (sigil math)
+        (racer track)
+        (racer handling))
+
+(define (near? a b eps) (< (abs (- a b)) eps))
+(define DT (/ 1.0 60.0))
+(define EAST (/ 3.141592653589793 2.0))       ; heading: forward is (sin h, -cos h)
+
+(define CORRIDOR
+  (let ((v (make-vector (* 6 4) 0.0)))
+    (define (put! i x y tx ty)
+      (vector-set! v (* 6 i) x) (vector-set! v (+ (* 6 i) 1) y)
+      (vector-set! v (+ (* 6 i) 2) tx) (vector-set! v (+ (* 6 i) 3) ty)
+      (vector-set! v (+ (* 6 i) 4) 50.0) (vector-set! v (+ (* 6 i) 5) 0.0))
+    (put! 0 0.0 0.0 1.0 0.0) (put! 1 1000.0 0.0 1.0 0.0)
+    (put! 2 1000.0 400.0 -1.0 0.0) (put! 3 0.0 400.0 -1.0 0.0)
+    (make-track v 16.0 '((100.0 150.0 -1.0 1.0)) '((300.0 500.0 -1.0 -0.5)))))
+
+(define H default-handling)
+(define (P k) (handling-ref H k))
+
+(define (run h m in n)
+  (let loop ((m m) (i 0)) (if (= i n) m (loop (machine-step h CORRIDOR m in DT) (+ i 1)))))
+
+;; Run n steps and collect every step's events.
+(define (run-events h m in n)
+  (let loop ((m m) (i 0) (evs '()))
+    (if (= i n)
+        (cons m evs)
+        (let ((m2 (machine-step h CORRIDOR m in DT)))
+          (loop m2 (+ i 1) (append (machine-events m2) evs))))))
+
+(define FULL (make-input 0.0 1.0 0.0 #f #f))
+;; a machine parked at x = 200 (past the pad), already up to speed v east
+(define (moving v) (machine (make-machine 200.0 0.0 EAST) vx: v))
+
+;; A world with no pad, no strip and no walls in reach: the speed tests
+;; must not hit anything (the corridor is 1000 long, so they start early
+;; and run briefly; the long ones re-centre the machine each step).
+(define (run-free h m in n)
+  (let loop ((m m) (i 0))
+    (if (= i n) m
+        (let ((m2 (machine-step h CORRIDOR m in DT)))
+          (loop (machine m2 x: 200.0 y: 0.0 hint: #f) (+ i 1))))))
+
+(test-group "handling: speed"
+  (test "full throttle from a standstill: speed rises, eases off, never passes top"
+    (let* ((m0 (make-machine 200.0 0.0 EAST))
+           (m1 (run-free H m0 FULL 30))
+           (m2 (run-free H m0 FULL 60))
+           (m9 (run-free H m0 FULL 600)))
+      (assert-true (> (machine-speed m1) 0.0))
+      (assert-true (> (machine-speed m2) (machine-speed m1)))
+      ;; the second half second adds less than the first: easing toward top
+      (assert-true (< (- (machine-speed m2) (machine-speed m1)) (machine-speed m1)))
+      (assert-true (<= (machine-speed m9) (+ (P 'top) 1e-6)))
+      (assert-true (> (machine-speed m9) (* 0.98 (P 'top))))))
+
+  (test "more accel reaches speed sooner"
+    (let ((slow (run-free H (make-machine 200.0 0.0 EAST) FULL 60))
+          (fast (run-free (handling-set H 'accel 600.0) (make-machine 200.0 0.0 EAST) FULL 60)))
+      (assert-true (> (machine-speed fast) (* 1.3 (machine-speed slow))))))
+
+  (test "off the throttle it coasts down; the brake stops it harder"
+    (let* ((m (moving 400.0))
+           (coast (run-free H m NO-INPUT 30))
+           (brake (run-free H m (make-input 0.0 0.0 1.0 #f #f) 30)))
+      (assert-true (< (machine-speed coast) 400.0))
+      (assert-true (near? (machine-speed coast) (- 400.0 (* 0.5 (P 'coast))) 1.0))
+      (assert-true (< (machine-speed brake) (- (machine-speed coast) 100.0))))))
+
+(test-group "handling: steering, grip, drift"
+  (test "steering right turns the heading clockwise; left, anticlockwise"
+    (let ((r (run-free H (moving 300.0) (make-input 1.0 1.0 0.0 #f #f) 30))
+          (l (run-free H (moving 300.0) (make-input -1.0 1.0 0.0 #f #f) 30)))
+      (assert-true (> (machine-heading r) EAST))
+      (assert-true (< (machine-heading l) EAST))))
+
+  (test "steering is slower at top speed"
+    (let ((slow (run-free H (moving 50.0) (make-input 1.0 0.0 0.0 #f #f) 1))
+          (fast (run-free H (moving (P 'top)) (make-input 1.0 0.0 0.0 #f #f) 1)))
+      (assert-true (< (- (machine-heading fast) EAST) (* 0.8 (- (machine-heading slow) EAST))))))
+
+  (test "grip takes the slide out at the grip rate"
+    ;; moving east, sliding south (the machine's right) at 200
+    (let* ((m (machine (moving 300.0) vy: 200.0))
+           (after (run-free H m NO-INPUT 30)))
+      (assert-true (near? (machine-lateral-speed after)
+                          (* 200.0 (exp (* -0.5 (P 'grip)))) 2.0))))
+
+  (test "more grip, less slide"
+    (let* ((m (machine (moving 300.0) vy: 200.0))
+           (lo (run-free (handling-set H 'grip 3.0) m NO-INPUT 20))
+           (hi (run-free (handling-set H 'grip 12.0) m NO-INPUT 20)))
+      (assert-true (> (abs (machine-lateral-speed lo)) (* 2.0 (abs (machine-lateral-speed hi)))))))
+
+  (test "grip turns slide into forward speed by transfer"
+    (let* ((m (machine (moving 300.0) vy: 200.0))
+           (keep (run-free (handling-set H 'transfer 1.0) m (make-input 0.0 0.0 0.0 #f #f) 10))
+           (lose (run-free (handling-set H 'transfer 0.0) m (make-input 0.0 0.0 0.0 #f #f) 10)))
+      (assert-true (> (machine-forward-speed keep) (+ (machine-forward-speed lose) 30.0)))))
+
+  (test "drift: the slide lasts longer and the heading turns faster"
+    (let* ((m (machine (moving 300.0) vy: 200.0))
+           (grip (run-free H m (make-input 1.0 1.0 0.0 #f #f) 20))
+           (drift (run-free H m (make-input 1.0 1.0 0.0 #f #t) 20)))
+      (assert-true (> (abs (machine-lateral-speed drift)) (* 1.5 (abs (machine-lateral-speed grip)))))
+      (assert-true (> (machine-heading drift) (machine-heading grip)))))
+
+  (test "the sprite leans into the turn"
+    (let ((m (run-free H (moving 300.0) (make-input 1.0 1.0 0.0 #f #f) 30)))
+      (assert-true (> (machine-lean m) 0.5)))))
+
+(test-group "handling: boost and integrity"
+  (define PRESS (input steer: 0.0 throttle: 1.0 boost: #t))
+  (test "a boost press costs boost-cost integrity and lifts top speed"
+    (let* ((m (moving (P 'top)))
+           (b (run-free H m PRESS 1))
+           (later (run-free H b FULL 50)))
+      (assert-true (near? (machine-integrity b) (- 100.0 (P 'boost-cost)) 1e-9))
+      (assert-true (memq 'boost (machine-events b)))
+      (assert-true (> (machine-speed later) (* 1.15 (P 'top))))))
+
+  (test "boosts do not stack: a press while boosting does nothing"
+    (let* ((b (run-free H (moving 300.0) PRESS 1))
+           (b2 (run-free H b PRESS 1)))
+      (assert-true (near? (machine-integrity b2) (machine-integrity b) 1e-9))
+      (assert-false (memq 'boost (machine-events b2)))))
+
+  (test "no boost on the first lap (boost-ok #f)"
+    (let ((b (run-free H (moving 300.0) (input throttle: 1.0 boost: #t boost-ok: #f) 1)))
+      (assert-true (near? (machine-integrity b) 100.0 1e-9))
+      (assert-true (near? (machine-boost b) 0.0 1e-9))))
+
+  (test "no boost that would spend the last of the integrity"
+    (let ((b (run-free H (machine (moving 300.0) integrity: (P 'boost-cost)) PRESS 1)))
+      (assert-true (near? (machine-boost b) 0.0 1e-9))
+      (assert-true (near? (machine-integrity b) (P 'boost-cost) 1e-9))))
+
+  (test "after the boost, speed sheds back to top"
+    (let* ((b (run-free H (moving (P 'top)) PRESS 80))
+           (after (run-free H b FULL 240)))
+      (assert-true (near? (machine-speed after) (P 'top) 5.0))))
+
+  (test "a boost pad boosts for free, once per visit"
+    ;; from x 60, at 300 texels/s: over the pad (s 100 to 150) in 10 steps
+    (let* ((r (run-events H (machine (make-machine 60.0 0.0 EAST) vx: 300.0) FULL 40))
+           (m (car r)) (evs (cdr r)))
+      (assert-equal 1 (length (filter (lambda (e) (eq? e 'pad)) evs)))
+      (assert-true (near? (machine-integrity m) 100.0 1e-9))
+      (assert-true (> (machine-boost m) 0.0))))
+
+  (test "the repair strip restores integrity, capped at the maximum"
+    ;; on the strip (s 300 to 500, left lane) for a second at 100 texels/s
+    (let* ((m (machine (make-machine 310.0 -40.0 EAST) vx: 100.0 integrity: 50.0))
+           (r (run H m (make-input 0.0 0.0 0.0 #f #f) 60))
+           (full (run H (machine m integrity: 99.0) NO-INPUT 60)))
+      (assert-true (> (machine-integrity r) (+ 50.0 (* 0.9 (P 'repair)))))
+      (assert-true (near? (machine-integrity full) 100.0 1e-9))))
+
+  (test "off the strip nothing repairs"
+    (let ((r (run H (machine (make-machine 310.0 40.0 EAST) vx: 100.0 integrity: 50.0) NO-INPUT 60)))
+      (assert-true (near? (machine-integrity r) 50.0 1e-9)))))
+
+(test-group "handling: walls"
+  ;; heading east, sliding south (right) into the wall at y = +50
+  (define (into-wall vy) (machine (make-machine 600.0 30.0 EAST) vx: 300.0 vy: vy))
+
+  (test "a wall keeps the machine on the road and bounces it back"
+    (let* ((r (run-events H (into-wall 400.0) NO-INPUT 20))
+           (m (car r)))
+      (assert-true (<= (machine-y m) (- 50.0 (P 'radius) -1e-6)))
+      (assert-true (< (machine-vy m) 0.0))
+      (assert-true (assq 'wall (cdr r)))))
+
+  (test "a wall hit costs integrity in proportion to the impact"
+    (let* ((soft (car (run-events H (into-wall 100.0) NO-INPUT 30)))
+           (hard (car (run-events H (into-wall 400.0) NO-INPUT 30)))
+           (lost-soft (- 100.0 (machine-integrity soft)))
+           (lost-hard (- 100.0 (machine-integrity hard))))
+      (assert-true (> lost-soft 0.0))
+      (assert-true (> lost-hard (* 3.0 lost-soft)))
+      (assert-true (near? lost-hard (* (P 'wall-damage) 400.0) 4.0))))
+
+  (test "bounce sets how hard the wall throws you back"
+    (let ((dead (car (run-events (handling-set H 'bounce 0.0) (into-wall 400.0) NO-INPUT 8)))
+          (live (car (run-events (handling-set H 'bounce 0.9) (into-wall 400.0) NO-INPUT 8))))
+      (assert-true (< (machine-vy live) (- (machine-vy dead) 100.0)))))
+
+  (test "a wall scrubs speed along it"
+    (let ((m (car (run-events H (into-wall 400.0) NO-INPUT 8)))
+          (free (run-free H (into-wall 400.0) NO-INPUT 8)))   ; the same slide, no wall in reach
+      (assert-true (< (machine-forward-speed m) (- (machine-forward-speed free) 20.0)))))
+
+  (test "integrity never goes below zero"
+    (let ((m (car (run-events H (machine (into-wall 600.0) integrity: 3.0) NO-INPUT 10))))
+      (assert-true (near? (machine-integrity m) 0.0 1e-9)))))

@@ -1,0 +1,91 @@
+;;; (racer mode7 camera) - The Mode 7 camera: a pinhole over a flat ground,
+;;; and the projection both ways.
+;;;
+;;; The ground is z = 0; world x y are texels with y down the map, z is up.
+;;; The camera sits at (x, y, height) facing heading (0 up the map,
+;;; clockwise, as (racer handling)), pitched down by `pitch` radians. The
+;;; focal length f in pixels comes from the horizontal field of view, and
+;;; `horizon` is the screen row where the ground meets the sky: the optical
+;;; centre's row follows as cy = horizon + f * tan(pitch), so the horizon
+;;; stays put while pitch changes how steeply the ground recedes.
+;;;
+;;; A screen pixel (px, py), rows from the top, looks along
+;;;   ray = fwd * f + right * (px - w/2) + up * (cy - py)
+;;; with fwd = (forward * cos p, -sin p), up = (forward * sin p, cos p),
+;;; right = (right, 0). It meets the ground when ray.z < 0, at
+;;; t = height / -ray.z. The fragment shader in (racer mode7 render) does
+;;; exactly this per pixel; camera-unproject is the same on the CPU (the
+;;; tests check the two directions agree), and camera-project places the
+;;; sprites.
+;;;
+;;; This module and (racer mode7 render) are written to lift out as a
+;;; package later (substratic-mode7): they know nothing of the racer.
+
+(define-library (racer mode7 camera)
+  (import (sigil core)
+          (sigil struct)
+          (sigil math))
+
+  (export cam cam? make-cam cam-x cam-y cam-height cam-heading cam-pitch cam-fov cam-horizon
+          cam-w cam-h cam-focal cam-cy cam-behind
+          camera-project camera-unproject camera-horizon-row
+          projected? projected-x projected-y projected-depth projected-scale)
+
+  (begin
+    (define-struct cam
+      (x default: 0.0) (y default: 0.0) (height default: 24.0)
+      (heading default: 0.0) (pitch default: 0.12) (fov default: 1.2)
+      (horizon default: 80.0)
+      (w default: 480) (h default: 270))
+
+    (define (make-cam x y height heading pitch fov horizon w h)
+      (cam x: x y: y height: height heading: heading pitch: pitch fov: fov horizon: horizon w: w h: h))
+
+    ;; The camera dist texels behind (x, y) along heading.
+    (define (cam-behind c x y heading dist)
+      (cam c x: (- x (* dist (sin heading))) y: (+ y (* dist (cos heading))) heading: heading))
+
+    (define (cam-focal c) (/ (* 0.5 (cam-w c)) (tan (* 0.5 (cam-fov c)))))
+    (define (cam-cy c) (+ (cam-horizon c) (* (cam-focal c) (tan (cam-pitch c)))))
+    (define (camera-horizon-row c) (cam-horizon c))
+
+    (define-struct projected
+      (x default: 0.0) (y default: 0.0) (depth default: 0.0) (scale default: 0.0))
+
+    ;; World (wx, wy, wz) to the screen: x y in pixels (rows from the top),
+    ;; depth along the view axis, scale in pixels per texel at that depth.
+    ;; #f when the point is behind the camera or closer than `near`.
+    (define (camera-project c wx wy wz near)
+      (let* ((h (cam-heading c)) (p (cam-pitch c))
+             (fx (sin h)) (fy (- (cos h)))
+             (rx (cos h)) (ry (sin h))
+             (cp (cos p)) (sp (sin p))
+             (dx (- wx (cam-x c))) (dy (- wy (cam-y c))) (dz (- wz (cam-height c)))
+             (along (+ (* dx fx) (* dy fy)))
+             (depth (- (* along cp) (* dz sp)))
+             (side (+ (* dx rx) (* dy ry)))
+             (up (+ (* along sp) (* dz cp)))
+             (f (cam-focal c)))
+        (and (> depth near)
+             (projected x: (+ (* 0.5 (cam-w c)) (/ (* f side) depth))
+                        y: (- (cam-cy c) (/ (* f up) depth))
+                        depth: depth
+                        scale: (/ f depth)))))
+
+    ;; The ground point under screen pixel (px, py), as (x . y), or #f for
+    ;; the sky. The shader's arithmetic, on the CPU.
+    (define (camera-unproject c px py)
+      (let* ((h (cam-heading c)) (p (cam-pitch c))
+             (fx (sin h)) (fy (- (cos h)))
+             (rx (cos h)) (ry (sin h))
+             (cp (cos p)) (sp (sin p))
+             (f (cam-focal c))
+             (sx (- px (* 0.5 (cam-w c))))
+             (sy (- (cam-cy c) py))
+             ;; ray = fwd * f + right * sx + up * sy
+             (ray-along (+ (* f cp) (* sy sp)))
+             (ray-z (- (* sy cp) (* f sp))))
+        (and (< ray-z 0.0)
+             (let ((t (/ (cam-height c) (- ray-z))))
+               (cons (+ (cam-x c) (* t (+ (* ray-along fx) (* sx rx))))
+                     (+ (cam-y c) (* t (+ (* ray-along fy) (* sx ry)))))))))))

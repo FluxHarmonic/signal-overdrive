@@ -1,0 +1,3 @@
+build/
+.sigil/
+node_modules/

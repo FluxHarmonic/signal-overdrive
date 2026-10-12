@@ -1,0 +1,225 @@
+;;; (racer handling) - One machine's handling, F-Zero style: throttle,
+;;; top speed, steering, grip and slide, a boost, walls that bounce you and
+;;; cost integrity, and the repair strip.
+;;;
+;;; Pure: (machine-step params track m input dt) is the next machine. The
+;;; track is (racer track)'s; a machine carries its own probe hint. Units
+;;; are world texels and seconds; angles are radians.
+;;;
+;;; Heading 0 faces up the map (y down, so forward is (sin h, -cos h)) and
+;;; grows clockwise, so steering right adds to it. The right of travel is
+;;; (cos h, sin h).
+;;;
+;;; The model, per step:
+;;;  1. steer: the heading turns at `steer` rad/s at full lock, falling to
+;;;     steer * steer-high at top speed; holding drift multiplies it by
+;;;     drift-steer.
+;;;  2. the velocity is split along the new heading (forward) and across it
+;;;     (lateral).
+;;;  3. forward: the throttle adds accel * (1 - v/top), so speed eases into
+;;;     top speed; a boost raises top by boost-speed and adds boost-accel.
+;;;     Above top (a boost ending) it sheds overspeed-drag. Off the throttle
+;;;     it coasts down at `coast`; the brake takes `brake`.
+;;;  4. grip: the lateral speed decays at `grip` per second (grip * drift
+;;;     while drift is held: the slide); a share `transfer` of what grip
+;;;     takes away becomes forward speed, so a clean turn keeps its speed
+;;;     and a slide scrubs it.
+;;;  5. move, then the walls: past hw - radius the machine is put back on
+;;;     the wall, its speed into the wall reflected at `bounce` and its
+;;;     speed along the wall scrubbed by `wall-drag` scaled by the impact;
+;;;     integrity drops by wall-damage per texel/s of impact speed.
+;;;  6. zones: a boost pad starts a free boost (pad-time) once per visit; the
+;;;     repair strip restores `repair` integrity per second.
+;;;  7. a boost press: boost-time seconds of boost for boost-cost integrity,
+;;;     refused while one runs, when boosts are not allowed (the first lap)
+;;;     or when it would spend the last of the integrity.
+
+(define-library (racer handling)
+  (import (sigil core)
+          (sigil struct)
+          (sigil math)
+          (racer track))
+
+  (export handling handling? default-handling handling-ref handling-set handling-keys
+          machine machine? make-machine
+          machine-x machine-y machine-heading machine-vx machine-vy machine-integrity
+          machine-boost machine-lean machine-hint machine-pad-lock machine-events
+          machine-s machine-d machine-on-repair
+          machine-speed machine-forward-speed machine-lateral-speed
+          input input? input-steer input-throttle input-brake input-boost input-drift input-boost-ok
+          make-input NO-INPUT
+          machine-step INTEGRITY-MAX)
+
+  (begin
+    (define INTEGRITY-MAX 100.0)
+
+    ;; The knobs, as an association list (key . value): (racer tuning) shows
+    ;; and edits them, the URL sets them, and a test builds its own.
+    (define default-handling
+      '((accel . 300.0)          ; texels/s^2 from a standstill
+        (top . 560.0)            ; texels/s
+        (brake . 700.0)          ; texels/s^2
+        (coast . 70.0)           ; texels/s^2 off the throttle
+        (overspeed-drag . 240.0) ; texels/s^2 above top speed
+        (steer . 2.5)            ; rad/s at full lock, at a standstill
+        (steer-high . 0.62)      ; the share of steer left at top speed
+        (grip . 7.0)             ; lateral decay per second
+        (drift . 0.30)           ; grip multiplier while drifting
+        (drift-steer . 1.40)     ; steer multiplier while drifting
+        (transfer . 0.75)        ; share of lost lateral speed kept as forward
+        (boost-speed . 1.35)     ; top speed multiplier while boosting
+        (boost-accel . 700.0)    ; texels/s^2 added while boosting
+        (boost-time . 1.3)       ; s
+        (boost-cost . 12.0)      ; integrity per boost
+        (pad-time . 0.9)         ; s of boost from a pad
+        (bounce . 0.55)          ; restitution off a wall
+        (wall-drag . 0.30)       ; along-wall speed lost at a 300 texel/s impact
+        (wall-damage . 0.045)    ; integrity per texel/s of impact speed
+        (repair . 24.0)          ; integrity per second on the strip
+        (radius . 10.0)))        ; the machine's half-width against walls
+
+    (define (handling-keys) (map car default-handling))
+    (define (handling-ref h key)
+      (let ((e (assq key h)))
+        (if e (cdr e) (cdr (assq key default-handling)))))
+    (define (handling-set h key value)
+      (cons (cons key value)
+            (let drop ((l h))
+              (cond ((null? l) '())
+                    ((eq? (caar l) key) (drop (cdr l)))
+                    (else (cons (car l) (drop (cdr l))))))))
+    (define (handling . pairs) pairs)
+    (define (handling? h) (list? h))
+
+    ;; boost: seconds of boost left. lean: -1..1, the sprite's lean, eased
+    ;; toward the steering. pad-lock: on a pad last step (a pad fires once
+    ;; per visit). events: what happened this step: wall (with the impact
+    ;; speed), boost, pad, repair. s d: the probe's answer after the move.
+    (define-struct machine
+      (x default: 0.0) (y default: 0.0) (heading default: 0.0)
+      (vx default: 0.0) (vy default: 0.0)
+      (integrity default: 100.0)
+      (boost default: 0.0)
+      (lean default: 0.0)
+      (hint default: #f)
+      (pad-lock default: #f)
+      (on-repair default: #f)
+      (s default: 0.0) (d default: 0.0)
+      (events default: '()))
+
+    (define (make-machine x y heading) (machine x: x y: y heading: heading))
+
+    ;; steer -1..1 (+ right), throttle and brake 0..1, boost a press this
+    ;; step, drift held, boost-ok: may a press boost (no boosts on lap 1).
+    (define-struct input
+      (steer default: 0.0) (throttle default: 0.0) (brake default: 0.0)
+      (boost default: #f) (drift default: #f) (boost-ok default: #t))
+    (define (make-input steer throttle brake boost drift)
+      (input steer: steer throttle: throttle brake: brake boost: boost drift: drift))
+    (define NO-INPUT (input))
+
+    (define (machine-speed m)
+      (sqrt (+ (square (machine-vx m)) (square (machine-vy m)))))
+    (define (fwd-x h) (sin h))
+    (define (fwd-y h) (- (cos h)))
+    (define (machine-forward-speed m)
+      (let ((h (machine-heading m)))
+        (+ (* (machine-vx m) (fwd-x h)) (* (machine-vy m) (fwd-y h)))))
+    (define (machine-lateral-speed m)
+      (let ((h (machine-heading m)))
+        (+ (* (machine-vx m) (cos h)) (* (machine-vy m) (sin h)))))
+
+    (define (clamp lo hi v) (max lo (min hi v)))
+
+    (define (machine-step h t m in dt)
+      (let* ((P (lambda (k) (handling-ref h k)))
+             (top (P 'top))
+             (boosting (> (machine-boost m) 0.0))
+             (top-eff (if boosting (* top (P 'boost-speed)) top))
+             (speed0 (machine-speed m))
+             (drift (input-drift in))
+             (steer (clamp -1.0 1.0 (input-steer in)))
+             ;; 1. steer
+             (rate (* (P 'steer)
+                      (+ 1.0 (* (- (P 'steer-high) 1.0) (clamp 0.0 1.0 (/ speed0 top))))
+                      (if drift (P 'drift-steer) 1.0)))
+             (heading (+ (machine-heading m) (* steer rate dt)))
+             ;; 2. split
+             (fx (fwd-x heading)) (fy (fwd-y heading))
+             (rx (cos heading)) (ry (sin heading))
+             (vf (+ (* (machine-vx m) fx) (* (machine-vy m) fy)))
+             (vl (+ (* (machine-vx m) rx) (* (machine-vy m) ry)))
+             ;; 3. forward
+             (throttle (clamp 0.0 1.0 (input-throttle in)))
+             (accel (+ (P 'accel) (if boosting (P 'boost-accel) 0.0)))
+             (vf (if (> vf top-eff)
+                     (max top-eff (- vf (* (P 'overspeed-drag) dt)))
+                     (+ vf (* throttle accel (max 0.0 (- 1.0 (/ vf top-eff))) dt))))
+             (vf (if (< throttle 0.05)
+                     (if (> vf 0.0) (max 0.0 (- vf (* (P 'coast) dt))) (min 0.0 (+ vf (* (P 'coast) dt))))
+                     vf))
+             (vf (let ((b (clamp 0.0 1.0 (input-brake in))))
+                   (if (> b 0.0) (max 0.0 (- vf (* b (P 'brake) dt))) vf)))
+             ;; 4. grip
+             (g (* (P 'grip) (if drift (P 'drift) 1.0)))
+             (keep (exp (- (* g dt))))
+             (lost (* vl (- 1.0 keep)))
+             (vl (- vl lost))
+             (vf (+ vf (* (abs lost) (P 'transfer) (if (>= vf 0.0) 1.0 -1.0))))
+             (vx (+ (* vf fx) (* vl rx)))
+             (vy (+ (* vf fy) (* vl ry)))
+             ;; 5. move, walls
+             (x (+ (machine-x m) (* vx dt)))
+             (y (+ (machine-y m) (* vy dt)))
+             (p (track-probe t x y (machine-hint m)))
+             (limit (- (probe-hw p) (P 'radius)))
+             (over (- (abs (probe-d p)) limit))
+             (events '()))
+        (let-values (((x y vx vy hit)
+                      (if (<= over 0.0)
+                          (values x y vx vy 0.0)
+                          ;; n: the wall's normal, pointing back onto the road
+                          (let* ((side (if (> (probe-d p) 0.0) 1.0 -1.0))
+                                 (nx (* (- side) (- (probe-ty p))))
+                                 (ny (* (- side) (probe-tx p)))
+                                 (x (+ x (* nx over)))
+                                 (y (+ y (* ny over)))
+                                 (vn (+ (* vx nx) (* vy ny))))
+                            (if (>= vn 0.0)
+                                (values x y vx vy 0.0)
+                                (let* ((impact (- vn))
+                                       (vtx (- vx (* vn nx))) (vty (- vy (* vn ny)))
+                                       (scrub (- 1.0 (clamp 0.0 0.9 (* (P 'wall-drag) (/ impact 300.0)))))
+                                       (vx (+ (* vtx scrub) (* (P 'bounce) impact nx)))
+                                       (vy (+ (* vty scrub) (* (P 'bounce) impact ny))))
+                                  (values x y vx vy impact)))))))
+          (let* ((events (if (> hit 0.0) (cons (cons 'wall hit) events) events))
+                 (integrity (- (machine-integrity m) (* (P 'wall-damage) hit)))
+                 ;; 6. zones (on the probe before the wall push: the push is
+                 ;; at most a few texels and never moves s)
+                 (on-pad (track-on-boost? t p))
+                 (pad-fires (and on-pad (not (machine-pad-lock m))))
+                 (boost (- (machine-boost m) dt))
+                 (boost (if pad-fires (max boost (P 'pad-time)) boost))
+                 (events (if pad-fires (cons 'pad events) events))
+                 (on-repair (track-on-repair? t p))
+                 (integrity (if on-repair (min INTEGRITY-MAX (+ integrity (* (P 'repair) dt))) integrity))
+                 (events (if on-repair (cons 'repair events) events))
+                 ;; 7. a boost press
+                 (fires (and (input-boost in) (input-boost-ok in)
+                             (<= boost 0.0)
+                             (> integrity (P 'boost-cost))))
+                 (boost (if fires (P 'boost-time) boost))
+                 (integrity (if fires (- integrity (P 'boost-cost)) integrity))
+                 (events (if fires (cons 'boost events) events))
+                 (lean-to (clamp -1.0 1.0 (* steer (if drift 1.0 0.7))))
+                 (lean (+ (machine-lean m) (* (- lean-to (machine-lean m)) (min 1.0 (* 10.0 dt))))))
+            (machine m x: x y: y heading: heading vx: vx vy: vy
+                     integrity: (max 0.0 integrity)
+                     boost: (max 0.0 boost)
+                     lean: lean
+                     hint: (probe-i p)
+                     pad-lock: on-pad
+                     on-repair: on-repair
+                     s: (probe-s p) d: (probe-d p)
+                     events: events)))))))
