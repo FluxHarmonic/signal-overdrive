@@ -27,6 +27,7 @@
           (racer mode7 camera)
           (racer mode7 render)
           (racer dither)
+          (racer lut)
           (racer track)
           (racer handling)
           (racer race)
@@ -70,7 +71,13 @@
     ;; tracks is ((name atlas map avg) ...), one entry per track.
     (define *tracks* '())
     (define *shown* #f)          ; the track whose textures the ground has
-    (define (scene-init! tracks sky sheet)
+    ;; luts: ((embers . texture) (crash . texture)), (racer lut)'s lookups.
+    (define *lut-pipe* #f)
+    (define *luts* '())
+    (define (scene-init! tracks sky sheet luts)
+      (set! *luts* luts)
+      (for-each (lambda (e) (set-texture-sampling! (cdr e) 'nearest 'clamp)) luts)
+      (hud-font-init!)
       (mode7-init! VIEW-W VIEW-H)
       (set! *tracks* tracks)
       (show-track! (caar tracks))
@@ -82,7 +89,11 @@
         (set! *post-pipe* (make-pipeline pl
                                          (string-append (glsl-header) POST-VERTEX)
                                          (string-append (glsl-header) POST-FRAGMENT)
-                                         '(depth-test #f depth-write #f cull none))))
+                                         '(depth-test #f depth-write #f cull none)))
+        (set! *lut-pipe* (make-pipeline pl
+                                        (string-append (glsl-header) POST-VERTEX)
+                                        (string-append (glsl-header) LUT-FRAGMENT)
+                                        '(depth-test #f depth-write #f cull none))))
       (set! *view* (make-render-target VIEW-W VIEW-H 'nearest 'depth))
       (set! *post* (make-render-target VIEW-W VIEW-H 'nearest 'depth))
       (set! *view-tex* (render-target->texture *view*))
@@ -107,7 +118,9 @@
                                    (list spread 4.0 (exact->inexact (length colors)) (exact->inexact VIEW-H)))
             ;; rows counted from the top: the pass's gl_FragCoord row 0 is
             ;; the picture's bottom on a render target (Phantom's finding)
-            (set-pipeline-uniform! *post-pipe* 'opts (list 1.0 1.0 0.0 0.0))))))
+            (set-pipeline-uniform! *post-pipe* 'opts (list 1.0 1.0 0.0 0.0))
+            (set-pipeline-uniform! *lut-pipe* 'params (list spread 4.0 (exact->inexact (length colors)) (exact->inexact VIEW-H)))
+            (set-pipeline-uniform! *lut-pipe* 'opts (list 1.0 1.0 0.0 0.0))))))
 
     ;; --- the camera --------------------------------------------------------------------
 
@@ -237,18 +250,71 @@
     (define (hs) (max 1 (exact (floor (fit-scale *fit*)))))
     (define (hx vx) (+ (fit-x *fit*) (* vx (fit-scale *fit*))))
     (define (hy vy) (+ (fit-y *fit*) (* vy (fit-scale *fit*))))
+    ;; Colours by hex, parsed once each.
+    (define *rgb* '())
     (define (rgb hex)
-      (let ((d (lambda (k) (/ (string->number (substring hex k (+ k 2)) 16) 255.0))))
-        (set-color (d 1) (d 3) (d 5))))
+      (let ((e (assoc hex *rgb*)))
+        (if e
+            (apply set-color (cdr e))
+            (let* ((d (lambda (k) (/ (string->number (substring hex k (+ k 2)) 16) 255.0)))
+                   (c (list (d 1) (d 3) (d 5))))
+              (set! *rgb* (cons (cons hex c) *rgb*))
+              (apply set-color c)))))
     (define (rect! vx vy w h hex)
       (rgb hex)
       (draw-filled-rect (hx vx) (hy vy) (* w (fit-scale *fit*)) (* h (fit-scale *fit*))))
+
+    ;; The HUD's text: Substratic's 5x7 font, rendered once into a white
+    ;; glyph texture and drawn one textured rect per character, tinted by
+    ;; the current colour. Substratic's draw-text draws each glyph as a
+    ;; rect per run of lit cells (around five a glyph), and on the web every
+    ;; drawing call allocates: the HUD was most of DRAW's 9 ms a frame.
+    (define *font* #f)
+    (define *glyph-index* '())    ; char -> column in the texture
+    (define *comb* #f)            ; the meter's cells, 2 lit 1 gap, white
+    (define (hud-font-init!)
+      (let* ((n (length GLYPHS))
+             (w (* n 6)) (h 7)
+             (px (make-bytevector (* w h 4) 0)))
+        (let loop ((gs GLYPHS) (i 0))
+          (unless (null? gs)
+            (set! *glyph-index* (cons (cons (char-downcase (caar gs)) i) *glyph-index*))
+            (let rows ((rs (cdar gs)) (y 0))
+              (unless (null? rs)
+                (let cols ((x 0))
+                  (when (< x 5)
+                    (when (char=? (string-ref (car rs) x) #\#)
+                      (let ((k (* 4 (+ (* y w) (* i 6) x))))
+                        (bytevector-u8-set! px k 255) (bytevector-u8-set! px (+ k 1) 255)
+                        (bytevector-u8-set! px (+ k 2) 255) (bytevector-u8-set! px (+ k 3) 255)))
+                    (cols (+ x 1))))
+                (rows (cdr rs) (+ y 1))))
+            (loop (cdr gs) (+ i 1))))
+        (set! *font* (make-texture-from-pixels w h px 'nearest)))
+      (let* ((cells 50) (w (* cells 3)) (px (make-bytevector (* w 4) 0)))
+        (let loop ((x 0))
+          (when (< x w)
+            (unless (= 2 (modulo x 3))
+              (let ((k (* 4 x)))
+                (bytevector-u8-set! px k 255) (bytevector-u8-set! px (+ k 1) 255)
+                (bytevector-u8-set! px (+ k 2) 255) (bytevector-u8-set! px (+ k 3) 255)))
+            (loop (+ x 1))))
+        (set! *comb* (make-texture-from-pixels w 1 px 'nearest))))
+
+    (define (glyphs! s x y scale)
+      (let ((adv (* scale 6)) (gw (* scale 5)) (gh (* scale 7)))
+        (let loop ((i 0) (x x))
+          (when (< i (string-length s))
+            (let ((e (assv (char-downcase (string-ref s i)) *glyph-index*)))
+              (when e (draw-texture-region *font* x y gw gh (* 6 (cdr e)) 0 5 7)))
+            (loop (+ i 1) (+ x adv))))))
+
     (define (text! s vx vy hex . size)
       (let ((k (if (pair? size) (car size) 1)))
         (rgb "#0D0A1A")
-        (draw-text s (+ (hx vx) (hs)) (+ (hy vy) (hs)) (* k (hs)))
+        (glyphs! s (+ (hx vx) (hs)) (+ (hy vy) (hs)) (* k (hs)))
         (rgb hex)
-        (draw-text s (hx vx) (hy vy) (* k (hs)))))
+        (glyphs! s (hx vx) (hy vy) (* k (hs)))))
     (define (text-w s . size) (/ (text-width s (* (if (pair? size) (car size) 1) (hs))) (fit-scale *fit*)))
     (define (centred! s vy hex . size)
       (let ((k (if (pair? size) (car size) 1)))
@@ -263,10 +329,13 @@
              (col (if (and (< integrity 25.0) (odd? (quotient tick 8))) "#CC3340" col))
              (col (if (> flash 0) "#FAFCFF" col)))
         (rect! (- vx 1) (- vy 1) (+ (* cells 3) 1) 8 "#0D0A1A")
-        (let loop ((i 0))
-          (when (< i cells)
-            (rect! (+ vx (* i 3)) vy 2 6 (if (< i lit) col "#21173D"))
-            (loop (+ i 1))))))
+        ;; two textured draws: every cell dim, then the lit ones
+        (let ((s (fit-scale *fit*)))
+          (rgb "#21173D")
+          (draw-texture-region *comb* (hx vx) (hy vy) (* cells 3 s) (* 6 s) 0 0 (* cells 3) 1)
+          (when (> lit 0)
+            (rgb col)
+            (draw-texture-region *comb* (hx vx) (hy vy) (* lit 3 s) (* 6 s) 0 0 (* lit 3) 1)))))
 
     (define (hud! tuning r info)
       (let* ((p (race-player r))
@@ -361,7 +430,9 @@
           (draw-machines! c tuning r cam-heading (cdr (assq 'spark info))))
         (when dither?
           (with-3d-pass *post* #f
-            (draw-mesh *post-pipe* *tri* *view-tex*)))
+            (if (> (tuning-ref tuning 'lut) 0.5)
+                (draw-mesh *lut-pipe* *tri* *view-tex* (cdr (assq *palette* *luts*)))
+                (draw-mesh *post-pipe* *tri* *view-tex*))))
         (view-present! *presenter* (if dither? *post* *view*) f)
         (set-blend-mode 'normal)
         (hud! tuning r info)

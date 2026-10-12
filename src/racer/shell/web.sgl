@@ -27,7 +27,7 @@
     (define (track-files t)
       (let ((n (symbol->string t)))
         (list (string-append n "-atlas.png") (string-append n "-map.png") (string-append n "-avg.png"))))
-    (define NAMES (append (apply append (map track-files TRACKS)) '("sky.png" "machines.png")))
+    (define NAMES (append (apply append (map track-files TRACKS)) '("sky.png" "machines.png" "lut-embers.png" "lut-crash.png")))
     (define *fetches* '())
     (define *started* #f)
     (define *last-ms* #f)
@@ -63,7 +63,8 @@
                (when (= 0 (modulo *frames* 600)) (say (core-describe))))
               ((fetched?)
                (scene-init! (map (lambda (t) (cons t (map texture (track-files t)))) TRACKS)
-                            (texture "sky.png") (texture "machines.png"))
+                            (texture "sky.png") (texture "machines.png")
+                            (list (cons 'embers (texture "lut-embers.png")) (cons 'crash (texture "lut-crash.png"))))
                (set! *started* #t)))))
 
     (define (web-main)

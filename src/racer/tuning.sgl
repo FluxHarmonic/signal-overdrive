@@ -37,6 +37,7 @@
         (far-end      look     0.5    12.0   0.1   3.2     "FAR FADE TO")
         (dither       look     0.0    1.0    1.0   1.0     "DITHER")
         (spread       look     0.0    64.0   4.0   8.0     "SPREAD")
+        (lut          look     0.0    1.0    1.0   1.0     "DITHER BY LOOKUP")
         (palette      look     0.0    1.0    1.0   0.0     "PALETTE")))
 
     (define RACE-KNOBS
