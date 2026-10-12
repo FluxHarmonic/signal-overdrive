@@ -382,10 +382,10 @@
     ;; --- the tuning overlay ------------------------------------------------------------------
 
     (define (overlay! tuning sel)
-      (let* ((rows 24)
+      (let* ((rows 22)
              (n (length KNOBS))
              (top (max 0 (min (- n rows) (- sel (quotient rows 2)))))
-             (x 8) (y 60))
+             (x 8) (y 40))
         (rect! (- x 4) (- y 6) 196 (+ (* rows 8) 34) "#0D0A1A")
         (text! "TUNING  UP/DOWN PICK  LEFT/RIGHT SET  0 RESET" x (- y 2) "#7380A6")
         (let loop ((i top) (row 0))
