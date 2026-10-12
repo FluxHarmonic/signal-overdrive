@@ -35,7 +35,7 @@
   (export native-main)
 
   (begin
-    (define KEYS '(left right up down a d w s c space return shift tab p slash r 0 escape f3))
+    (define KEYS '(left right up down a d w s c space return shift tab p slash r 0 escape f3 f4))
 
     (define (texture name)
       (let* ((img (load-image (string-append "assets/racer/" name)))

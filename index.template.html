@@ -88,6 +88,13 @@
     document.addEventListener("sigil-web-app-ready", function (e) {
       app = e.detail; if (pending) app.dispatch(pending[0], pending[1]);
       app.dispatch("param", "touch-scheme=" + scheme);
+      // the audio bridge's stream mode, as the bridge itself decides it
+      // (sigil-wasm-audio.js): an AudioWorklet and a SharedArrayBuffer
+      // (cross-origin isolation) give worklet-sab; a worklet alone,
+      // worklet-msg; neither, scriptprocessor (on the main thread)
+      var wk = typeof AudioWorkletNode !== "undefined";
+      var sab = typeof SharedArrayBuffer !== "undefined" && self.crossOriginIsolated === true;
+      app.dispatch("param", "audio-mode=" + (wk ? (sab ? "worklet-sab" : "worklet-msg") : "scriptprocessor"));
     }, { once: true });
     if (globalThis.SigilWebApp && globalThis.SigilWebApp.started) app = globalThis.SigilWebApp;
 

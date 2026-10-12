@@ -33,7 +33,8 @@
   (import (sigil core)
           (sigil math))
 
-  (export make-synth synth-set! synth-event! synth-fill! synth-rate)
+  (export make-synth synth-set! synth-event! synth-fill! synth-rate synth-engine-gain! render-cue CUE-KINDS
+          synth-freq)
 
   (begin
     ;; the state's slots
@@ -41,15 +42,20 @@
     (define SEED 6) (define WIND 7) (define WHOOSH 8) (define WPH 9) (define WBP 10) (define WLP 11)
     (define SCRAPE 12) (define SHP 13) (define CORRUPT 14) (define CPH 15)
     (define T-SPEED 16) (define T-THROTTLE 17) (define T-BOOST 18) (define SPEED 19) (define THROTTLE 20)
-    (define SLOTS 21)
+    (define ENG 21)                      ; the engine's and the wind's gain (0 renders events alone)
+    (define SLOTS 22)
 
     (define (make-synth rate)
       (let ((s (make-vector SLOTS 0.0)))
         (vector-set! s RATE (exact->inexact rate))
         (vector-set! s SEED 12345)
         (vector-set! s FREQ 48.0)
+        (vector-set! s ENG 1.0)
         s))
+    (define (synth-engine-gain! s g) (vector-set! s ENG (exact->inexact g)))
     (define (synth-rate s) (vector-ref s RATE))
+    ;; the engine's pitch now, Hz (the tests watch it glide)
+    (define (synth-freq s) (vector-ref s FREQ))
 
     (define (synth-set! s speed throttle boost)
       (vector-set! s T-SPEED (max 0.0 (min 1.4 (exact->inexact speed))))
@@ -61,6 +67,8 @@
         ((boost pad) (vector-set! s WHOOSH 1.0) (vector-set! s WPH 0.0))
         ((wall) (vector-set! s SCRAPE (max (vector-ref s SCRAPE) (min 1.0 (/ (exact->inexact strength) 250.0)))))
         ((corrupt) (vector-set! s CORRUPT 1.0) (vector-set! s CPH 0.0))
+        ;; ICE: a short burst of the corrupt sound (the steering scrambled)
+        ((ice) (vector-set! s CORRUPT 0.55) (vector-set! s CPH 0.0))
         (else #f)))
 
     ;; a 31-bit LCG, as a float in -1..1
@@ -71,6 +79,11 @@
 
     (define (frac x) (- x (floor x)))
 
+    ;; The state rides in the loop's variables and is stored once per block:
+    ;; the first version read and wrote the state vector on every sample
+    ;; (13 ms a frame in the bytecode build, most of the frame). The event
+    ;; sounds are skipped while their envelopes are silent.
+    (define QUIET 1e-5)
     (define (synth-fill! s buf n)
       (let* ((rate (vector-ref s RATE))
              (dt (/ 1.0 rate))
@@ -78,47 +91,78 @@
              (glide (- 1.0 (exp (/ -1.0 (* 0.05 rate)))))
              (whoosh-decay (exp (/ -1.0 (* 0.6 rate))))
              (scrape-decay (exp (/ -1.0 (* 0.25 rate))))
-             (corrupt-decay (exp (/ -1.0 (* 1.2 rate)))))
-        (let loop ((i 0))
-          (when (< i n)
-            (let* ((speed (+ (vector-ref s SPEED) (* glide (- (vector-ref s T-SPEED) (vector-ref s SPEED)))))
-                   (throttle (+ (vector-ref s THROTTLE) (* glide (- (vector-ref s T-THROTTLE) (vector-ref s THROTTLE)))))
-                   (target-f (+ 48.0 (* 170.0 speed) (* 22.0 (vector-ref s T-BOOST))))
-                   (f (+ (vector-ref s FREQ) (* glide (- target-f (vector-ref s FREQ)))))
-                   (p1 (frac (+ (vector-ref s P1) (* f dt))))
-                   (p2 (frac (+ (vector-ref s P2) (* f 1.007 dt))))
-                   (p3 (frac (+ (vector-ref s P3) (* f 0.5 dt))))
-                   (raw (+ (- (* 2.0 p1) 1.0) (* 0.8 (- (* 2.0 p2) 1.0)) (* 0.5 (if (< p3 0.5) 1.0 -1.0))))
-                   (cut (+ 0.05 (* 0.18 throttle) (* 0.22 speed)))
-                   (lp (+ (vector-ref s LP) (* cut (- raw (vector-ref s LP)))))
-                   (engine (* lp (+ 0.10 (* 0.08 throttle))))
-                   (nz (noise! s))
-                   (wind (+ (vector-ref s WIND) (* 0.02 (- nz (vector-ref s WIND)))))
-                   (wind-out (* wind 1.6 speed speed))
-                   ;; the whoosh: noise through a band that sweeps up then down
-                   (wh (* (vector-ref s WHOOSH) whoosh-decay))
-                   (wph (+ (vector-ref s WPH) dt))
-                   (wcut (+ 0.03 (* 0.25 (sin (min 3.14159 (* wph 5.0))))))
-                   (wlp (+ (vector-ref s WLP) (* wcut (- nz (vector-ref s WLP)))))
-                   (wbp (+ (vector-ref s WBP) (* 0.5 (- wlp (vector-ref s WBP)))))
-                   (whoosh-out (* 0.55 wh (- wlp wbp) 3.0))
-                   ;; the scrape: high-passed noise, gated into crackle
-                   (sc (* (vector-ref s SCRAPE) scrape-decay))
-                   (shp (+ (vector-ref s SHP) (* 0.3 (- nz (vector-ref s SHP)))))
-                   (crackle (if (> (noise! s) 0.2) 1.0 0.25))
-                   (scrape-out (* 0.5 sc crackle (- nz shp)))
-                   ;; the corrupt sound: a sawtooth falling an octave and a half, and noise
-                   (co (* (vector-ref s CORRUPT) corrupt-decay))
-                   (cph (+ (vector-ref s CPH) (* (* 220.0 (max 0.2 co)) dt)))
-                   (corrupt-out (* 0.4 co (+ (- (* 2.0 (frac cph)) 1.0) (* 0.5 nz))))
-                   (mix (+ engine wind-out whoosh-out scrape-out corrupt-out))
-                   (out (/ mix (+ 1.0 (abs mix)))))
-              (vector-set! s SPEED speed) (vector-set! s THROTTLE throttle)
-              (vector-set! s FREQ f) (vector-set! s P1 p1) (vector-set! s P2 p2) (vector-set! s P3 p3)
-              (vector-set! s LP lp) (vector-set! s WIND wind)
-              (vector-set! s WHOOSH wh) (vector-set! s WPH wph) (vector-set! s WLP wlp) (vector-set! s WBP wbp)
-              (vector-set! s SCRAPE sc) (vector-set! s SHP shp)
-              (vector-set! s CORRUPT co) (vector-set! s CPH cph)
-              (bytevector-ieee-single-set! buf (* 8 i) out 'little)
-              (bytevector-ieee-single-set! buf (+ (* 8 i) 4) out 'little))
-            (loop (+ i 1))))))))
+             (corrupt-decay (exp (/ -1.0 (* 1.2 rate))))
+             (t-speed (vector-ref s T-SPEED)) (t-throttle (vector-ref s T-THROTTLE))
+             (t-boost (vector-ref s T-BOOST)) (eng (vector-ref s ENG)))
+        (let loop ((i 0)
+                   (speed (vector-ref s SPEED)) (throttle (vector-ref s THROTTLE)) (f (vector-ref s FREQ))
+                   (p1 (vector-ref s P1)) (p2 (vector-ref s P2)) (p3 (vector-ref s P3))
+                   (lp (vector-ref s LP)) (wind (vector-ref s WIND))
+                   (wh (vector-ref s WHOOSH)) (wph (vector-ref s WPH)) (wlp (vector-ref s WLP)) (wbp (vector-ref s WBP))
+                   (sc (vector-ref s SCRAPE)) (shp (vector-ref s SHP))
+                   (co (vector-ref s CORRUPT)) (cph (vector-ref s CPH))
+                   (seed (exact (vector-ref s SEED))))
+          (if (< i n)
+              (let* ((speed (+ speed (* glide (- t-speed speed))))
+                     (throttle (+ throttle (* glide (- t-throttle throttle))))
+                     (f (+ f (* glide (- (+ 48.0 (* 170.0 speed) (* 22.0 t-boost)) f))))
+                     (p1 (frac (+ p1 (* f dt))))
+                     (p2 (frac (+ p2 (* f 1.007 dt))))
+                     (p3 (frac (+ p3 (* f 0.5 dt))))
+                     (raw (+ (- (* 2.0 p1) 1.0) (* 0.8 (- (* 2.0 p2) 1.0)) (* 0.5 (if (< p3 0.5) 1.0 -1.0))))
+                     (lp (+ lp (* (+ 0.05 (* 0.18 throttle) (* 0.22 speed)) (- raw lp))))
+                     (engine (* lp (+ 0.10 (* 0.08 throttle))))
+                     (seed (modulo (+ (* seed 1103515245) 12345) 2147483648))
+                     (nz (- (* 2.0 (/ seed 2147483648.0)) 1.0))
+                     (wind (+ wind (* 0.02 (- nz wind))))
+                     (mix (* eng (+ engine (* wind 1.6 speed speed)))))
+                ;; the event sounds, each skipped while silent (plain let*: in
+                ;; Sigil a call inside let-values is not a tail call, and the
+                ;; loop overflowed the stack)
+                (let* ((wa (> wh QUIET))
+                       (wh (if wa (* wh whoosh-decay) 0.0))
+                       (wph (if wa (+ wph dt) wph))
+                       (wlp (if wa (+ wlp (* (+ 0.03 (* 0.25 (sin (min 3.14159 (* wph 5.0))))) (- nz wlp))) wlp))
+                       (wbp (if wa (+ wbp (* 0.5 (- wlp wbp))) wbp))
+                       (mix (if wa (+ mix (* 1.65 wh (- wlp wbp))) mix))
+                       (sa (> sc QUIET))
+                       (sc (if sa (* sc scrape-decay) 0.0))
+                       (shp (if sa (+ shp (* 0.3 (- nz shp))) shp))
+                       (seed (if sa (modulo (+ (* seed 1103515245) 12345) 2147483648) seed))
+                       (mix (if sa
+                                (+ mix (* 0.5 sc (if (> (- (* 2.0 (/ seed 2147483648.0)) 1.0) 0.2) 1.0 0.25) (- nz shp)))
+                                mix))
+                       (ca (> co QUIET))
+                       (co (if ca (* co corrupt-decay) 0.0))
+                       (cph (if ca (+ cph (* 220.0 (max 0.2 co) dt)) cph))
+                       (mix (if ca (+ mix (* 0.4 co (+ (- (* 2.0 (frac cph)) 1.0) (* 0.5 nz)))) mix))
+                       (out (/ mix (+ 1.0 (abs mix)))))
+                  (bytevector-ieee-single-set! buf (* 8 i) out 'little)
+                  (bytevector-ieee-single-set! buf (+ (* 8 i) 4) out 'little)
+                  (loop (+ i 1) speed throttle f p1 p2 p3 lp wind wh wph wlp wbp sc shp co cph seed)))
+              (begin
+                (vector-set! s SPEED speed) (vector-set! s THROTTLE throttle)
+                (vector-set! s FREQ f) (vector-set! s P1 p1) (vector-set! s P2 p2) (vector-set! s P3 p3)
+                (vector-set! s LP lp) (vector-set! s WIND wind)
+                (vector-set! s WHOOSH wh) (vector-set! s WPH wph) (vector-set! s WLP wlp) (vector-set! s WBP wbp)
+                (vector-set! s SCRAPE sc) (vector-set! s SHP shp)
+                (vector-set! s CORRUPT co) (vector-set! s CPH cph)
+                (vector-set! s SEED seed))))))
+
+    ;; The one-shot sounds as cues (sigil-audio 0.13's cue path: mixed in
+    ;; the AudioWorklet on the web, in the device callback natively, so a
+    ;; main-thread stall cannot delay or starve them): (kind seconds).
+    (define CUE-KINDS '((boost 0.7) (pad 0.7) (wall 0.4) (ice 0.7) (corrupt 1.5)))
+
+    ;; A cue's stereo float32 PCM at rate: the event alone, the engine silent.
+    ;; The wall is rendered at full strength; the game plays it at a volume
+    ;; for the impact.
+    (define (render-cue kind rate)
+      (let* ((s (make-synth rate))
+             (secs (cadr (assq kind CUE-KINDS)))
+             (n (exact (floor (* secs rate))))
+             (buf (make-bytevector (* 8 n) 0)))
+        (synth-engine-gain! s 0.0)
+        (synth-event! s kind 250.0)
+        (synth-fill! s buf n)
+        buf))))

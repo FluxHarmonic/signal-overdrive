@@ -490,6 +490,76 @@
         (let ((q (tuning-query tuning)))
           (text! (if (string=? q "") "?(DEFAULTS)" (string-append "?" q)) x (+ y 12 (* rows 8)) "#FF59D9"))))
 
+    ;; --- the F3 instruments -----------------------------------------------------------------
+
+    ;; ins: (history index max hitches audio-mode audio-readout). Two lines
+    ;; over the FPS line and the last 180 frames as bars (bottom right):
+    ;; each bar a frame's interval, 1 px per 2 ms; the dim line is 16.7 ms,
+    ;; the red line 33 ms (a frame over it is a hitch, logged).
+    (define (instruments! ins)
+      (let* ((hist (car ins)) (idx (cadr ins)) (mx (caddr ins)) (hitches (cadddr ins))
+             (mode (list-ref ins 4)) (a (list-ref ins 5))
+             (r1 (lambda (v) (number->string (/ (round (* 10.0 v)) 10.0))))
+             (n (vector-length hist))
+             (x0 (- VIEW-W 8 n)) (base (- VIEW-H 8)))
+        ;; short, to clear the graph: MAX frame ms, HITCH count, AUD the
+        ;; sound's ms a frame; the stream mode (SAB worklet-sab, MSG
+        ;; worklet-msg, SPROC scriptprocessor, NATIVE), the queue, UR the
+        ;; underruns heard, CUE the cue mode and its lag in frames
+        (text! (string-append "MAX " (r1 mx) "MS HITCH " (number->string hitches) " AUD " (r1 (list-ref ins 6)) "MS F4 LOG")
+               8 (- VIEW-H 34) "#4DF2D9")
+        (text! (string-append (if (car a)
+                                  (cond ((string=? mode "worklet-sab") "SAB") ((string=? mode "worklet-msg") "MSG")
+                                        ((string=? mode "scriptprocessor") "SPROC") (else (string-upcase mode)))
+                                  "OFF")
+                              " " (number->string (cadr a)) "MS UR " (number->string (caddr a))
+                              " CUE " (string-upcase (let ((m (list-ref a 4))) (if (symbol? m) (symbol->string m) "?")))
+                              " " (number->string (list-ref a 5)))
+               8 (- VIEW-H 24) "#4DF2D9")
+        (graph! hist idx x0 base)))
+
+    ;; The graph as a texture, a ring of columns: each frame rewrites the
+    ;; one column for the newest frame and uploads once, and the texture is
+    ;; drawn in two pieces (oldest first). A rect per bar would have been
+    ;; 180 drawing calls a frame, and on the web each call allocates: the
+    ;; graph would have inflated the DRAW time it is there to show.
+    (define GRAPH-H 34)
+    (define *graph* #f) (define *graph-px* #f) (define *graph-last* -1) (define *graph-new* #f)
+    (define (graph-column! k ms)
+      (let ((h (max 1 (min GRAPH-H (exact (round (/ ms 2.0)))))))
+        (let loop ((y 0))
+          (when (< y GRAPH-H)
+            (let* ((o (* 4 (+ (* y 180) k)))
+                   (from-bottom (- GRAPH-H 1 y))
+                   (c (cond ((< from-bottom h) (if (> ms 33.0) '(255 89 89) '(77 242 217)))
+                            ((= from-bottom 16) '(204 51 64))
+                            ((= from-bottom 8) '(61 64 82))
+                            (else '(13 10 26)))))
+              (bytevector-u8-set! *graph-px* o (car c))
+              (bytevector-u8-set! *graph-px* (+ o 1) (cadr c))
+              (bytevector-u8-set! *graph-px* (+ o 2) (caddr c))
+              (bytevector-u8-set! *graph-px* (+ o 3) 255))
+            (loop (+ y 1))))))
+    (define (graph! hist idx x0 base)
+      (unless *graph*
+        (set! *graph-px* (make-bytevector (* 180 GRAPH-H 4) 0))
+        (let loop ((k 0)) (when (< k 180) (graph-column! k (vector-ref hist k)) (loop (+ k 1))))
+        ;; the texture is made this frame (that is its upload); updates start next frame
+        (set! *graph* (make-texture-from-pixels 180 GRAPH-H *graph-px* 'nearest))
+        (set! *graph-new* #t))
+      ;; the newest frame is the one before idx
+      (let ((k (modulo (- idx 1) 180)))
+        (unless (= k *graph-last*)
+          (graph-column! k (vector-ref hist k))
+          (set! *graph-last* k)
+          (if *graph-new* (set! *graph-new* #f) (update-texture *graph* *graph-px*))))
+      (let* ((s (fit-scale *fit*)) (y (hy (- base GRAPH-H))))
+        (set-color 1.0 1.0 1.0)
+        ;; oldest (idx..179) first, then 0..idx-1
+        (draw-texture-region *graph* (hx x0) y (* (- 180 idx) s) (* GRAPH-H s) idx 0 (- 180 idx) GRAPH-H)
+        (when (> idx 0)
+          (draw-texture-region *graph* (hx (+ x0 (- 180 idx))) y (* idx s) (* GRAPH-H s) 0 0 idx GRAPH-H))))
+
     ;; --- a frame ------------------------------------------------------------------------------
 
     (define (look! tuning)
@@ -545,4 +615,6 @@
               (text! (string-append (number->string (exact (round (car fps)))) " FPS  "
                                     (r1 (cadr fps)) " MS  SIM " (r1 (caddr fps)) "  DRAW " (r1 (cadddr fps)))
                      8 (- VIEW-H 14) "#4DF2D9"))))
+        (let ((ins (cdr (assq 'instruments info))))
+          (when ins (instruments! ins)))
         (end-frame)))))

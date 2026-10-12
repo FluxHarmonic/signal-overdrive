@@ -20,6 +20,7 @@
           (sigil string)
           (sigil list)
           (sigil time)
+          (sigil gc)
           (substratic time clock)
           (substratic input keys)
           (substratic input sticks)
@@ -157,6 +158,16 @@
             ((string=? kv "start") (set! *start-now* #t))
             ((string=? kv "fps") (set! *fps-on* #t))
             ((string=? kv "mute") (audio-mute!))
+            ((string=? kv "hitchlog") (set! *hitch-print* #t))
+            ((string=? kv "cues=0") (audio-cues! #f))
+            ((and (> (string-length kv) 11) (string=? (substring kv 0 11) "audiodepth="))
+             (let ((v (string->number (substring kv 11 (string-length kv)))))
+               (when v (audio-depth! v) (say "audio depth " (number->string v) " ms"))))
+            ;; the page's own report: the audio bridge's stream mode as the
+            ;; page infers it (an AudioWorklet and cross-origin isolation:
+            ;; worklet-sab; a worklet only: worklet-msg; else scriptprocessor)
+            ((and (> (string-length kv) 11) (string=? (substring kv 0 11) "audio-mode="))
+             (set! *audio-mode* (substring kv 11 (string-length kv))))
             ;; ?track=oval|loop as well as ?track=0|1
             ((and (> (string-length kv) 6) (string=? (substring kv 0 6) "track=")
                   (memq (string->symbol (substring kv 6 (string-length kv))) TRACKS))
@@ -326,7 +337,15 @@
         (string-append "probe heading " (r3 (machine-heading m))
                        " speed " (number->string (exact (round (machine-speed m))))
                        " boost " (r3 (machine-boost m))
-                       " integrity " (r3 (machine-integrity m)))))
+                       " integrity " (r3 (machine-integrity m))
+                       ;; the sound, for the audio check
+                       (let ((a (audio-readout)))
+                         (string-append " audio " (if (car a) "on" "off") " depth " (number->string (cadr a))
+                                        " underruns " (number->string (caddr a)) " underruns-all " (number->string (cadddr a))
+                                        " mode " *audio-mode*
+                                        " cues " (let ((m (list-ref a 4))) (if (symbol? m) (symbol->string m) "?"))
+                                        " cue-lag " (number->string (list-ref a 5)) " cue-plays " (number->string (list-ref a 7))
+                                        " hitches " (number->string *hitch-count*) " audio-ms " (r3 *audio-ms*))))))
 
     ;; The knob table as markdown, for the README (native --knobs).
     (define (core-knobs-markdown)
@@ -347,11 +366,60 @@
     (define *sim-ms* 0.0)        ; the race's steps this frame, CPU
     (define *draw-ms* 0.0)       ; building and submitting the frame, CPU
     (define (ms-since t0) (/ (* 1000.0 (- (current-jiffy) t0)) (jiffies-per-second)))
+
+    ;; The frame-time instruments (F3): the last 180 frames' intervals, and
+    ;; the hitch log, every frame over 33 ms with its SIM and DRAW and the
+    ;; collections run since the frame before. F4 prints the log;
+    ;; ?hitchlog prints each hitch as it happens.
+    (define HISTORY 180)
+    (define *history* (make-vector HISTORY 16.7))
+    (define *hist-i* 0)
+    (define *hitches* '())        ; newest first, at most 60
+    (define *hitch-count* 0)
+    (define *hitch-print* #f)
+    (define *audio-mode* (cond-expand (wasm "unknown") (else "native")))
+    (define *gc-last* #f)
+    ;; (collections . ns spent collecting) since start, from gc-stats: the
+    ;; generational backend's minor and major counters, else the plain count
+    (define (gc-now)
+      (let* ((st (gc-stats))
+             (g (lambda (k) (let ((e (assq k st))) (if (and e (number? (cdr e))) (cdr e) 0)))))
+        (if (assq 'minor-collections st)
+            (cons (+ (g 'minor-collections) (g 'major-collections)) (+ (g 'minor-time-ns) (g 'major-time-ns)))
+            (cons (g 'collections) 0))))
+    (define *audio-ms* 0.0)
+    (define (frame-record! ms sim draw)
+      (vector-set! *history* *hist-i* ms)
+      (set! *hist-i* (modulo (+ *hist-i* 1) HISTORY))
+      (when (or *fps-on* *hitch-print*)
+        (let* ((gcs (gc-now))
+               (dgc (if *gc-last* (- (car gcs) (car *gc-last*)) 0))
+               (dgc-ms (if *gc-last* (/ (- (cdr gcs) (cdr *gc-last*)) 1000000.0) 0.0)))
+          (set! *gc-last* gcs)
+          (when (> ms 33.0)
+            (set! *hitch-count* (+ *hitch-count* 1))
+            (let ((h (list (race-tick *race*) ms sim draw dgc dgc-ms *audio-ms*)))
+              (set! *hitches* (let take ((l (cons h *hitches*)) (k 0))
+                                (if (or (null? l) (>= k 60)) '() (cons (car l) (take (cdr l) (+ k 1))))))
+              (when *hitch-print* (say "hitch " (hitch-text h)))))))
+      (when (pressed? 'f4)
+        (say "hitch log: " (number->string *hitch-count*) " hitches; newest first")
+        (for-each (lambda (h) (say "  " (hitch-text h))) *hitches*)))
+    (define (r1 v) (number->string (/ (round (* 10.0 v)) 10.0)))
+    (define (hitch-text h)
+      (string-append "tick " (number->string (car h)) " frame " (r1 (cadr h)) " ms sim " (r1 (caddr h))
+                     " draw " (r1 (cadddr h)) " audio " (r1 (list-ref h 6))
+                     " gc " (number->string (list-ref h 4)) " (" (r1 (list-ref h 5)) " ms)"))
+    (define (history-max)
+      (let loop ((i 0) (m 0.0)) (if (= i HISTORY) m (loop (+ i 1) (max m (vector-ref *history* i))))))
     (define (ease old new) (+ (* 0.9 old) (* 0.1 new)))
 
     (define (core-describe)
       (let ((m (racer-machine (race-player *race*))))
         (string-append "fps " (number->string (exact (round *fps*)))
+                       " audio-ms " (number->string (/ (round (* 10.0 *audio-ms*)) 10.0))
+                       " underruns " (number->string (caddr (audio-readout)))
+                       " hitches " (number->string *hitch-count*)
                        " sim-ms " (number->string (/ (round (* 10.0 *sim-ms*)) 10.0))
                        " draw-ms " (number->string (/ (round (* 10.0 *draw-ms*)) 10.0))
                        " phase " (symbol->string (race-phase *race*))
@@ -388,15 +456,19 @@
                           (cons 'start-line (if (eq? *platform* 'web) "PRESS ENTER OR TAP" "PRESS ENTER"))
                           (cons 'restart-line (if (eq? *platform* 'web) "ENTER OR TAP TO RUN IT AGAIN" "ENTER TO RUN IT AGAIN"))
                           (cons 'overlay *overlay*)
-                          (cons 'fps (and *fps-on* (list *fps* *frame-ms* *sim-ms* *draw-ms*))))
+                          (cons 'fps (and *fps-on* (list *fps* *frame-ms* *sim-ms* *draw-ms*)))
+                          (cons 'instruments (and *fps-on* (list *history* *hist-i* (history-max) *hitch-count*
+                                                                 *audio-mode* (audio-readout) *audio-ms*))))
                     win-w win-h integer-only)
        (set! *draw-ms* (ease *draw-ms* (ms-since t0))))
-      (let ((m (racer-machine (race-player *race*))))
+      (frame-record! (* 1000.0 dt) *sim-ms* *draw-ms*)
+      (let ((m (racer-machine (race-player *race*))) (t0 (current-jiffy)))
         (audio-frame! (if (memq (race-phase *race*) '(title countdown)) 0.0
                           (/ (machine-speed m) (handling-ref *tuning* 'top)))
                       (if (eq? (race-phase *race*) 'race) *last-throttle* 0.0)
                       (> (machine-boost m) 0.0)
-                      *frame-events*))
+                      *frame-events*)
+        (set! *audio-ms* (ease *audio-ms* (ms-since t0))))
       (set! *frame-events* '())
       (keys-end-frame! *keys*)
       (pad-end-frame! *pad*))))

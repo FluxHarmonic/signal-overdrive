@@ -62,14 +62,24 @@
       (assert-true (< 610 slow 750))
       (assert-true (< 195 fast 245))))
 
-  (test "the pitch glides: no step between one block and the next"
-    (let* ((s (settled 0.2 1.0)))
+  (test "the pitch glides: 50 ms after a speed change it is partway there, then arrives"
+    ;; settled at 0.2 (82 Hz), set to 0.9 (201 Hz). The speed glides (50 ms)
+    ;; and the pitch glides after it (50 ms): two cascaded lags cover
+    ;; 1 - 2/e = 26% of the way in 50 ms (measured 113 Hz). Without the
+    ;; pitch's own glide it would be 63%; with neither, all of it. (Counting zero
+    ;; crossings could not see an instant step: the wind's noise moved the
+    ;; counts more than the glide did. The sabotage run found it.)
+    (let* ((s (settled 0.2 1.0))
+           (from (synth-freq s)))
       (synth-set! s 0.9 1.0 #f)
-      (let* ((a (crossings (render s (quotient RATE 20))))     ; the first 50 ms
-             (b (crossings (render s (quotient RATE 20)))))
-        ;; the second 50 ms is clearly higher than the first: the pitch is
-        ;; still climbing (an instant step would make them equal)
-        (assert-true (> b (+ a 2))))))
+      (render s (quotient RATE 20))
+      (let ((mid (synth-freq s)))
+        (render s RATE)
+        (let ((to (synth-freq s)))
+          (assert-true (< 80.0 from 84.0))
+          (assert-true (< 199.0 to 203.0))
+          (let ((share (/ (- mid from) (- to from))))
+            (assert-true (< 0.15 share 0.4)))))))
 
   (test "a boost and a wall each add sound over the engine alone"
     (let* ((quiet (rms (render (settled 0.5 0.0) (quotient RATE 4))))

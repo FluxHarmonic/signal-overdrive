@@ -36,7 +36,11 @@ function handler(req, res) {
   try { if (fs.statSync(fp).isDirectory()) fp = path.join(fp, "index.html"); } catch { /* the read reports it */ }
   fs.readFile(fp, (err, buf) => {
     if (err) { res.writeHead(404); res.end(); return; }
-    res.writeHead(200, { "content-type": MIME[path.extname(fp).slice(1)] || "application/octet-stream", "cache-control": "no-cache" });
+    // cross-origin isolation (COOP + COEP; CORP on everything, all same-origin):
+    // a SharedArrayBuffer for the audio bridge, so its stream runs as worklet-sab
+    // off the main thread, not worklet-msg or scriptprocessor
+    res.writeHead(200, { "content-type": MIME[path.extname(fp).slice(1)] || "application/octet-stream", "cache-control": "no-cache",
+      "cross-origin-opener-policy": "same-origin", "cross-origin-embedder-policy": "require-corp", "cross-origin-resource-policy": "same-origin" });
     res.end(buf);
   });
 }

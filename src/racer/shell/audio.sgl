@@ -4,56 +4,112 @@
 ;;;
 ;;;   (audio-mute!)                 never open a device (?mute, --mute; every
 ;;;                                 headless check runs muted)
-;;;   (audio-start!)                open the context and the stream; on the web
-;;;                                 call it from a user gesture (autoplay
-;;;                                 policy), again on later gestures to resume
+;;;   (audio-depth! ms)             the engine stream's queue (?audiodepth=MS)
+;;;   (audio-cues! on?)             one-shots as cues (default) or in the stream (?cues=0)
+;;;   (audio-start!)                open the context and the stream, load the
+;;;                                 cues; on the web call it from a user
+;;;                                 gesture (autoplay policy), again on later
+;;;                                 gestures to resume
 ;;;   (audio-frame! speed throttle boost events)
 ;;;                                 once a frame: speed 0..1 of top, the
 ;;;                                 player's events this frame ('boost, 'pad,
-;;;                                 (wall . impact), 'corrupt)
+;;;                                 (wall . impact), 'ice, 'corrupt)
+;;;   (audio-readout)               for F3: underruns, depth, cue mode and lag
 ;;;
-;;; The synth renders at 22,050 Hz and the sink upsamples (sigil-audio
-;;; 0.13's rate:), half the work of rendering at the device's rate. About
-;;; 60 ms is kept queued: enough to ride out a slow frame, short enough that
-;;; a wall hit is heard with it.
+;;; Two paths, after David heard hitching in pass 3:
+;;;   - the engine and the wind are a continuous stream, rendered here on
+;;;     the main thread at 22,050 Hz (the sink upsamples) and kept DEPTH ms
+;;;     queued. Pass 3 kept 60 ms: any main-thread stall longer than that
+;;;     (a slow frame, a collection, a busy machine) ran the device dry and
+;;;     was heard as a hitch. The default is now 250 ms, Crash's figure.
+;;;   - the one-shots (boost, pad, wall, ICE, corrupt) are cues: rendered
+;;;     once at the device's rate when the sound starts, then mixed in the
+;;;     AudioWorklet (web) or the device callback (native) from their next
+;;;     quantum. A deep stream would make them late if they were in it; as
+;;;     cues they are immediate whatever the depth, and no main-thread stall
+;;;     can starve them.
 
 (define-library (racer shell audio)
   (import (sigil core)
           (sigil audio sink)
           (racer sound))
 
-  (export audio-mute! audio-start! audio-frame! audio-started?)
+  (export audio-mute! audio-depth! audio-cues! audio-start! audio-frame! audio-started? audio-readout)
 
   (begin
     (define RATE 22050)
-    (define DEPTH (exact (floor (* 0.06 RATE))))
     (define PUSH 1024)
     (define *muted* #f)
+    (define *depth-ms* 250)
+    (define *cues-on* #t)
     (define *ctx* #f)
     (define *stream* #f)
+    (define *cues* '())              ; ((kind . cue) ...) once loaded
+    (define *cue-plays* 0)
     (define *synth* (make-synth RATE))
     (define *buf* (make-bytevector (* 8 PUSH) 0))
 
     (define (audio-mute!) (set! *muted* #t))
+    (define (audio-depth! ms) (set! *depth-ms* (max 10 (min 2000 ms))))
+    (define (audio-cues! on?) (set! *cues-on* on?))
     (define (audio-started?) (and *stream* #t))
+    (define (depth-frames) (exact (floor (/ (* *depth-ms* RATE) 1000))))
+
+    (define (load-cues!)
+      (when (and *cues-on* *ctx* (null? *cues*))
+        (let ((rate (or (guard (e (#t #f)) (audio-context-sample-rate *ctx*)) 44100)))
+          (set! *cues*
+                (let loop ((ks CUE-KINDS) (acc '()))
+                  (if (null? ks)
+                      acc
+                      (let ((c (guard (e (#t #f)) (load-audio-cue (render-cue (caar ks) rate) channels: 2))))
+                        (loop (cdr ks) (if c (cons (cons (caar ks) c) acc) acc)))))))))
 
     (define (audio-start!)
       (unless *muted*
         (unless *ctx* (set! *ctx* (guard (e (#t #f)) (audio-context-open))))
         (when *ctx* (guard (e (#t #f)) (audio-context-resume *ctx*)))
         (unless *stream*
-          (set! *stream* (guard (e (#t #f)) (open-audio-stream channels: 2 buffer-frames: 8192 rate: RATE))))))
+          ;; the ring: the depth with room to spare, at least 8192 frames
+          (set! *stream* (guard (e (#t #f)) (open-audio-stream channels: 2
+                                                               buffer-frames: (max 8192 (* 2 (depth-frames)))
+                                                               rate: RATE))))
+        (load-cues!)))
+
+    ;; A one-shot: a cue when there is one, else into the synth's stream.
+    (define (one-shot! kind strength)
+      (let ((c (assq kind *cues*)))
+        (if c
+            (begin
+              (guard (e (#t #f))
+                (play-audio-cue (cdr c)
+                                volume: (if (eq? kind 'wall) (min 1.0 (/ (exact->inexact strength) 250.0)) 0.8)
+                                pan: 0.0))
+              (set! *cue-plays* (+ *cue-plays* 1)))
+            (synth-event! *synth* kind strength))))
 
     (define (audio-frame! speed throttle boost events)
       (synth-set! *synth* speed throttle boost)
       (for-each (lambda (e)
-                  (cond ((pair? e) (synth-event! *synth* (car e) (cdr e)))
-                        (else (synth-event! *synth* e 0))))
+                  (cond ((and (pair? e) (eq? (car e) 'wall)) (one-shot! 'wall (cdr e)))
+                        ((memq e '(boost pad ice corrupt)) (one-shot! e 0))
+                        (else #f)))
                 events)
       (when *stream*
         (let loop ()
-          (let ((n (min PUSH (audio-stream-room *stream*) (- DEPTH (audio-stream-depth *stream*)))))
+          (let ((n (min PUSH (audio-stream-room *stream*) (- (depth-frames) (audio-stream-depth *stream*)))))
             (when (> n 0)
               (synth-fill! *synth* *buf* n)
               (push-audio-samples *stream* *buf* n)
-              (loop))))))))
+              (loop))))))
+
+    ;; (started depth-ms underruns-sounding underruns cue-mode cue-lag-ms cue-count cue-plays)
+    (define (audio-readout)
+      (list (and *stream* #t)
+            *depth-ms*
+            (if *stream* (or (guard (e (#t #f)) (audio-stream-underruns-sounding *stream*)) 0) 0)
+            (if *stream* (or (guard (e (#t #f)) (audio-stream-underruns *stream*)) 0) 0)
+            (if (null? *cues*) (if *cues-on* 'none 'off) (or (guard (e (#t #f)) (audio-cue-mode)) 'unknown))
+            (or (guard (e (#t #f)) (audio-cue-lag)) 0)
+            (length *cues*)
+            *cue-plays*))))
