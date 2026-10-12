@@ -139,7 +139,7 @@ for (let attempt = 0; attempt < 3 && !ready; attempt++) {
   const before = requests.length;
   await send("Page.navigate", { url: URL_BASE ? `${URL_BASE}?${QUERY}` : `http://127.0.0.1:${PORT}/index.html?${QUERY}` });
   ready = await waitLine(/signal-overdrive: ready/, 60000);
-  const assetsServed = requests.slice(before).some((r) => r.includes("/assets/racer/"));
+  const assetsServed = requests.slice(before).some((r) => r.includes("/assets/signal/"));
   if (!ready && !assetsServed && lines.some((l) => l.includes("Failed to fetch"))) {
     console.log(`retry: attempt ${attempt + 1}: every asset fetch failed before reaching the server`);
   } else break;

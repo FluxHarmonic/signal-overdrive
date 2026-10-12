@@ -1,4 +1,4 @@
-;;; (racer shell core) - What both shells share: the race on Substratic's
+;;; (signal shell core) - What both shells share: the race on Substratic's
 ;;; fixed clock, the input it reads (keys, a gamepad, the page's touch
 ;;; schemes), the tuning and its overlay, the best lap in the store, the
 ;;; camera's lag, and the frame.
@@ -14,7 +14,7 @@
 ;;;   tuning      Tab: the overlay (Up/Down pick a knob, Left/Right set
 ;;;               it, 0 resets it); P the palette; / the dither
 
-(define-library (racer shell core)
+(define-library (signal shell core)
   (import (sigil core)
           (sigil math)
           (sigil string)
@@ -26,12 +26,12 @@
           (substratic input sticks)
           (substratic input pad)
           (substratic store kv)
-          (racer track)
-          (racer handling)
-          (racer race)
-          (racer tuning)
-          (racer scene)
-          (racer shell audio))
+          (signal track)
+          (signal handling)
+          (signal race)
+          (signal tuning)
+          (signal scene)
+          (signal shell audio))
 
   (export core-boot! core-frame! core-keys core-sticks core-pad core-param! core-touch!
           core-tap! core-race core-tuning core-describe core-probe core-knobs-markdown GAME-NAME
@@ -211,7 +211,7 @@
     (define *last-throttle* 0.0)
     (define *frame-events* '())   ; the player's events over this frame's ticks, for the sound
     (define (core-audio-start!) (audio-start!))
-    ;; One tick's controls: the player's (racer handling) input.
+    ;; One tick's controls: the player's (signal handling) input.
     (define (controls)
       (let* ((ps (stick-analog (pad-axis *pad* 'lx) 0.0 0.18))
              (overlay? *overlay*)

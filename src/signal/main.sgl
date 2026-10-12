@@ -1,11 +1,11 @@
-;;; (racer main) - The entry, and the seam between the two targets:
-;;; (racer shell web) on the web config, (racer shell native) otherwise.
+;;; (signal main) - The entry, and the seam between the two targets:
+;;; (signal shell web) on the web config, (signal shell native) otherwise.
 
-(define-library (racer main)
+(define-library (signal main)
   (import (sigil core))
   (cond-expand
-    (wasm (import (racer shell web)))
-    (else (import (racer shell native))))
+    (wasm (import (signal shell web)))
+    (else (import (signal shell native))))
 
   (export main sigil-web-dispatch-event)
 

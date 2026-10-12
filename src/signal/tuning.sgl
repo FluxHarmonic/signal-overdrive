@@ -1,18 +1,18 @@
-;;; (racer tuning) - Every knob in one table: the handling's, the race's,
+;;; (signal tuning) - Every knob in one table: the handling's, the race's,
 ;;; the camera's and the look's. The overlay (Tab) shows and edits them, the
 ;;; URL sets them (?grip=8.5&top=600), and the overlay prints the query
 ;;; string that reproduces the current values, so "grip 8.5 felt right"
 ;;; becomes a link.
 ;;;
 ;;; A tuning is an association list (key . value), the form (racer
-;;; handling) and (racer race) read; this module builds it, steps it and
+;;; handling) and (signal race) read; this module builds it, steps it and
 ;;; prints it.
 
-(define-library (racer tuning)
+(define-library (signal tuning)
   (import (sigil core)
           (sigil string)
           (sigil list)
-          (racer handling))
+          (signal handling))
 
   (export KNOBS knob-key knob-group knob-min knob-max knob-step knob-default knob-label
           tuning-defaults tuning-ref tuning-set tuning-step tuning-parse! tuning-query

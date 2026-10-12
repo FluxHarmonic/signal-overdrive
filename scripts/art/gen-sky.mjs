@@ -3,7 +3,7 @@
 //
 //   node scripts/art/gen-sky.mjs [--zoom]
 //
-// Writes assets/racer/sky.png, 1024x288: three layers of 96 rows each, far
+// Writes assets/signal/sky.png, 1024x288: three layers of 96 rows each, far
 // (rows 0-95), mid (96-191), near (192-287). Each layer's bottom row sits
 // on the horizon; transparent pixels show the layer behind or the sky's
 // gradient (drawn by the ground shader). Every layer wraps sideways
@@ -129,7 +129,7 @@ const FONT = {
 }
 
 sky.checkPalette("sky");
-sky.save(path.join(ROOT, "assets/racer/sky.png"));
+sky.save(path.join(ROOT, "assets/signal/sky.png"));
 console.log(`gen-sky: ${W}x${LH * 3}, ${sky.colourCount()} colours`);
 
 if (process.argv.includes("--zoom")) {

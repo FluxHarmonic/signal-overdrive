@@ -8,8 +8,8 @@
 
 (import (sigil test)
         (sigil math)
-        (racer track)
-        (racer handling))
+        (signal track)
+        (signal handling))
 
 (define (near? a b eps) (< (abs (- a b)) eps))
 (define DT (/ 1.0 60.0))

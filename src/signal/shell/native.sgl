@@ -1,18 +1,18 @@
-;;; (racer shell native) - The desktop: a sigil-desktop window at whole
+;;; (signal shell native) - The desktop: a sigil-desktop window at whole
 ;;; scales of the 480x270 view (x3 the first time, then remembered), the
-;;; textures read from assets/racer/ (run it from the package root).
+;;; textures read from assets/signal/ (run it from the package root).
 ;;;
 ;;;   signal-overdrive [--KNOB=VALUE ...] [--autopilot] [--start] [--quit-after S]
 ;;;                    [--shots DIR --shot-times "T1,T2,..."] [--knobs]
 ;;;
-;;; Every knob of (racer tuning) can be set from the command line exactly
+;;; Every knob of (signal tuning) can be set from the command line exactly
 ;;; as from the URL: --grip=8.5 --top=600. --autopilot drives the player on
 ;;; the racing line (for checks); --start skips the title; --quit-after
 ;;; quits after S seconds of wall time. --shots writes DIR/shot-T.png when
 ;;; the race clock passes each T seconds (so an autopilot run shoots the same
 ;;; places every time), then quits. --knobs prints the knob table as markdown.
 
-(define-library (racer shell native)
+(define-library (signal shell native)
   (import (sigil core)
           (sigil io)
           (sigil process)
@@ -27,10 +27,10 @@
           (substratic store kv)
           (substratic image capture)
           (sigil fs)
-          (racer race)
-          (racer scene)
-          (racer track)
-          (racer shell core))
+          (signal race)
+          (signal scene)
+          (signal track)
+          (signal shell core))
 
   (export native-main)
 
@@ -38,7 +38,7 @@
     (define KEYS '(left right up down a d w s c space return shift tab p slash r 0 escape f3 f4))
 
     (define (texture name)
-      (let* ((img (load-image (string-append "assets/racer/" name)))
+      (let* ((img (load-image (string-append "assets/signal/" name)))
              (tex (load-texture img)))
         (image-free! img)
         tex))

@@ -4,7 +4,7 @@ The question was whether this feels good enough to become a game. David is the o
 
 ## The handling
 
-What it is: an arcade model on a fixed 1/60 s tick, all in one pure module (`src/racer/handling.sgl`) with 33 tests (67 across the five test files). Every behaviour the brief named is sabotage-checked: break it in the code and a test goes red. 18 plants in all, across handling, the race and the sound; all red on the final code.
+What it is: an arcade model on a fixed 1/60 s tick, all in one pure module (`src/signal/handling.sgl`) with 33 tests (67 across the five test files). Every behaviour the brief named is sabotage-checked: break it in the code and a test goes red. 18 plants in all, across handling, the race and the sound; all red on the final code.
 
 - The throttle eases into top speed (560 texels/s, about 504 km/h), and the cap is on total speed, so a slide counts against it.
 - Steering ramps in over about 0.13 s and returns in about 0.08 s, so a key steers like a stick. It turns slower at top speed (62% of full rate).
@@ -77,7 +77,7 @@ Collections are not the cause: in the web build's hitch log, 148 of 155 hitches 
 
 1. **Measure the frame rate on David's machines first.** "Turning snaps to angles" measured as the frame rate: headless Chrome ran 8.8 fps, and each frame ran several ticks. It's 17 to 20 fps there now and 87 natively on llvmpipe. On a real GPU it should be far higher, but F3 is there to confirm, on the desktop and on the phone.
 2. **Ask Substratic to allow sigil-graphics 0.14.** Its `<0.14` cap holds this at 0.13's 1 KiB uniform blocks. Nothing here hit that limit, but a richer post pass will.
-3. **Lift `(racer mode7 camera)` and `(racer mode7 render)` into substratic-mode7** when a second game wants them. They already know nothing about racing.
+3. **Lift `(signal mode7 camera)` and `(signal mode7 render)` into substratic-mode7** when a second game wants them. They already know nothing about racing.
 4. **A track format,** so a track isn't control points in a JS file, and reusable edge tiles to keep the atlas small.
 5. **Per-machine stats** (the brick heavier in bumps, the needle faster on straights) and mass in collisions; rivals with more personality than "follow the line and block".
 6. **A ghost that persists** across sessions and is shareable. Today it's positions in memory, which is right while rivals can bump you.

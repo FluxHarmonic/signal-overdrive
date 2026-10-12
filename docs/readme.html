@@ -19,7 +19,7 @@ through the Flux Harmonic palette and Bayer dither pass.</p>
 <h2>Play it</h2>
 <ul>
 <li>https://10.11.0.2:8855/ (self-signed certificate) or http://10.11.0.2:8856/ on wg0</li>
-<li>Native: <code>scripts/dev sigil build</code>, then <code>scripts/dev ./build/dev/bin/mode7-racer</code> from this directory</li>
+<li>Native: <code>scripts/dev sigil build</code>, then <code>scripts/dev ./build/dev/bin/signal-overdrive</code> from this directory</li>
 </ul>
 <h2>What is in it</h2>
 <ul>
@@ -156,7 +156,7 @@ it on the grid.</p>
 the stream instead of as cues, the old way), <code>?hitchlog</code> (every frame over 33 ms to the console),
 <code>?touch=zones|drag|stick</code>, <code>?autopilot</code> (the player drives the racing line),
 <code>?start</code> (skip the title), <code>?fps</code> (the F3 readout from the start).</p>
-<p>The knobs, from <code>mode7-racer --knobs</code> (units are world texels, seconds and radians; a texel is about 25 cm, so 560 texels/s is 504 km/h):</p>
+<p>The knobs, from <code>signal-overdrive --knobs</code> (units are world texels, seconds and radians; a texel is about 25 cm, so 560 texels/s is 504 km/h):</p>
 <table>
 <thead>
 <tr>
@@ -515,17 +515,17 @@ the stream instead of as cues, the old way), <code>?hitchlog</code> (every frame
 </table>
 <h2>How it's built</h2>
 <ul>
-<li><code>src/racer/mode7/</code> the Mode 7 camera and renderer (nothing racing-specific;
+<li><code>src/signal/mode7/</code> the Mode 7 camera and renderer (nothing racing-specific;
 the seed of a later substratic-mode7 package)</li>
-<li><code>src/racer/handling.sgl</code> one machine's handling, pure, with tests</li>
-<li><code>src/racer/track.sgl</code> where a point is on a track; <code>track/oval-data.sgl</code> and <code>track/loop-data.sgl</code> are generated</li>
-<li><code>src/racer/race.sgl</code> the grid, laps, rivals, the finish and corrupt cargo</li>
-<li><code>src/racer/scene.sgl</code> the frame: the Mode 7 pass, the dither pass, the HUD</li>
-<li><code>src/racer/lut.sgl</code> the dither pass by lookup texture (<code>scripts/art/gen-lut.mjs</code>); <code>dither.sgl</code> is Phantom Burn's exact pass</li>
-<li><code>src/racer/sound.sgl</code> the synthesized sound; <code>shell/audio.sgl</code> pushes it to the device</li>
+<li><code>src/signal/handling.sgl</code> one machine's handling, pure, with tests</li>
+<li><code>src/signal/track.sgl</code> where a point is on a track; <code>track/oval-data.sgl</code> and <code>track/loop-data.sgl</code> are generated</li>
+<li><code>src/signal/race.sgl</code> the grid, laps, rivals, the finish and corrupt cargo</li>
+<li><code>src/signal/scene.sgl</code> the frame: the Mode 7 pass, the dither pass, the HUD</li>
+<li><code>src/signal/lut.sgl</code> the dither pass by lookup texture (<code>scripts/art/gen-lut.mjs</code>); <code>dither.sgl</code> is Phantom Burn's exact pass</li>
+<li><code>src/signal/sound.sgl</code> the synthesized sound; <code>shell/audio.sgl</code> pushes it to the device</li>
 <li><code>scripts/touch-check.mjs</code> drives the touch schemes in a headless phone viewport;
 <code>scripts/shot-web.mjs</code> takes web screenshots; <code>scripts/host</code> serves the build on wg0</li>
-<li><code>scripts/art/</code> the generators for every image in <code>assets/racer/</code> (node, no dependencies)</li>
+<li><code>scripts/art/</code> the generators for every image in <code>assets/signal/</code> (node, no dependencies)</li>
 </ul>
 <p>Tests: <code>scripts/dev sigil test --sgl test/test-handling.sgl</code> (and
 <code>test-track</code>, <code>test-camera</code>, <code>test-race</code>, <code>test-sound</code>).</p>

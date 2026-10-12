@@ -1,10 +1,10 @@
-;;; (racer lut) - The post pass by lookup: the same ordered dither as
-;;; (racer dither)'s POST-FRAGMENT (Bayer 4x4, the threshold added to all
+;;; (signal lut) - The post pass by lookup: the same ordered dither as
+;;; (signal dither)'s POST-FRAGMENT (Bayer 4x4, the threshold added to all
 ;;; three channels, clamped), then the nearest palette colour read from a
 ;;; precomputed texture instead of found by comparing against every palette
 ;;; colour: one texelFetch per pixel instead of up to 60 distance tests.
 ;;;
-;;; The lookups are scripts/art/gen-lut.mjs's (assets/racer/lut-*.png): a
+;;; The lookups are scripts/art/gen-lut.mjs's (assets/signal/lut-*.png): a
 ;;; channel value v in 0..255 falls in bin floor(v / 4); bin (r, g, b) is
 ;;; the texel (r + 64 * (b mod 8), g + 64 * floor(b / 8)) of a 512x512
 ;;; texture, holding the palette colour nearest the bin's centre (4b + 2). That is an
@@ -16,7 +16,7 @@
 ;;; frames a second with the exact pass and 18.7 without it; on a phone's
 ;;; GPU the 51-colour loop per pixel is the heaviest work in the frame.
 
-(define-library (racer lut)
+(define-library (signal lut)
   (import (sigil core))
   (export LUT-FRAGMENT)
   (begin

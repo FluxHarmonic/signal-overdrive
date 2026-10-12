@@ -1,9 +1,9 @@
-;;; (racer mode7 camera) - The Mode 7 camera: a pinhole over a flat ground,
+;;; (signal mode7 camera) - The Mode 7 camera: a pinhole over a flat ground,
 ;;; and the projection both ways.
 ;;;
 ;;; The ground is z = 0; world x y are texels with y down the map, z is up.
 ;;; The camera sits at (x, y, height) facing heading (0 up the map,
-;;; clockwise, as (racer handling)), pitched down by `pitch` radians. The
+;;; clockwise, as (signal handling)), pitched down by `pitch` radians. The
 ;;; focal length f in pixels comes from the horizontal field of view, and
 ;;; `horizon` is the screen row where the ground meets the sky: the optical
 ;;; centre's row follows as cy = horizon + f * tan(pitch), so the horizon
@@ -13,15 +13,15 @@
 ;;;   ray = fwd * f + right * (px - w/2) + up * (cy - py)
 ;;; with fwd = (forward * cos p, -sin p), up = (forward * sin p, cos p),
 ;;; right = (right, 0). It meets the ground when ray.z < 0, at
-;;; t = height / -ray.z. The fragment shader in (racer mode7 render) does
+;;; t = height / -ray.z. The fragment shader in (signal mode7 render) does
 ;;; exactly this per pixel; camera-unproject is the same on the CPU (the
 ;;; tests check the two directions agree), and camera-project places the
 ;;; sprites.
 ;;;
-;;; This module and (racer mode7 render) are written to lift out as a
+;;; This module and (signal mode7 render) are written to lift out as a
 ;;; package later (substratic-mode7): they know nothing of the racer.
 
-(define-library (racer mode7 camera)
+(define-library (signal mode7 camera)
   (import (sigil core)
           (sigil struct)
           (sigil math))

@@ -3,7 +3,7 @@
 
 (import (sigil test)
         (sigil math)
-        (racer sound))
+        (signal sound))
 
 (define RATE 22050)
 

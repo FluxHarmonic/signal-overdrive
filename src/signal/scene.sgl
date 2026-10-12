@@ -1,4 +1,4 @@
-;;; (racer scene) - A frame: the Mode 7 pass (sky, ground, the machines as
+;;; (signal scene) - A frame: the Mode 7 pass (sky, ground, the machines as
 ;;; sprites, far to near) into the 480x270 view, the palette-and-dither post
 ;;; pass, the view on the window at its fit, then the HUD and the tuning
 ;;; overlay at the window's own pixel scale.
@@ -15,7 +15,7 @@
 ;;; body is 64 px wide, a rival's 58 (PLAYER-BODY, RIVAL-BODY): a machine is
 ;;; drawn sprite-size texels wide whichever cell it comes from.
 
-(define-library (racer scene)
+(define-library (signal scene)
   (import (sigil core)
           (sigil math)
           (sigil string)
@@ -24,14 +24,14 @@
           (substratic view fit)
           (substratic view present)
           (substratic text font)
-          (racer mode7 camera)
-          (racer mode7 render)
-          (racer dither)
-          (racer lut)
-          (racer track)
-          (racer handling)
-          (racer race)
-          (racer tuning))
+          (signal mode7 camera)
+          (signal mode7 render)
+          (signal dither)
+          (signal lut)
+          (signal track)
+          (signal handling)
+          (signal race)
+          (signal tuning))
 
   (export VIEW-W VIEW-H scene-init! scene-ready? scene-frame! scene-camera
           scene-world-ms speed-kmh lap-clock)
@@ -71,7 +71,7 @@
     ;; tracks is ((name atlas map avg) ...), one entry per track.
     (define *tracks* '())
     (define *shown* #f)          ; the track whose textures the ground has
-    ;; luts: ((embers . texture) (crash . texture)), (racer lut)'s lookups.
+    ;; luts: ((embers . texture) (crash . texture)), (signal lut)'s lookups.
     (define *lut-pipe* #f)
     (define *luts* '())
     (define (scene-init! tracks sky sheet luts)

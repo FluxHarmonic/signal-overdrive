@@ -39,18 +39,18 @@ stop_port $PORT_HTTP
 
 WEB_REL="${WEB:-build/web}"
 case "$WEB_REL" in /*) WEB="$WEB_REL" ;; *) WEB="$REPO/$WEB_REL" ;; esac
-[ -f "$WEB/mode7-racer.wasm" ] || { echo "host: $WEB_REL/mode7-racer.wasm missing; build --config web first"; exit 1; }
-[ -f "$WEB/assets/racer/track-atlas.png" ] || { echo "host: $WEB_REL/assets/racer missing"; exit 1; }
+[ -f "$WEB/signal-overdrive.wasm" ] || { echo "host: $WEB_REL/signal-overdrive.wasm missing; build --config web first"; exit 1; }
+[ -f "$WEB/assets/signal/track-atlas.png" ] || { echo "host: $WEB_REL/assets/signal missing"; exit 1; }
 rm -rf site
 mkdir -p site
-cp -r "$WEB/index.html" "$WEB/mode7-racer.wasm" "$WEB/assets" site/
+cp -r "$WEB/index.html" "$WEB/signal-overdrive.wasm" "$WEB/assets" site/
 for f in "$WEB"/sigil-wasm-bridges.*; do [ -f "$f" ] && cp "$f" site/; done
 cp "$REPO/README.md" site/README.md 2>/dev/null || true
 [ -f "$REPO/docs/readme.html" ] && cp "$REPO/docs/readme.html" site/readme.html
 [ -d "$REPO/docs/shots" ] && cp -r "$REPO/docs/shots" site/shots
 cp "$REPO/scripts/serve.mjs" serve.mjs
 printf 'signal-overdrive %s\ncommit %s\nhosted %s\n' \
-  "$(sha256sum site/mode7-racer.wasm | cut -c1-12)" \
+  "$(sha256sum site/signal-overdrive.wasm | cut -c1-12)" \
   "$(git -C "$REPO" rev-parse --short HEAD; git -C "$REPO" diff --quiet HEAD || echo -dirty)" \
   "$(date -u +%FT%TZ)" | tr -s '\n' > site/version.txt
 # the stamp the build put in the page, for comparing against version.txt

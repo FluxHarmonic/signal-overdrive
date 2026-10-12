@@ -3,10 +3,10 @@
 
 (import (sigil test)
         (sigil math)
-        (racer track)
-        (racer handling)
-        (racer race)
-        (racer tuning)
+        (signal track)
+        (signal handling)
+        (signal race)
+        (signal tuning)
         (sigil list))
 
 (define T (tuning-defaults))

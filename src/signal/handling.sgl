@@ -1,9 +1,9 @@
-;;; (racer handling) - One machine's handling, F-Zero style: throttle,
+;;; (signal handling) - One machine's handling, F-Zero style: throttle,
 ;;; top speed, steering, grip and slide, a boost, walls that bounce you and
 ;;; cost integrity, and the repair strip.
 ;;;
 ;;; Pure: (machine-step params track m input dt) is the next machine. The
-;;; track is (racer track)'s; a machine carries its own probe hint. Units
+;;; track is (signal track)'s; a machine carries its own probe hint. Units
 ;;; are world texels and seconds; angles are radians.
 ;;;
 ;;; Heading 0 faces up the map (y down, so forward is (sin h, -cos h)) and
@@ -40,11 +40,11 @@
 ;;;     refused while one runs, when boosts are not allowed (the first lap)
 ;;;     or when it would spend the last of the integrity.
 
-(define-library (racer handling)
+(define-library (signal handling)
   (import (sigil core)
           (sigil struct)
           (sigil math)
-          (racer track))
+          (signal track))
 
   (export handling handling? default-handling handling-ref handling-set handling-keys
           machine machine? make-machine
@@ -59,7 +59,7 @@
   (begin
     (define INTEGRITY-MAX 100.0)
 
-    ;; The knobs, as an association list (key . value): (racer tuning) shows
+    ;; The knobs, as an association list (key . value): (signal tuning) shows
     ;; and edits them, the URL sets them, and a test builds its own.
     (define default-handling
       '((accel . 300.0)          ; texels/s^2 from a standstill

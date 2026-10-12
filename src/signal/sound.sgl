@@ -1,4 +1,4 @@
-;;; (racer sound) - The placeholder sound, synthesized: an engine whose
+;;; (signal sound) - The placeholder sound, synthesized: an engine whose
 ;;; pitch follows the speed, wind that rises with it, a boost whoosh and a
 ;;; wall scrape. Pure: a synth is a vector of state, and engine-fill!
 ;;; renders n stereo float32 frames into a bytevector, so the tests can
@@ -29,7 +29,7 @@
 ;;;   corrupt a falling sawtooth and noise: the cargo going
 ;;; then a soft clip (x / (1 + |x|)), so nothing ever leaves -1..1.
 
-(define-library (racer sound)
+(define-library (signal sound)
   (import (sigil core)
           (sigil math))
 

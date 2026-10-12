@@ -13,7 +13,7 @@ through the Flux Harmonic palette and Bayer dither pass.
 ## Play it
 
 - https://10.11.0.2:8855/ (self-signed certificate) or http://10.11.0.2:8856/ on wg0
-- Native: `scripts/dev sigil build`, then `scripts/dev ./build/dev/bin/mode7-racer` from this directory
+- Native: `scripts/dev sigil build`, then `scripts/dev ./build/dev/bin/signal-overdrive` from this directory
 
 ## What is in it
 
@@ -105,7 +105,7 @@ the stream instead of as cues, the old way), `?hitchlog` (every frame over 33 ms
 `?touch=zones|drag|stick`, `?autopilot` (the player drives the racing line),
 `?start` (skip the title), `?fps` (the F3 readout from the start).
 
-The knobs, from `mode7-racer --knobs` (units are world texels, seconds and radians; a texel is about 25 cm, so 560 texels/s is 504 km/h):
+The knobs, from `signal-overdrive --knobs` (units are world texels, seconds and radians; a texel is about 25 cm, so 560 texels/s is 504 km/h):
 
 | Knob (URL parameter) | Group | Default | Range | Step |
 |---|---|---|---|---|
@@ -161,17 +161,17 @@ The knobs, from `mode7-racer --knobs` (units are world texels, seconds and radia
 
 ## How it's built
 
-- `src/racer/mode7/` the Mode 7 camera and renderer (nothing racing-specific;
+- `src/signal/mode7/` the Mode 7 camera and renderer (nothing racing-specific;
   the seed of a later substratic-mode7 package)
-- `src/racer/handling.sgl` one machine's handling, pure, with tests
-- `src/racer/track.sgl` where a point is on a track; `track/oval-data.sgl` and `track/loop-data.sgl` are generated
-- `src/racer/race.sgl` the grid, laps, rivals, the finish and corrupt cargo
-- `src/racer/scene.sgl` the frame: the Mode 7 pass, the dither pass, the HUD
-- `src/racer/lut.sgl` the dither pass by lookup texture (`scripts/art/gen-lut.mjs`); `dither.sgl` is Phantom Burn's exact pass
-- `src/racer/sound.sgl` the synthesized sound; `shell/audio.sgl` pushes it to the device
+- `src/signal/handling.sgl` one machine's handling, pure, with tests
+- `src/signal/track.sgl` where a point is on a track; `track/oval-data.sgl` and `track/loop-data.sgl` are generated
+- `src/signal/race.sgl` the grid, laps, rivals, the finish and corrupt cargo
+- `src/signal/scene.sgl` the frame: the Mode 7 pass, the dither pass, the HUD
+- `src/signal/lut.sgl` the dither pass by lookup texture (`scripts/art/gen-lut.mjs`); `dither.sgl` is Phantom Burn's exact pass
+- `src/signal/sound.sgl` the synthesized sound; `shell/audio.sgl` pushes it to the device
 - `scripts/touch-check.mjs` drives the touch schemes in a headless phone viewport;
   `scripts/shot-web.mjs` takes web screenshots; `scripts/host` serves the build on wg0
-- `scripts/art/` the generators for every image in `assets/racer/` (node, no dependencies)
+- `scripts/art/` the generators for every image in `assets/signal/` (node, no dependencies)
 
 Tests: `scripts/dev sigil test --sgl test/test-handling.sgl` (and
 `test-track`, `test-camera`, `test-race`, `test-sound`).

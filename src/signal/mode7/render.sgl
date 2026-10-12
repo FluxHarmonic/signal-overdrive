@@ -1,4 +1,4 @@
-;;; (racer mode7 render) - The Mode 7 ground plane and the sky, as one
+;;; (signal mode7 render) - The Mode 7 ground plane and the sky, as one
 ;;; full-screen fragment shader, and sprites as quads, on sigil-graphics'
 ;;; 3D path.
 ;;;
@@ -6,7 +6,7 @@
 ;;; row), an index map (one texel per tile, R + 256 * G the tile's index in
 ;;; the atlas), and the atlas's averages (one texel per tile, the tile's
 ;;; mean colour). Per pixel the shader unprojects onto the ground exactly as
-;;; (racer mode7 camera)'s camera-unproject does, finds the tile and the
+;;; (signal mode7 camera)'s camera-unproject does, finds the tile and the
 ;;; texel by texelFetch (point sampling, no filter), fades toward the tile's
 ;;; average where one pixel covers several texels (the far ground's
 ;;; shimmer), and toward the fog colour with distance. Beyond the map's edge
@@ -25,16 +25,16 @@
 ;;;   (mode7-set-world! atlas map avg tile per-row map-tiles)
 ;;;   (mode7-set-sky! sky layer-h rate-far rate-mid rate-near)
 ;;;   (mode7-set-look! alist)                fog, colours, the far fade
-;;;   (mode7-draw-ground! cam)               a (racer mode7 camera) cam
+;;;   (mode7-draw-ground! cam)               a (signal mode7 camera) cam
 ;;;   (mode7-draw-sprite! sheet x y w h u0 v0 u1 v1 fog)
 ;;;
-;;; Nothing here knows about racing: this and (racer mode7 camera) are the
+;;; Nothing here knows about racing: this and (signal mode7 camera) are the
 ;;; seed of a substratic-mode7 package.
 
-(define-library (racer mode7 render)
+(define-library (signal mode7 render)
   (import (sigil core)
           (sigil graphics)
-          (racer mode7 camera))
+          (signal mode7 camera))
 
   (export mode7-init! mode7-set-world! mode7-set-sky! mode7-set-look! mode7-draw-ground!
           mode7-draw-sprite! mode7-ready? mode7-set-far! mode7-sprite-style!)

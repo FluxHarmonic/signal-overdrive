@@ -1,11 +1,11 @@
-;;; (racer race) - A race on the loop: the grid, the countdown, laps and lap
+;;; (signal race) - A race on the loop: the grid, the countdown, laps and lap
 ;;; times, the rivals and their racing line, bumps between machines, and the
 ;;; two ends: the finish, and the cargo corrupted.
 ;;;
 ;;; Pure and deterministic, on Substratic's fixed 1/60 s tick: (race-step
 ;;; tuning r controls) is the next race. controls is the player's
-;;; (racer handling) input plus a start press. tuning is the association
-;;; list (racer tuning) keeps: the handling's knobs and the race's own
+;;; (signal handling) input plus a start press. tuning is the association
+;;; list (signal tuning) keeps: the handling's knobs and the race's own
 ;;; (laps, rivals, rival-pace, boost-lap).
 ;;;
 ;;; Phases: title (the grid, waiting for a start), countdown (3 s, no
@@ -18,13 +18,13 @@
 ;;; starts as the field crosses the line. Running the wrong way and back
 ;;; over the line counts nothing.
 
-(define-library (racer race)
+(define-library (signal race)
   (import (sigil core)
           (sigil struct)
           (sigil math)
           (sigil list)
-          (racer track)
-          (racer handling))
+          (signal track)
+          (signal handling))
 
   (export race race? race-new race-step race-start race-track
           race-phase race-tick race-player race-rivals race-clock race-countdown race-events race-start-tick

@@ -1,4 +1,4 @@
-;;; (racer shell web) - The browser: one frame per requestAnimationFrame
+;;; (signal shell web) - The browser: one frame per requestAnimationFrame
 ;;; dispatch, the page's events in between.
 ;;;
 ;;; The page forwards every URL parameter as ("param", "KEY=VALUE"); a
@@ -9,7 +9,7 @@
 ;;; The textures are fetched at boot; the game draws from the first frame
 ;;; after all five have arrived, and then prints "signal-overdrive: ready".
 
-(define-library (racer shell web)
+(define-library (signal shell web)
   (import (sigil core)
           (sigil string)
           (sigil graphics)
@@ -17,9 +17,9 @@
           (sigil browser gles3)
           (substratic input events)
           (substratic input pad)
-          (racer scene)
-          (racer track)
-          (racer shell core))
+          (signal scene)
+          (signal track)
+          (signal shell core))
 
   (export web-main web-dispatch)
 
@@ -73,7 +73,7 @@
       (core-boot! 'web)
       (gles3-resize-to-display)
       (gfx-setup)
-      (set! *fetches* (map (lambda (n) (cons n (gles3-fetch-image (string-append "assets/racer/" n)))) NAMES))
+      (set! *fetches* (map (lambda (n) (cons n (gles3-fetch-image (string-append "assets/signal/" n)))) NAMES))
       (gles3-start-loop "signal-overdrive-tick")
       0)
 

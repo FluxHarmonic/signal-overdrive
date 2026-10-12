@@ -2,7 +2,7 @@
 
 (import (sigil test)
         (sigil math)
-        (racer track))
+        (signal track))
 
 (define (near? a b eps) (< (abs (- a b)) eps))
 (define T (loop-track))

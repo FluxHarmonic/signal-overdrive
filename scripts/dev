@@ -3,7 +3,7 @@
 # Run a sigil command inside the guix environment the native build needs.
 #   scripts/dev sigil build
 #   scripts/dev sigil test
-#   scripts/dev ./build/dev/bin/mode7-racer
+#   scripts/dev ./build/dev/bin/signal-overdrive
 # The runtime libraries (libGL, libEGL, libwayland-client, libX11, libpulse,
 # ...) are loaded by name at run time and sigil-desktop's resolver looks in
 # $GUIX_ENVIRONMENT/lib, so no LD_LIBRARY_PATH is set here.

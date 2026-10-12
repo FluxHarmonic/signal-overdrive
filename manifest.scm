@@ -1,4 +1,4 @@
-;; mode7-racer - development environment (copied from Phantom Burn, itself from Harkfell and Crash The Stack) for both builds.
+;; signal-overdrive - development environment (copied from Phantom Burn, itself from Harkfell and Crash The Stack) for both builds.
 ;; Use with scripts/dev, which runs a command as
 ;;   guix shell -m manifest.scm -- sh -c 'CPATH=$GUIX_ENVIRONMENT/include LIBRARY_PATH=$GUIX_ENVIRONMENT/lib <cmd>'
 ;; and is the same form .kiln/ci.sgv uses (sigil-graphics' precedent).

@@ -5,14 +5,14 @@
 //   node scripts/art/gen-lut.mjs [OUT-DIR]
 //
 // Writes OUT-DIR/lut-embers.png and OUT-DIR/lut-crash.png (default
-// assets/racer), each 512x512: the colour bin (r, g, b), each 0..63 (a
+// assets/signal), each 512x512: the colour bin (r, g, b), each 0..63 (a
 // channel value v in 0..255 is bin floor(v / 4)), is the texel
 // (r + 64 * (b mod 8), g + 64 * floor(b / 8)). A bin's colour is the palette
 // colour nearest the bin's centre (v = 4 * bin + 2; a dithered value in the
 // bin spans 4 * bin + 0.25 to + 3.75: measured by the pass-2 review, 2.84%
 // of pixels differ from the exact pass against 3.10% for + 1.5) by squared RGB
-// distance, the first in palette order on a tie, which is (racer dither)'s
-// own rule. The palettes and their order are read from src/racer/dither.sgl,
+// distance, the first in palette order on a tie, which is (signal dither)'s
+// own rule. The palettes and their order are read from src/signal/dither.sgl,
 // so the lookups cannot drift from the exact pass.
 //
 // The lookup is an approximation of the exact pass: a pixel whose
@@ -25,8 +25,8 @@ import path from "node:path";
 import { writePNG } from "./lib.mjs";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
-const OUT = process.argv[2] ? path.resolve(process.argv[2]) : path.join(ROOT, "assets/racer");
-const src = fs.readFileSync(path.join(ROOT, "src/racer/dither.sgl"), "utf8");
+const OUT = process.argv[2] ? path.resolve(process.argv[2]) : path.join(ROOT, "assets/signal");
+const src = fs.readFileSync(path.join(ROOT, "src/signal/dither.sgl"), "utf8");
 
 function palette(name) {
   const m = src.match(new RegExp(`\\(${name}\\s+((?:"#[0-9A-Fa-f]{6}"\\s*)+)\\)`));

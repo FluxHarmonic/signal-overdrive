@@ -1,4 +1,4 @@
-;;; (racer dither) - Copied verbatim from Phantom Burn's (phantom dither) at
+;;; (signal dither) - Copied verbatim from Phantom Burn's (phantom dither) at
 ;;; 07a765d (src/phantom/dither.sgl), only the library name changed, so the
 ;;; racer's post pass and its generated art share Phantom's palette and dither
 ;;; bit for bit. Phantom's header follows.
@@ -37,7 +37,7 @@
 ;;; reading the 3D target by texelFetch (one texel per pixel, so the
 ;;; sampler's filter never applies).
 
-(define-library (racer dither)
+(define-library (signal dither)
   (import (sigil core))
 
   (export PALETTES palette-names palette-colors palette-uniform

@@ -3,7 +3,7 @@
 //
 //   node scripts/art/gen-machines.mjs [--zoom]
 //
-// Writes assets/racer/machines.png, 2048x640, in rows 80 px tall (scene.sgl's
+// Writes assets/signal/machines.png, 2048x640, in rows 80 px tall (scene.sgl's
 // CELL-H) with the ground point 48 px down (ANCHOR-Y), centred across:
 //   row 0    80 px cells (PLAYER-CELL-W): the player (the falcon) from
 //            behind, in four runs of five leans (hard left, left, centre,
@@ -296,8 +296,8 @@ for (let y = 0; y < CH; y++) for (let x = 0; x < PW; x++) {
   }
 }
 sheet.checkPalette("machines");
-fs.mkdirSync(path.join(ROOT, "assets/racer"), { recursive: true });
-sheet.save(path.join(ROOT, "assets/racer/machines.png"));
+fs.mkdirSync(path.join(ROOT, "assets/signal"), { recursive: true });
+sheet.save(path.join(ROOT, "assets/signal/machines.png"));
 console.log(`gen-machines: ${sheet.w}x${sheet.h}, ${sheet.colourCount()} colours`);
 
 if (process.argv.includes("--zoom")) {

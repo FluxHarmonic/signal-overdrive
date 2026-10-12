@@ -1,8 +1,8 @@
-;;; (racer track) - Where a point is on the track: how far along it, how far
+;;; (signal track) - Where a point is on the track: how far along it, how far
 ;;; from the centreline, and whether it is on a boost pad or the repair strip.
 ;;;
 ;;; A track is its centreline sampled at even arc lengths (the generator's
-;;; samples, (racer track oval-data) and (racer track loop-data); TRACKS
+;;; samples, (signal track oval-data) and (signal track loop-data); TRACKS
 ;;; names them, track-named builds one): per sample x y, the unit tangent,
 ;;; the half-width and the racing line. A probe finds the nearest sample
 ;;; (near a hint when one is given, so a probe per machine per tick costs a
@@ -17,12 +17,12 @@
 ;;; World coordinates are texels, y down (the map image's own). Pure: no
 ;;; state but the track itself.
 
-(define-library (racer track)
+(define-library (signal track)
   (import (sigil core)
           (sigil struct)
           (sigil math)
-          (racer track oval-data)
-          (racer track loop-data))
+          (signal track oval-data)
+          (signal track loop-data))
 
   (export track track? track-n track-length track-step track-samples track-cumulative
           track-boost track-repair track-ice

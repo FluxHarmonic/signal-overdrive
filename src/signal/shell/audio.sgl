@@ -1,4 +1,4 @@
-;;; (racer shell audio) - The placeholder sound on a device: (racer sound)'s
+;;; (signal shell audio) - The placeholder sound on a device: (signal sound)'s
 ;;; synth pushed through (sigil audio sink), the same source natively
 ;;; (miniaudio) and on the web (the WebAudio bridge).
 ;;;
@@ -29,10 +29,10 @@
 ;;;     cues they are immediate whatever the depth, and no main-thread stall
 ;;;     can starve them.
 
-(define-library (racer shell audio)
+(define-library (signal shell audio)
   (import (sigil core)
           (sigil audio sink)
-          (racer sound))
+          (signal sound))
 
   (export audio-mute! audio-depth! audio-cues! audio-start! audio-frame! audio-started? audio-readout)
 

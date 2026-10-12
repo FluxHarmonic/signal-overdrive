@@ -2,7 +2,7 @@
 // Bayer 4x4 ordered dither, and an RGBA canvas with a few drawing helpers.
 //
 // Every generator draws in palette colours and dithers between them with
-// the same 4x4 Bayer matrix the post pass uses (src/racer/dither.sgl), so a
+// the same 4x4 Bayer matrix the post pass uses (src/signal/dither.sgl), so a
 // generated asset passes through the post pass unchanged: at spread 8 a
 // palette colour plus at most +-4 snaps back to itself (every pair of
 // palette colours is further apart than that).
@@ -42,7 +42,7 @@ export function writePNG(file, w, h, rgba) {
 // ---- the palette ---------------------------------------------------------------
 
 // Phantom Burn's `embers` (51), in `convert -unique-colors` order: the order
-// src/racer/dither.sgl lists and so the post pass's tie order.
+// src/signal/dither.sgl lists and so the post pass's tie order.
 export const EMBERS = [
   "#0D0A1A", "#241104", "#261804", "#3D1D07", "#3B1F1A", "#3D281A", "#17122E", "#21173D",
   "#2A2D3A", "#402807", "#74391A", "#7A4D1A", "#4A5A2B", "#2E1D48", "#2E1C4D", "#3D1A40",
