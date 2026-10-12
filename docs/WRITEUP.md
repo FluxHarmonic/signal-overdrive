@@ -4,7 +4,7 @@ The question was whether this feels good enough to become a game. David is the o
 
 ## The handling
 
-What it is: an arcade model on a fixed 1/60 s tick, all in one pure module (`src/racer/handling.sgl`) with 31 tests. Every behaviour the brief named is sabotage-checked: break it in the code and a test goes red, 17 plants in all.
+What it is: an arcade model on a fixed 1/60 s tick, all in one pure module (`src/racer/handling.sgl`) with 33 tests (67 across the five test files). Every behaviour the brief named is sabotage-checked: break it in the code and a test goes red. 18 plants in all, across handling, the race and the sound; all red on the final code.
 
 - The throttle eases into top speed (560 texels/s, about 504 km/h), and the cap is on total speed, so a slide counts against it.
 - Steering ramps in over about 0.13 s and returns in about 0.08 s, so a key steers like a stick. It turns slower at top speed (62% of full rate).
@@ -44,6 +44,34 @@ All three schemes work in a headless phone viewport (844x390, touch emulation): 
 - **stick** (a floating stick on the left, the right thumb boosts and drifts) is analogue too. Every right-thumb landing also boosts, so drifting costs a boost; that's probably wrong.
 
 What I couldn't judge without a real phone: thumb comfort, whether 60 px of drag is the right full lock, where the BOOST button should sit in landscape, iOS Safari's multi-touch and gesture quirks, the frame rate on a phone GPU, and how much latency the touch path adds.
+
+## The sound, and why it hitched
+
+David heard hitching in pass 3. Measured headless (`scripts/audio-check.mjs`, Chrome on SwiftShader, sound on but muted), 15 s of the race:
+
+| | underrun frames at 1x | at 4x CPU throttle |
+|---|---|---|
+| pass 3: 60 ms queue, one-shots in the stream, not isolated (`worklet-msg`) | 77,531 to 109,889 | 332,057 to 463,363 |
+| 250 ms queue, one-shots as cues, not isolated | 0 | 7,907 to 150,184 |
+| 250 ms queue, cues, isolated (`worklet-sab`) | 0 | 0 to 11,558 |
+
+The ranges are across runs on a busy machine (load 13 to 19). At 48 kHz, 100,000 frames is about 2 s of silence in 15.
+
+The cause was the queue: the synth renders on the main thread, and 60 ms of queued sound ran out in any frame longer than that. Under SwiftShader, frames ran 33 to 100 ms, with stalls up to 1.8 s.
+
+The fix has three parts:
+- The engine stream keeps 250 ms (`?audiodepth=` to try others).
+- The one-shots are cues, mixed in the AudioWorklet (web) or the device callback (native), so they're immediate however deep the stream is.
+- The host sends COOP/COEP, so the page is cross-origin isolated and the bridge runs its stream with shared memory (`worklet-sab`).
+
+The synth also got cheaper, from 13.1 to 3.6 ms a frame in the bytecode build: its state now lives in loop variables, not a vector read and written every sample. In the web build it costs about 5 µs a sample, about 1.8 ms a frame at 60 fps.
+
+Collections are not the cause: in the web build's hitch log, 148 of 155 hitches had none. The 7 that had one spent about 18 ms each in it, which a 250 ms queue rides out.
+
+**The longer-term option: render off the main thread.** The engine could run inside the AudioWorklet itself (web) or the device callback (native). Then no main-thread stall could ever starve it, and the queue could be short again, which matters for music that reacts to play.
+- The cost on the web is the synth in JavaScript or a second small wasm module in the worklet, with its parameters (speed, throttle, boost) posted from the game. That's a few hundred lines and a second build target, and the synth would no longer share code with the game's Sigil.
+- Natively it means a callback into Sigil from the audio thread, which Sigil's runtime does not offer today.
+- Phantom Burn's reactive music has the same shape. Doing this once, in sigil-wasm-audio as a "parameter-driven generator" node, would serve both games.
 
 ## What I'd change before a real build
 

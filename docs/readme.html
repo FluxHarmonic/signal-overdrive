@@ -100,8 +100,13 @@ site under <code>/shots/</code>.</p>
 <td></td>
 </tr>
 <tr>
-<td>FPS and CPU readout</td>
+<td>FPS, frame graph, sound readout</td>
 <td>F3</td>
+<td></td>
+</tr>
+<tr>
+<td>Print the hitch log (console)</td>
+<td>F4</td>
 <td></td>
 </tr>
 </tbody>
@@ -118,6 +123,27 @@ and drifts while held.</li>
 down to brake); a thumb landing on the right half boosts, and drifts
 while held.</li>
 </ul>
+<h2>Reading F3 while you drive</h2>
+<p>F3 (or <code>?fps</code>) shows three lines and a graph at the bottom:</p>
+<ul>
+<li><code>60 FPS 16.7 MS SIM 1.2 DRAW 2.4</code>: frames a second, the frame's interval,
+and the CPU's share in ms: SIM is the race, DRAW is building the frame.
+A slow frame with small SIM and DRAW is the GPU's.</li>
+<li><code>MAX 34MS HITCH 3 AUD 1.8MS F4 LOG</code>: the longest frame in the last three
+seconds, how many frames have run over 33 ms (a hitch), and the sound's
+own ms a frame. F4 prints every hitch with its SIM, DRAW, AUDIO and
+garbage collections to the browser console.</li>
+<li><code>SAB 250MS UR 0 CUE WORKLET 0</code>: the audio stream's mode (SAB is the best:
+off the main thread with shared memory; MSG works; SPROC is on the main
+thread, the worst), the queue, UR the underruns (times the device ran
+dry: each is a hitch you hear), and the cue mode with its lag.</li>
+<li>The graph: one bar a frame for the last 180 frames; the dim line is
+16.7 ms (60 fps), the red line 33 ms; red bars are hitches.</li>
+</ul>
+<p>If the sound hitches, the numbers that say why: UR rising means the
+queue ran dry (a deeper <code>?audiodepth=</code> will help); red bars with a large
+SIM, DRAW or AUD point at the game; red bars with small ones point at the
+GPU or the machine being busy.</p>
 <h2>Tuning</h2>
 <p>Tab opens the overlay: Up/Down pick a knob, Left/Right change it (hold to
 repeat), 0 resets it. The overlay's last line is the query string for the
@@ -126,6 +152,8 @@ current values, and every knob takes a URL parameter of the same name, so
 <code>--grip=8.5</code>. Knobs that change the race (track, laps, rivals, rival pace) restart
 it on the grid.</p>
 <p>Other parameters: <code>?track=oval|loop</code> (the same as <code>track=0|1</code>), <code>?mute</code>,
+<code>?audiodepth=MS</code> (the engine sound's queue, default 250), <code>?cues=0</code> (the one-shot sounds in
+the stream instead of as cues, the old way), <code>?hitchlog</code> (every frame over 33 ms to the console),
 <code>?touch=zones|drag|stick</code>, <code>?autopilot</code> (the player drives the racing line),
 <code>?start</code> (skip the title), <code>?fps</code> (the F3 readout from the start).</p>
 <p>The knobs, from <code>mode7-racer --knobs</code> (units are world texels, seconds and radians; a texel is about 25 cm, so 560 texels/s is 504 km/h):</p>

@@ -52,7 +52,8 @@ site under `/shots/`.
 | Restart | R | Back |
 | Tuning overlay | Tab | |
 | Palette, dither | P, / | |
-| FPS and CPU readout | F3 | |
+| FPS, frame graph, sound readout | F3 | |
+| Print the hitch log (console) | F4 | |
 
 **On a phone** the machine accelerates by itself. Three schemes, picked with
 the SCHEME button (top left) or `?touch=zones|drag|stick`:
@@ -66,6 +67,29 @@ the SCHEME button (top left) or `?touch=zones|drag|stick`:
   down to brake); a thumb landing on the right half boosts, and drifts
   while held.
 
+## Reading F3 while you drive
+
+F3 (or `?fps`) shows three lines and a graph at the bottom:
+
+- `60 FPS 16.7 MS SIM 1.2 DRAW 2.4`: frames a second, the frame's interval,
+  and the CPU's share in ms: SIM is the race, DRAW is building the frame.
+  A slow frame with small SIM and DRAW is the GPU's.
+- `MAX 34MS HITCH 3 AUD 1.8MS F4 LOG`: the longest frame in the last three
+  seconds, how many frames have run over 33 ms (a hitch), and the sound's
+  own ms a frame. F4 prints every hitch with its SIM, DRAW, AUDIO and
+  garbage collections to the browser console.
+- `SAB 250MS UR 0 CUE WORKLET 0`: the audio stream's mode (SAB is the best:
+  off the main thread with shared memory; MSG works; SPROC is on the main
+  thread, the worst), the queue, UR the underruns (times the device ran
+  dry: each is a hitch you hear), and the cue mode with its lag.
+- The graph: one bar a frame for the last 180 frames; the dim line is
+  16.7 ms (60 fps), the red line 33 ms; red bars are hitches.
+
+If the sound hitches, the numbers that say why: UR rising means the
+queue ran dry (a deeper `?audiodepth=` will help); red bars with a large
+SIM, DRAW or AUD point at the game; red bars with small ones point at the
+GPU or the machine being busy.
+
 ## Tuning
 
 Tab opens the overlay: Up/Down pick a knob, Left/Right change it (hold to
@@ -76,6 +100,8 @@ current values, and every knob takes a URL parameter of the same name, so
 it on the grid.
 
 Other parameters: `?track=oval|loop` (the same as `track=0|1`), `?mute`,
+`?audiodepth=MS` (the engine sound's queue, default 250), `?cues=0` (the one-shot sounds in
+the stream instead of as cues, the old way), `?hitchlog` (every frame over 33 ms to the console),
 `?touch=zones|drag|stick`, `?autopilot` (the player drives the racing line),
 `?start` (skip the title), `?fps` (the F3 readout from the start).
 
