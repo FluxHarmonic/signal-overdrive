@@ -91,8 +91,13 @@
                       (let ((i (let find ((k 0)) (cond ((>= k (string-length s)) #f) ((char=? (string-ref s k) #\,) k) (else (find (+ k 1)))))))
                         (if i (split (substring s (+ i 1) (string-length s)) (cons (substring s 0 i) acc))
                             (reverse (cons s acc))))))
-             (num (lambda (k) (or (and (> (length parts) k) (string->number (list-ref parts k))) 0.0))))
-        (set! *touch* (list (num 0) (num 1) (num 2) (> (num 3) 0.5) (> (num 4) 0.5)))))
+             (num (lambda (k) (or (and (> (length parts) k) (string->number (list-ref parts k))) 0.0)))
+             (boost (> (num 3) 0.5)))
+        ;; a boost that goes on is kept for the next tick even if it goes
+        ;; off again first (a tap's on and off can both land between ticks)
+        (when (and boost (not (cadddr *touch*))) (set! *touch-boost-pending* #t))
+        (set! *touch* (list (num 0) (num 1) (num 2) boost (> (num 4) 0.5)))))
+    (define *touch-boost-pending* #f)
 
     ;; A tap on the page (a start on the title and end screens).
     (define (core-tap!) (set! *tapped* #t))
@@ -125,11 +130,14 @@
                          (if (pad-held? *pad* 'b) 1.0 0.0)
                          (trigger 'lt)
                          (caddr *touch*)))
+             (pending *touch-boost-pending*)
              (boost-now (or (held? 'space) (pad-held? *pad* 'x) (cadddr *touch*)))
-             ;; a press is the first tick it is held
-             (boost (and boost-now (not *boost-latch*)))
+             ;; a press is the first tick it is held, or a touch boost that
+             ;; went on since the last tick
+             (boost (or (and boost-now (not *boost-latch*)) pending))
              (drift (or (held? 'shift 'c) (pad-held? *pad* 'lb) (pad-held? *pad* 'rb) (list-ref *touch* 4))))
         (set! *boost-latch* boost-now)
+        (set! *touch-boost-pending* #f)
         (if *autopilot*
             (let ((m (racer-machine (race-player *race*))))
               (ai-input (loop-track) m 0.0 #t))

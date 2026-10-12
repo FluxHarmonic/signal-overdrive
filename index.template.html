@@ -1,0 +1,191 @@
+<!doctype html>
+<!--
+  Signal Overdrive's page: Substratic's template (web/index.template.html in
+  substratic 0.3.0) with the title, no Substratic touch sticks, and the
+  racer's own touch schemes below. It forwards every URL parameter to the
+  game, so ?grip=8.5&top=600 sets those knobs.
+
+  Touch schemes (?touch=zones|drag|stick, or the SCHEME button on a phone).
+  Every scheme accelerates on its own; each sends the whole touch state as
+  ("touch", "steer,throttle,brake,boost,drift") when it changes, and
+  ("tap", "") when a finger lands (a start on the title and end screens).
+    zones   a thumb on the left half steers left, on the right half right;
+            both thumbs down brakes; the BOOST button boosts
+    drag    one finger anywhere steers by how far it has moved sideways
+            from where it landed (60 CSS px is full lock); a second finger
+            boosts as it lands, and drifts while held
+    stick   a floating stick under the left thumb (sideways steers, down
+            brakes); the right half boosts as a thumb lands and drifts
+            while held
+
+  __TITLE__ and __VERSION__ are stamped by package.sgl's build step.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#000000">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="substratic-version" content="__VERSION__">
+  <title>__TITLE__</title>
+  <link rel="icon" href="data:,">
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; overflow: hidden;
+                 overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
+    #stage { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh;
+             display: block; touch-action: none; user-select: none;
+             -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+    #status { position: fixed; left: 8px; bottom: 8px; color: #aab; font: 13px ui-monospace, monospace; }
+    #status:empty, #status [data-sigil-booting] { display: none; }
+    .so-btn { position: fixed; z-index: 4; display: none; border-radius: 10px; touch-action: none;
+              border: 2px solid rgba(204,230,255,.45); background: rgba(13,10,26,.55); color: rgba(204,230,255,.9);
+              font: bold 14px ui-monospace, monospace; -webkit-user-select: none; user-select: none; padding: 0 12px; }
+    .so-btn.down { background: rgba(255,89,217,.45); }
+    body.so-touch .so-btn { display: block; }
+    #so-boost { right: 16px; top: 64px; height: 56px; min-width: 88px; }
+    #so-scheme { left: 16px; top: 64px; height: 36px; font-size: 12px; }
+    .so-ring, .so-knob { position: fixed; border-radius: 50%; pointer-events: none; display: none; z-index: 3; box-sizing: border-box; }
+    .so-ring { width: 120px; height: 120px; margin: -60px 0 0 -60px; border: 2px solid rgba(204,230,255,.35); }
+    .so-knob { width: 48px; height: 48px; margin: -24px 0 0 -24px; background: rgba(204,230,255,.4); }
+    .so-zone { position: fixed; top: 0; bottom: 0; width: 50%; display: none; z-index: 1; pointer-events: none; }
+    .so-zone.on { display: block; background: rgba(77,242,217,.08); }
+  </style>
+</head>
+<body>
+  <canvas id="stage" tabindex="0"></canvas>
+  <div id="status"></div>
+  <div class="so-zone" id="so-zl" style="left:0"></div>
+  <div class="so-zone" id="so-zr" style="right:0"></div>
+  <div class="so-ring" id="so-ring"></div><div class="so-knob" id="so-knob"></div>
+  <button class="so-btn" id="so-boost">BOOST</button>
+  <button class="so-btn" id="so-scheme">ZONES</button>
+  <script>
+  window.SUBSTRATIC = {
+    canvas: "#stage",
+    sticks: [],                 // the racer's own touch schemes, below
+    buttons: [],
+    playtest: false,
+    versionUrl: null,
+    fullscreen: true,
+    gamepad: true,
+    webglCheck: true
+  };
+  </script>
+  <script src="assets/substratic/substratic.js"></script>
+  <script>
+  (function () {
+    "use strict";
+    var SCHEMES = ["zones", "drag", "stick"];
+    var params = new URLSearchParams(location.search);
+    var scheme = SCHEMES.indexOf(params.get("touch")) >= 0 ? params.get("touch") : "zones";
+    if (params.has("touch")) document.body.classList.add("so-touch");
+    var app = null, pending = null, last = "";
+    function send(type, payload) {
+      if (app) app.dispatch(type, payload); else pending = [type, payload];
+    }
+    document.addEventListener("sigil-web-app-ready", function (e) {
+      app = e.detail; if (pending) app.dispatch(pending[0], pending[1]);
+      app.dispatch("param", "touch-scheme=" + scheme);
+    }, { once: true });
+    if (globalThis.SigilWebApp && globalThis.SigilWebApp.started) app = globalThis.SigilWebApp;
+
+    var touches = {};            // id -> {x0, y0, x, y, t0}
+    var boostBtn = false, boostPulse = false;
+    var el = function (id) { return document.getElementById(id); };
+    var ring = el("so-ring"), knob = el("so-knob");
+
+    function state() {
+      var steer = 0, throttle = 1, brake = 0, boost = boostBtn || boostPulse, drift = false;
+      var ids = Object.keys(touches).sort(function (a, b) { return touches[a].t0 - touches[b].t0; });
+      var half = window.innerWidth / 2;
+      if (scheme === "zones") {
+        var l = false, r = false;
+        ids.forEach(function (id) { if (touches[id].x < half) l = true; else r = true; });
+        if (l && !r) steer = -1; else if (r && !l) steer = 1; else if (l && r) brake = 1;
+        el("so-zl").classList.toggle("on", l); el("so-zr").classList.toggle("on", r);
+      } else if (scheme === "drag") {
+        if (ids.length) {
+          var t = touches[ids[0]];
+          steer = Math.max(-1, Math.min(1, (t.x - t.x0) / 60));
+          if (ids.length > 1) drift = true;
+        }
+      } else {
+        var stick = null, right = false;
+        ids.forEach(function (id) { var t = touches[id]; if (t.x0 < half && !stick) stick = t; else if (t.x0 >= half) right = true; });
+        ring.style.display = knob.style.display = stick ? "block" : "none";
+        if (stick) {
+          var dx = (stick.x - stick.x0) / 60, dy = (stick.y - stick.y0) / 60, m = Math.hypot(dx, dy);
+          if (m > 1) { dx /= m; dy /= m; }
+          steer = Math.abs(dx) < 0.12 ? 0 : dx;
+          brake = dy > 0.5 ? Math.min(1, (dy - 0.5) * 2) : 0;
+          ring.style.left = stick.x0 + "px"; ring.style.top = stick.y0 + "px";
+          knob.style.left = (stick.x0 + dx * 60) + "px"; knob.style.top = (stick.y0 + dy * 60) + "px";
+        }
+        drift = right;
+      }
+      return [steer.toFixed(2), throttle, brake.toFixed(2), boost ? 1 : 0, drift ? 1 : 0].join(",");
+    }
+    function update() {
+      var s = state();
+      if (s !== last) { last = s; send("touch", s); }
+      boostPulse = false;
+    }
+    function idle() { touches = {}; boostBtn = false; last = ""; send("touch", "0,0,0,0,0");
+      el("so-zl").classList.remove("on"); el("so-zr").classList.remove("on"); ring.style.display = knob.style.display = "none"; }
+
+    var canvas = el("stage");
+    canvas.addEventListener("touchstart", function (e) {
+      document.body.classList.add("so-touch");
+      var half = window.innerWidth / 2;
+      for (var i = 0; i < e.changedTouches.length; i++) {
+        var t = e.changedTouches[i];
+        var n = Object.keys(touches).length;
+        touches[t.identifier] = { x0: t.clientX, y0: t.clientY, x: t.clientX, y: t.clientY, t0: performance.now() + i };
+        // a boost as a finger lands: drag's second finger, stick's right thumb
+        if ((scheme === "drag" && n >= 1) || (scheme === "stick" && t.clientX >= half)) boostPulse = true;
+      }
+      send("tap", "");
+      // the pulse must reach the game as its own message, then clear
+      update(); if (last.split(",")[3] === "1") { last = ""; update(); }
+      e.preventDefault();
+    }, { passive: false });
+    canvas.addEventListener("touchmove", function (e) {
+      for (var i = 0; i < e.changedTouches.length; i++) {
+        var t = e.changedTouches[i], k = touches[t.identifier];
+        if (k) { k.x = t.clientX; k.y = t.clientY; }
+      }
+      update(); e.preventDefault();
+    }, { passive: false });
+    function end(e) {
+      for (var i = 0; i < e.changedTouches.length; i++) delete touches[e.changedTouches[i].identifier];
+      if (Object.keys(touches).length === 0 && !boostBtn) idle(); else update();
+    }
+    canvas.addEventListener("touchend", end);
+    canvas.addEventListener("touchcancel", end);
+    window.addEventListener("blur", idle);
+
+    var b = el("so-boost");
+    b.addEventListener("pointerdown", function (e) { e.preventDefault(); e.stopPropagation(); boostBtn = true; b.classList.add("down"); update(); });
+    ["pointerup", "pointercancel", "pointerleave"].forEach(function (n) {
+      b.addEventListener(n, function (e) { e.preventDefault(); boostBtn = false; b.classList.remove("down"); update(); });
+    });
+    var sb = el("so-scheme");
+    sb.textContent = scheme.toUpperCase();
+    sb.addEventListener("pointerdown", function (e) {
+      e.preventDefault(); e.stopPropagation();
+      scheme = SCHEMES[(SCHEMES.indexOf(scheme) + 1) % SCHEMES.length];
+      sb.textContent = scheme.toUpperCase(); idle();
+      send("param", "touch-scheme=" + scheme);
+    });
+    ["touchstart", "touchmove", "touchend"].forEach(function (n) {
+      [b, sb].forEach(function (x) { x.addEventListener(n, function (e) { e.stopPropagation(); }, { passive: true }); });
+    });
+    // for the headless checks: the scheme in force and the last state sent
+    window.SignalOverdriveTouch = { scheme: function () { return scheme; }, last: function () { return last; } };
+  })();
+  </script>
+  <!--sigil:app-->
+</body>
+</html>

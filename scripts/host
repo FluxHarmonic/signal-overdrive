@@ -1,0 +1,72 @@
+#!/bin/sh
+# scripts/host         snapshot build/web into $HOSTDIR/site and (re)start the
+#                      servers: https on 8855 and http on 8856, wg0 only.
+# scripts/host --stop  stop the servers this script started.
+#
+# Copied from Phantom Burn's scripts/host (07a765d) with the racer's names
+# and ports. HOSTDIR defaults to ~/Projects/Code/sigil/signal-overdrive-hosted
+# (outside the repo, so a rebuild does not change what is served until this
+# runs again). The site also carries the README (README.md and readme.html,
+# when docs/readme.html exists) and docs/shots/. $HOSTDIR/site/version.txt
+# names the wasm's hash and the commit it was built from.
+set -eu
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+HOSTDIR="${HOSTDIR:-$HOME/Projects/Code/sigil/signal-overdrive-hosted}"
+PORT_TLS="${PORT_TLS:-8855}"
+PORT_HTTP="${PORT_HTTP:-8856}"
+mkdir -p "$HOSTDIR"
+cd "$HOSTDIR"
+HERE="$(pwd)"
+
+live_pid() {   # the PID in host-PORT.pid if it is our node serve.mjs, else nothing
+  f="host-$1.pid"; [ -f "$f" ] || return 0
+  pid="$(cat "$f")"
+  exe="$(readlink "/proc/$pid/exe" 2>/dev/null || true)"
+  cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || true)"
+  [ "$(basename "${exe% (deleted)}")" = node ] || return 0
+  [ "$cwd" = "$HERE" ] || return 0
+  tr '\0' ' ' < "/proc/$pid/cmdline" | grep -q "serve.mjs site $1" || return 0
+  echo "$pid"
+}
+stop_port() {
+  pid="$(live_pid "$1")"
+  if [ -n "$pid" ]; then kill "$pid" && echo "host: stopped pid $pid (port $1)"; fi
+  rm -f "host-$1.pid"
+}
+stop_port $PORT_TLS
+stop_port $PORT_HTTP
+[ "${1:-}" = "--stop" ] && exit 0
+
+WEB_REL="${WEB:-build/web}"
+case "$WEB_REL" in /*) WEB="$WEB_REL" ;; *) WEB="$REPO/$WEB_REL" ;; esac
+[ -f "$WEB/mode7-racer.wasm" ] || { echo "host: $WEB_REL/mode7-racer.wasm missing; build --config web first"; exit 1; }
+[ -f "$WEB/assets/racer/track-atlas.png" ] || { echo "host: $WEB_REL/assets/racer missing"; exit 1; }
+rm -rf site
+mkdir -p site
+cp -r "$WEB/index.html" "$WEB/mode7-racer.wasm" "$WEB/assets" site/
+for f in "$WEB"/sigil-wasm-bridges.*; do [ -f "$f" ] && cp "$f" site/; done
+cp "$REPO/README.md" site/README.md 2>/dev/null || true
+[ -f "$REPO/docs/readme.html" ] && cp "$REPO/docs/readme.html" site/readme.html
+[ -d "$REPO/docs/shots" ] && cp -r "$REPO/docs/shots" site/shots
+cp "$REPO/scripts/serve.mjs" serve.mjs
+printf 'signal-overdrive %s\ncommit %s\nhosted %s\n' \
+  "$(sha256sum site/mode7-racer.wasm | cut -c1-12)" \
+  "$(git -C "$REPO" rev-parse --short HEAD; git -C "$REPO" diff --quiet HEAD || echo -dirty)" \
+  "$(date -u +%FT%TZ)" | tr -s '\n' > site/version.txt
+# the stamp the build put in the page, for comparing against version.txt
+[ -f "$WEB/build.txt" ] && printf 'page stamp %s\n' "$(cat "$WEB/build.txt")" >> site/version.txt
+
+HOST="$(ip -4 -o addr show dev wg0 | awk '{print $4}' | cut -d/ -f1)"
+[ -n "$HOST" ] || { echo "host: no wg0 address"; exit 1; }
+if [ ! -f tls/cert.pem ]; then
+  mkdir -p tls
+  guix shell openssl -- openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+    -keyout tls/key.pem -out tls/cert.pem -subj "/CN=$HOST" -addext "subjectAltName=IP:$HOST" 2>/dev/null
+fi
+nohup node serve.mjs site $PORT_TLS --tls > host-$PORT_TLS.log 2>&1 &
+echo $! > host-$PORT_TLS.pid
+nohup node serve.mjs site $PORT_HTTP > host-$PORT_HTTP.log 2>&1 &
+echo $! > host-$PORT_HTTP.pid
+sleep 1
+cat host-$PORT_TLS.log host-$PORT_HTTP.log
+cat site/version.txt
