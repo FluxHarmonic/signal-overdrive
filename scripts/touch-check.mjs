@@ -119,12 +119,23 @@ function check(name, ok, detail) { results.push(ok); console.log(`${ok ? "ok  " 
 
 async function newRace(scheme) {
   lines.length = 0;
-  await send("Page.navigate", { url: `http://127.0.0.1:${PORT}/index.html?touch=${scheme}&start&boost-lap=1&rivals=0&trace-touch` });
+  await send("Page.navigate", { url: `http://127.0.0.1:${PORT}/index.html?touch=${scheme}&start&boost-lap=1&rivals=0&trace-touch&mute` });
   if (!(await waitLine(/signal-overdrive: ready/, 60000))) throw new Error("SETUP: no ready line");
   if (!(await waitLine(/signal-overdrive: phase race/, 15000))) throw new Error("SETUP: the race never started");
   const s = await evalJS(`window.SignalOverdriveTouch && SignalOverdriveTouch.scheme()`);
   if (s !== scheme) throw new Error(`SETUP: the page's scheme is ${s}, not ${scheme}`);
   await sleep(400);
+}
+
+// A boost needs lap 1 (boost-lap=1): a fresh grid, the machine driven
+// straight on touch alone for 1.8 s, over the line. Zones: a 20 ms tap
+// (fingers up keeps accelerating); drag and stick: one finger held still.
+// Returns with that finger still down for drag and stick (id 1).
+async function overTheLine(scheme, at) {
+  await newRace(scheme);
+  if (scheme === "zones") { await touch("touchStart", [[at[0], at[1], 9]]); await sleep(20); await touch("touchEnd", []); }
+  else await touch("touchStart", [[at[0], at[1], 1]]);
+  await sleep(1800);
 }
 
 const W = VW, H = VH, L = [W * 0.2, H * 0.7], Rt = [W * 0.8, H * 0.7], C = [W * 0.5, H * 0.6];
@@ -146,7 +157,7 @@ try {
       await sleep(300);
       a = await probe(); await touch("touchStart", [[...L, 3], [...Rt, 4]]); await sleep(700); b = await probe(); await touch("touchEnd", []);
       check("zones: both thumbs brake", b.speed < a.speed - 40, `speed ${a.speed} -> ${b.speed}`);
-      await sleep(300);
+      await overTheLine(scheme, C);
       // the BOOST button (a DOM button: a pointer press at its centre)
       a = await probe();
       const r = await evalJS(`(() => { const b = document.getElementById("so-boost").getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2]; })()`);
@@ -158,7 +169,8 @@ try {
       check("drag: sliding right turns right", turned(a, b) > 0.15, `turned ${turned(a, b).toFixed(3)}`);
       await touch("touchMove", [[C[0] - 70, C[1], 1]]); a = await probe(); await sleep(700); b = await probe();
       check("drag: sliding left turns left", turned(a, b) < -0.15, `turned ${turned(a, b).toFixed(3)}`);
-      await touch("touchMove", [[C[0], C[1], 1]]);
+      await touch("touchEnd", []);
+      await overTheLine(scheme, C);
       a = await probe(); await touch("touchStart", [[C[0], C[1], 1], [W * 0.85, H * 0.3, 2]]); await sleep(150); b = await probe();
       await touch("touchEnd", [[C[0], C[1], 1]]); await touch("touchEnd", []);
       check("drag: a second finger boosts", b.boost > 0 && b.integrity < a.integrity, `boost ${b.boost} integrity ${a.integrity} -> ${b.integrity}`);
@@ -173,8 +185,9 @@ try {
       await touch("touchStart", [[...L, 1]]); await sleep(1500);
       a = await probe(); await touch("touchMove", [[L[0], L[1] + 60, 1]]); await sleep(700); b = await probe();
       check("stick: pulling down brakes", a.speed > 100 && b.speed < a.speed - 40, `speed ${a.speed} -> ${b.speed}`);
-      await touch("touchEnd", []); await sleep(300);
-      a = await probe(); await touch("touchStart", [[...Rt, 2]]); await sleep(150); b = await probe(); await touch("touchEnd", []);
+      await touch("touchEnd", []);
+      await overTheLine(scheme, L);
+      a = await probe(); await touch("touchStart", [[...L, 1], [...Rt, 2]]); await sleep(150); b = await probe(); await touch("touchEnd", []);
       check("stick: the right thumb boosts", b.boost > 0 && b.integrity < a.integrity, `boost ${b.boost} integrity ${a.integrity} -> ${b.integrity}`);
     }
   }
