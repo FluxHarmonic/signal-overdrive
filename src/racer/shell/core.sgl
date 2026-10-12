@@ -73,11 +73,13 @@
     (define *ghost-track* #f)
     (define *ghost-best* #f)
 
-    (define (ghost-tick! r)
+    ;; was: the phase before this tick (the last lap ends in the tick that
+    ;; turns the phase to finished, and must count too)
+    (define (ghost-tick! r was)
       (let* ((p (race-player r)) (m (racer-machine p)) (name (track-name (race-track r))))
         (unless (eq? name *ghost-track*)
           (set! *ghost-track* name) (set! *ghost* #f) (set! *ghost-best* #f) (set! *trail* '()))
-        (when (eq? (race-phase r) 'race)
+        (when (or (eq? (race-phase r) 'race) (eq? was 'race))
           ;; a new lap began this tick: was the one before it the best?
           (when (= (racer-lap-start p) (race-tick r))
             (let ((b (racer-best-lap p)))
@@ -300,7 +302,7 @@
                           (set! *spark* (cons 0 (if (> (machine-d (racer-machine (race-player r))) 0.0) 1 -1)))))
                       (race-events r))
             (record-best!)
-            (ghost-tick! r)
+            (ghost-tick! r was)
             (effects-tick! r)
             (unless (eq? was (race-phase r))
               (say "phase " (symbol->string (race-phase r))

@@ -257,6 +257,24 @@
       (assert-true (< (machine-scramble later) 1e-9))
       (assert-true (> (machine-heading turned) (+ before 0.05)))))
 
+  (test "a patch fires once a visit, says so, and fires again on the next visit"
+    (let* ((r (run-events H (machine (make-machine 690.0 0.0 EAST) vx: 300.0) NO-INPUT 6))
+           (once (length (filter (lambda (e) (eq? e 'ice)) (cdr r))))
+           ;; well past it, the scramble spent, then back before it and over again
+           (away (run-free H (car r) NO-INPUT 120))
+           (again (run-events H (machine away x: 690.0 y: 0.0 hint: #f vx: 300.0 vy: 0.0) NO-INPUT 6)))
+      (assert-equal 1 once)
+      (assert-equal 1 (length (filter (lambda (e) (eq? e 'ice)) (cdr again))))
+      (assert-true (> (machine-scramble (car again)) (* 0.8 (P 'ice-time))))))
+
+  (test "the patch's lateral range counts: alongside it, nothing fires"
+    ;; the corridor's patch spans the whole width, so test with a narrow one
+    (let* ((v (track-samples CORRIDOR))
+           (narrow (make-track v 16.0 '() '() 'narrow '((700.0 720.0 0.2 1.0))))
+           (left (let loop ((m (machine (make-machine 690.0 -30.0 EAST) vx: 300.0)) (i 0))
+                   (if (= i 6) m (loop (machine-step H narrow m NO-INPUT DT) (+ i 1))))))
+      (assert-true (< (machine-scramble left) 1e-9))))
+
   (test "off the patch nothing is scrambled"
     (let ((m (run-free H (moving 300.0) (make-input 1.0 0.0 0.0 #f #f) 20)))
       (assert-true (< (machine-scramble m) 1e-9))

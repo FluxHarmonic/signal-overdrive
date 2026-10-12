@@ -143,7 +143,11 @@
                      (cond ((> a 3.141592653589793) (wrap (- a 6.283185307179586)))
                            ((< a -3.141592653589793) (wrap (+ a 6.283185307179586)))
                            (else a))))
-             (steer (max -1.0 (min 1.0 (* diff 3.2))))
+             ;; ICE inverts a machine's steering; the rivals know it, and
+             ;; steer the other way while it lasts (inverted, this steering
+             ;; turns away from its line ever harder and into a wall)
+             (steer (* (if (> (machine-scramble m) 0.0) -1.0 1.0)
+                       (max -1.0 (min 1.0 (* diff 3.2)))))
              (sharp (abs diff)))
         (input steer: steer
                throttle: (if (> sharp 0.45) 0.4 1.0)
@@ -152,10 +156,12 @@
 
     ;; A rival with the player close behind moves across in front of it: its
     ;; lane becomes the player's lateral place, less the racing line there.
-    (define (block-lane t x pm)
+    ;; Not in the first 3 s: at GO the front row is inside the window and
+    ;; both would swerve across each other (the pass-3 review).
+    (define (block-lane t x pm clock)
       (let* ((m (racer-machine x))
              (behind (s-ahead t (machine-s pm) (machine-s m))))
-        (if (and (> behind 20.0) (< behind 160.0) (not (racer-finished x)))
+        (if (and (> clock 180) (> behind 20.0) (< behind 160.0) (not (racer-finished x)))
             (let* ((i (track-index-at t (machine-s m)))
                    (u (/ (machine-d pm) (track-hw t i))))
               (max -0.7 (min 0.7 (- u (track-line t i)))))
@@ -293,7 +299,7 @@
              (rms (map (lambda (x)
                          (let ((h (handling-set tuning 'top (* (racer-pace x) (handling-ref tuning 'top)))))
                            (machine-step h t (racer-machine x)
-                                         (ai-input t (racer-machine x) (block-lane t x (racer-machine p)) #f) DT)))
+                                         (ai-input t (racer-machine x) (block-lane t x (racer-machine p) (race-clock r)) #f) DT)))
                        (race-rivals r)))
              (bumped (bump-all tuning (cons pm rms)))
              (pm (car bumped))

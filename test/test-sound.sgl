@@ -67,7 +67,9 @@
       (synth-set! s 0.9 1.0 #f)
       (let* ((a (crossings (render s (quotient RATE 20))))     ; the first 50 ms
              (b (crossings (render s (quotient RATE 20)))))
-        (assert-true (<= a b)))))
+        ;; the second 50 ms is clearly higher than the first: the pitch is
+        ;; still climbing (an instant step would make them equal)
+        (assert-true (> b (+ a 2))))))
 
   (test "a boost and a wall each add sound over the engine alone"
     (let* ((quiet (rms (render (settled 0.5 0.0) (quotient RATE 4))))
