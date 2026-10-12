@@ -90,6 +90,28 @@
       (assert-true (< (machine-s (racer-machine (race-player r2))) 1000.0))
       (assert-equal 1 (racer-lap (race-player r2)))))
 
+  (test "pushed back over the line on lap 1, a machine's progress does not jump a lap"
+    (let* ((r (run T (started T) (+ 181 120)))
+           (t (race-track r))
+           (p (race-player r))
+           (before (racer-progress p))
+           (pt (track-point t (- (track-length t) 5.0) 0.0))
+           (m (machine (racer-machine p) x: (car pt) y: (cadr pt) hint: #f vx: 0.0 vy: 0.0))
+           (r2 (race-step T (race r player: (racer p machine: m)) NO-INPUT #f)))
+      (assert-equal 1 (racer-lap (race-player r2)))
+      (assert-true (< (racer-progress (race-player r2)) before))))
+
+  (test "after the finish, laps the autopilot drives change no times"
+    (let* ((tu (handling-set T 'laps 1.0))
+           (done (run tu (started tu) (* 60 30)))
+           (p (race-player done))
+           (later (run tu done (* 60 30)))
+           (q (race-player later)))
+      (assert-equal 'finished (race-phase done))
+      (assert-equal (racer-best-lap p) (racer-best-lap q))
+      (assert-equal (racer-last-lap p) (racer-last-lap q))
+      (assert-equal (racer-finished p) (racer-finished q))))
+
   (test "driving backwards over the line counts no lap"
     ;; turned round on the grid: full throttle the wrong way for 10 s
     (let* ((c (run T (started T) 181))

@@ -1,0 +1,88 @@
+;;; The placeholder sound, heard by counting: the engine's pitch follows the
+;;; speed, a boost and a wall each add sound, and nothing clips.
+
+(import (sigil test)
+        (sigil math)
+        (racer sound))
+
+(define RATE 22050)
+
+;; n frames of the left channel as a list of numbers.
+(define (render s n)
+  (let ((buf (make-bytevector (* 8 n) 0)))
+    (synth-fill! s buf n)
+    (let loop ((i (- n 1)) (acc '()))
+      (if (< i 0) acc (loop (- i 1) (cons (bytevector-ieee-single-ref buf (* 8 i) 'little) acc))))))
+
+;; upward zero crossings: a rough count (the sawtooths, the sub-octave
+;; square and the wind each add crossings, so this is not the pitch)
+(define (crossings xs)
+  (let loop ((xs xs) (k 0))
+    (if (or (null? xs) (null? (cdr xs))) k
+        (loop (cdr xs) (if (and (<= (car xs) 0.0) (> (cadr xs) 0.0)) (+ k 1) k)))))
+
+;; The waveform's period in samples, by autocorrelation over lags 20..900:
+;; the SHORTEST lag that is a local peak within 10% of the best correlation
+;; (any whole multiple of the period correlates nearly as well; taking the
+;; best alone picked twice the period at speed 0.9). The square an octave
+;; down makes the waveform repeat at half the engine's frequency, so
+;; compare periods, not hertz.
+(define (period xs)
+  (let* ((v (list->vector xs)) (n (min 3000 (- (vector-length v) 902)))
+         (corr (lambda (lag) (let sum ((i 0) (c 0.0)) (if (< i n) (sum (+ i 1) (+ c (* (vector-ref v i) (vector-ref v (+ i lag))))) c))))
+         (cs (let fill ((lag 900) (acc '())) (if (< lag 19) acc (fill (- lag 1) (cons (corr lag) acc)))))
+         (cv (list->vector cs))               ; cv[k] is lag k + 19
+         (top (apply max cs)))
+    (let find ((k 1))
+      (cond ((>= k (- (vector-length cv) 1)) #f)
+            ((and (>= (vector-ref cv k) (* 0.9 top))
+                  (>= (vector-ref cv k) (vector-ref cv (- k 1)))
+                  (>= (vector-ref cv k) (vector-ref cv (+ k 1))))
+             (+ k 19))
+            (else (find (+ k 1)))))))
+
+(define (rms xs) (sqrt (/ (apply + (map (lambda (x) (* x x)) xs)) (length xs))))
+
+;; a synth settled at a speed (half a second to glide there), then a second heard
+(define (settled speed throttle)
+  (let ((s (make-synth RATE)))
+    (synth-set! s speed throttle #f)
+    (render s (quotient RATE 2))
+    s))
+
+(test-group "sound"
+  (test "the engine's pitch rises with speed"
+    ;; 48 + 170v Hz: 65 Hz at 0.1, 201 at 0.9, so the period shortens about 3x
+    ;; (throttle on: with it off the engine is quieter and, at 0.9, the wind
+    ;; drowns the period)
+    (let ((slow (period (render (settled 0.1 1.0) 4000)))
+          (fast (period (render (settled 0.9 1.0) 4000))))
+      (assert-true (> slow (* 2.5 fast)))
+      ;; the waveform repeats at f/2: 2 * 22050 / 65 = 678 samples, 2 * 22050 / 201 = 219
+      (assert-true (< 610 slow 750))
+      (assert-true (< 195 fast 245))))
+
+  (test "the pitch glides: no step between one block and the next"
+    (let* ((s (settled 0.2 1.0)))
+      (synth-set! s 0.9 1.0 #f)
+      (let* ((a (crossings (render s (quotient RATE 20))))     ; the first 50 ms
+             (b (crossings (render s (quotient RATE 20)))))
+        (assert-true (<= a b)))))
+
+  (test "a boost and a wall each add sound over the engine alone"
+    (let* ((quiet (rms (render (settled 0.5 0.0) (quotient RATE 4))))
+           (b (settled 0.5 0.0))
+           (w (settled 0.5 0.0)))
+      (synth-event! b 'boost 0)
+      (synth-event! w 'wall 300.0)
+      (assert-true (> (rms (render b (quotient RATE 4))) (* 1.3 quiet)))
+      (assert-true (> (rms (render w (quotient RATE 8))) (* 1.3 quiet)))))
+
+  (test "nothing leaves -1..1, even with everything at once"
+    (let ((s (settled 1.4 1.0)))
+      (synth-set! s 1.4 1.0 #t)
+      (synth-event! s 'boost 0)
+      (synth-event! s 'wall 2000.0)
+      (synth-event! s 'corrupt 0)
+      (let ((xs (render s RATE)))
+        (assert-true (< (apply max (map abs xs)) 1.0))))))

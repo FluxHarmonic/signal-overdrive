@@ -36,7 +36,12 @@
 
   (begin
     (define GAME-NAME "signal-overdrive")
-    (define BEST-KEY "best-lap")
+    ;; the best lap, one per track
+    (define (best-key) (string-append "best-lap-" (symbol->string (track-name (race-track *race*)))))
+    (define *best-track* #f)
+    (define (load-best!)
+      (set! *best-track* (track-name (race-track *race*)))
+      (set! *best* (let ((b (store-read-datum (best-key)))) (and (exact-integer? b) b))))
 
     (define *tuning* (tuning-defaults))
     (define *race* #f)
@@ -69,8 +74,8 @@
       (set! *platform* platform)
       (set-store-app! GAME-NAME)
       (set-store-prefix! "signal-overdrive:")
-      (set! *best* (let ((b (store-read-datum BEST-KEY))) (and (exact-integer? b) b)))
-      (set! *race* (race-new *tuning*)))
+      (set! *race* (race-new *tuning*))
+      (load-best!))
 
     ;; A URL parameter or a command-line --key=value: a knob; or
     ;; autopilot (the player drives the racing line, for checks and
@@ -132,7 +137,7 @@
              (throttle (max (if (and (not overlay?) (held? 'up 'w)) 1.0 0.0)
                             (if (pad-held? *pad* 'a) 1.0 0.0)
                             (trigger 'rt)
-                            (cadr *touch*)))
+                            (if overlay? 0.0 (cadr *touch*))))
              (brake (max (if (and (not overlay?) (held? 'down 's)) 1.0 0.0)
                          (if (pad-held? *pad* 'b) 1.0 0.0)
                          (trigger 'lt)
@@ -196,10 +201,11 @@
     ;; --- a frame ----------------------------------------------------------------------------
 
     (define (record-best!)
+      (unless (eq? *best-track* (track-name (race-track *race*))) (load-best!))
       (let ((b (racer-best-lap (race-player *race*))))
         (when (and b (or (not *best*) (< b *best*)))
           (set! *best* b)
-          (store-write-datum! BEST-KEY b)
+          (store-write-datum! (best-key) b)
           (say "best lap " (lap-clock b)))))
 
     (define (step! n)

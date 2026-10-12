@@ -113,6 +113,14 @@
             ;; and reaches the full rate for its speed within a quarter second
             (assert-true (> (list-ref ds 15) (* 0.6 full)))))))
 
+  (test "reversing the steering crosses centre and reaches the other lock"
+    (let* ((right (run-free H (moving 300.0) (make-input 1.0 1.0 0.0 #f #f) 30))
+           (left (run-free H right (make-input -1.0 1.0 0.0 #f #f) 30)))
+      (assert-true (> (machine-steer right) 0.99))
+      (assert-true (< (machine-steer left) -0.99))
+      ;; and the lean follows the applied steer
+      (assert-true (< (machine-lean left) -0.5))))
+
   (test "letting go returns the steering to centre within a tenth of a second"
     (let* ((held (run-free H (moving 300.0) (make-input 1.0 1.0 0.0 #f #f) 30))
            (let-go (run-free H held (make-input 0.0 1.0 0.0 #f #f) 6)))

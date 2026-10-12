@@ -157,8 +157,19 @@
              (halfway (or (racer-halfway r) (and (> s (* 0.4 l)) (< s (* 0.6 l)))))
              (crossed (and halfway (> was-s (* 0.75 l)) (< s (* 0.25 l))))
              (r (racer r machine: m halfway: (if crossed #f halfway))))
-        (if (not crossed)
-            (racer r progress: (+ (* (max 0 (- (racer-lap r) 1)) l) (if (= (racer-lap r) 0) (- s l) s)))
+        (cond
+          ;; past the finish: the autopilot drives it round, nothing counts
+          ((racer-finished r) r)
+          ((not crossed)
+           ;; on lap 1 and up, a machine pushed back over the line (s wrapped
+           ;; to the end, halfway not passed) is just behind it: its progress
+           ;; must not jump a lap (a bump at the start of lap 1 would show it 1st)
+           (racer r progress: (+ (* (max 0 (- (racer-lap r) 1)) l)
+                                 (if (or (= (racer-lap r) 0)
+                                         (and (not (racer-halfway r)) (> s (* 0.75 l))))
+                                     (- s l)
+                                     s))))
+          (else
             (let* ((lap (+ (racer-lap r) 1))
                    (time (and (> (racer-lap r) 0) (- tick (racer-lap-start r))))
                    (best (if (and time (or (not (racer-best-lap r)) (< time (racer-best-lap r))))
@@ -167,7 +178,7 @@
               (racer r lap: (if (> lap laps) laps lap) lap-start: tick
                      last-lap: (or time (racer-last-lap r)) best-lap: best
                      finished: (if done tick (racer-finished r))
-                     progress: (+ (* (- lap 1) l) s))))))
+                     progress: (+ (* (- lap 1) l) s)))))))
 
     ;; --- bumps -----------------------------------------------------------------------------
 

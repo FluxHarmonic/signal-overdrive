@@ -7,7 +7,7 @@
 ;;; The lookups are scripts/art/gen-lut.mjs's (assets/racer/lut-*.png): a
 ;;; channel value v in 0..255 falls in bin floor(v / 4); bin (r, g, b) is
 ;;; the texel (r + 64 * (b mod 8), g + 64 * floor(b / 8)) of a 512x512
-;;; texture, holding the palette colour nearest the bin's centre. That is an
+;;; texture, holding the palette colour nearest the bin's centre (4b + 2). That is an
 ;;; approximation: a dithered value in a bin straddling the boundary between
 ;;; two colours can land on the other one. The exact pass stays behind the
 ;;; lut knob (0).

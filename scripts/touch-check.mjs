@@ -165,6 +165,8 @@ try {
     } else {
       let a = await probe(); await touch("touchStart", [[...L, 1]]); await touch("touchMove", [[L[0] - 60, L[1], 1]]); await sleep(700); let b = await probe();
       check("stick: left turns left", turned(a, b) < -0.15, `turned ${turned(a, b).toFixed(3)}`);
+      await touch("touchMove", [[L[0] + 60, L[1], 1]]); a = await probe(); await sleep(700); b = await probe();
+      check("stick: right turns right", turned(a, b) > 0.15, `turned ${turned(a, b).toFixed(3)}`);
       await touch("touchEnd", []);
       // the brake needs speed: a fresh grid, the stick held centred for 1.5 s, then pulled down
       await newRace(scheme);
