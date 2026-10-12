@@ -126,11 +126,18 @@
 
     ;; The camera behind the player, at cam-heading (the shell eases it
     ;; toward the machine's heading: the cam lag).
-    (define (scene-camera tuning m cam-heading)
-      (cam-behind (make-cam 0.0 0.0 (tuning-ref tuning 'cam-height) cam-heading
-                            (tuning-ref tuning 'pitch) (tuning-ref tuning 'fov)
-                            (tuning-ref tuning 'horizon) VIEW-W VIEW-H)
-                  (machine-x m) (machine-y m) cam-heading (tuning-ref tuning 'cam-dist)))
+    ;; Speed widens the field of view (speed-fov radians at top speed) and
+    ;; pulls the camera back (speed-pull texels); a boost's kick (0..1,
+    ;; decaying) punches the field of view out a little further.
+    (define (scene-camera tuning m cam-heading . more)
+      (let* ((v (min 1.4 (/ (machine-speed m) (handling-ref tuning 'top))))
+             (kick (if (pair? more) (car more) 0.0)))
+        (cam-behind (make-cam 0.0 0.0 (tuning-ref tuning 'cam-height) cam-heading
+                              (tuning-ref tuning 'pitch)
+                              (+ (tuning-ref tuning 'fov) (* v (tuning-ref tuning 'speed-fov)) (* 0.14 kick))
+                              (tuning-ref tuning 'horizon) VIEW-W VIEW-H)
+                    (machine-x m) (machine-y m) cam-heading
+                    (+ (tuning-ref tuning 'cam-dist) (* v (tuning-ref tuning 'speed-pull))))))
 
     ;; --- sprites -------------------------------------------------------------------------
 
@@ -207,16 +214,56 @@
              (k (exact (round (/ rel (/ PI 8.0))))))
         (modulo k 16)))
 
-    (define (draw-machines! c tuning r cam-heading spark)
+    ;; The best lap's ghost: the player's machine where it was at this
+    ;; point of the best lap, drawn see-through (every other pixel).
+    (define (ghost-item c tuning g)
+      (and g
+           (let ((it (machine-sprite c tuning (make-machine (car g) (cadr g) (caddr g)) 2 0 #t #f)))
+             (and it (list (car it) (lambda () (mode7-sprite-style! #t 0.0 0.0) ((cadr it)) (mode7-sprite-style! #f 0.0 0.0)))))))
+
+    ;; The uplink gate over the start line: two pylons just outside the road
+    ;; (row 7 from x 208: 32x80, the foot at the cell's bottom) and a beam
+    ;; between their tops (row 7 from x 240: 32x16, wrapped across).
+    (define GATE-HEIGHT 70.0)
+    (define (gate-items c t)
+      (let* ((l (track-point t 0.0 -1.12)) (rp (track-point t 0.0 1.12))
+             (a (camera-project c (car l) (cadr l) 0.0 4.0))
+             (b (camera-project c (car rp) (cadr rp) 0.0 4.0))
+             (at (camera-project c (car l) (cadr l) GATE-HEIGHT 4.0))
+             (bt (camera-project c (car rp) (cadr rp) GATE-HEIGHT 4.0)))
+        (if (not (and a b at bt))
+            '()
+            (let* ((pylon (lambda (p top)
+                            (let* ((h (- (projected-y p) (projected-y top)))
+                                   (w (* h 0.4)))
+                              (list (projected-depth p)
+                                    (lambda ()
+                                      (mode7-draw-sprite! *sheet* (round (- (projected-x p) (* 0.5 w))) (round (projected-y top))
+                                                          (round w) (round h) 208.0 (* 7 CELL-H) 240.0 (* 8 CELL-H) 0.0 '(0.0 0.0 0.0)))))))
+                   (x0 (min (projected-x at) (projected-x bt))) (x1 (max (projected-x at) (projected-x bt)))
+                   (y0 (min (projected-y at) (projected-y bt)))
+                   (bh (max 2.0 (* 0.16 (- (projected-y a) (projected-y at)))))
+                   (beam (list (* 0.5 (+ (projected-depth a) (projected-depth b)))
+                               (lambda ()
+                                 (mode7-sprite-style! #f 32.0 240.0)
+                                 (mode7-draw-sprite! *sheet* (round x0) (round y0) (round (- x1 x0)) (round bh)
+                                                     240.0 (* 7 CELL-H) (+ 240.0 (* 32.0 (/ (- x1 x0) (* 2.0 bh)))) (+ (* 7 CELL-H) 16)
+                                                     0.0 '(0.0 0.0 0.0))
+                                 (mode7-sprite-style! #f 0.0 0.0)))))
+              (list (pylon a at) (pylon b bt) beam)))))
+
+    (define (draw-machines! c tuning r cam-heading spark . more)
       (let* ((pm (racer-machine (race-player r)))
              (fl (flick? r))
+             (ghost (and (pair? more) (car more)))
              (items (cons (machine-sprite c tuning pm (+ (player-frame pm cam-heading) (if fl 10 0)) 0 #t
                                           (sparks-drawer spark))
                           (map (lambda (x)
                                  (let ((m (racer-machine x)))
                                    (machine-sprite c tuning m (rival-dir c m) (+ 1 (racer-colour x) (if fl 3 0)) #f #f)))
                                (race-rivals r))))
-             (items (filter (lambda (x) x) items)))
+             (items (append (filter (lambda (x) x) (cons (ghost-item c tuning ghost) items))
+                            (gate-items c (race-track r)))))
         ;; far to near
         (let draw ((items items))
           (unless (null? items)
@@ -322,6 +369,9 @@
 
     ;; The integrity meter: a bar of 2-pixel cells, cyan high, amber
     ;; middling, red low; flashing white for a few frames after a hit.
+    ;; meter-shown: the integrity the meter showed last frame, easing down to
+    ;; the real one, so what a hit or a boost spent drains away in white
+    (define *meter-shown* 100.0)
     (define (meter! vx vy integrity flash tick)
       (let* ((cells 50)
              (lit (exact (ceiling (* cells (/ integrity INTEGRITY-MAX)))))
@@ -333,6 +383,11 @@
         (let ((s (fit-scale *fit*)))
           (rgb "#21173D")
           (draw-texture-region *comb* (hx vx) (hy vy) (* cells 3 s) (* 6 s) 0 0 (* cells 3) 1)
+          (set! *meter-shown* (if (< *meter-shown* integrity) integrity (max integrity (- *meter-shown* 0.6))))
+          (let ((drain (exact (ceiling (* cells (/ *meter-shown* INTEGRITY-MAX))))))
+            (when (> drain lit)
+              (rgb "#FAFCFF")
+              (draw-texture-region *comb* (hx vx) (hy vy) (* drain 3 s) (* 6 s) 0 0 (* drain 3) 1)))
           (when (> lit 0)
             (rgb col)
             (draw-texture-region *comb* (hx vx) (hy vy) (* lit 3 s) (* 6 s) 0 0 (* lit 3) 1)))))
@@ -356,7 +411,15 @@
         ;; the integrity meter, top centre
         (centred! "INTEGRITY" 6 "#7380A6")
         (meter! (- (/ VIEW-W 2) 75) 15 (machine-integrity m) (cdr (assq 'flash info)) tick)
-        (cond ((> (machine-boost m) 0.0) (centred! "BOOST" 25 "#FFCC33"))
+        ;; what the last moments did to the cargo: (text colour age) rising
+        (for-each (lambda (pp)
+                    (let ((age (caddr pp)))
+                      (when (< age 50)
+                        (text! (car pp) (+ (/ VIEW-W 2) 80) (- 15 (quotient age 6)) (cadr pp)))))
+                  (cdr (assq 'popups info)))
+        (cond ((> (machine-scramble m) 0.0)
+               (when (odd? (quotient tick 4)) (centred! "ICE: STEERING SCRAMBLED" 25 "#FF5959")))
+              ((> (machine-boost m) 0.0) (centred! "BOOST" 25 "#FFCC33"))
               ((machine-on-repair m) (centred! "CHECKSUM LANE: REPAIRING" 25 "#4DF2D9"))
               ((and (eq? phase 'race) (>= (racer-lap p) (race-tuning-ref tuning 'boost-lap))
                     (> (machine-integrity m) (handling-ref tuning 'boost-cost)))
@@ -367,17 +430,43 @@
            (centred! "COURIER ZERO. ONE PACKAGE. DON'T LET IT CORRUPT." 98 "#CCE6FF")
            (when (odd? (quotient tick 30)) (centred! (cdr (assq 'start-line info)) 120 "#FFCC33" 2)))
           ((countdown)
+           ;; the start card
+           (rect! 70 56 340 26 "#0D0A1A")
+           (centred! "DELIVER THE SIGNAL TO THE UPLINK." 60 "#4DF2D9")
+           (centred! (string-append (number->string laps) " LAPS. KEEP THE CARGO CLEAN.") 71 "#CCE6FF")
            (let ((n (+ 1 (quotient (race-countdown r) 60))))
-             (centred! (number->string n) 90 "#FFCC33" 4)))
+             (centred! (number->string n) 96 "#FFCC33" 4)))
           ((race)
            (when (< (race-clock r) 60) (centred! "GO" 90 "#4DF2D9" 4)))
-          ((finished)
-           (centred! "DELIVERED." 76 "#4DF2D9" 3)
-           (centred! (string-append "PLACE " (ordinal (racer-place p)) "   BEST LAP " (lap-clock (racer-best-lap p))) 104 "#CCE6FF")
-           (centred! (cdr (assq 'restart-line info)) 120 "#FFCC33"))
+          ((finished) (finish-panel! r p (cdr (assq 'restart-line info))))
           ((corrupt)
            (centred! "CARGO CORRUPT." 80 "#FF5959" 3)
-           (centred! (cdr (assq 'restart-line info)) 108 "#FFCC33")))))
+           (centred! "THE SIGNAL DIDN'T MAKE IT." 102 "#CCE6FF")
+           (centred! (cdr (assq 'restart-line info)) 116 "#FFCC33")))))
+
+    ;; The finish: every machine by place, its race time (or still running)
+    ;; and its best lap; the player's row lit.
+    (define (finish-panel! r p restart)
+      (let* ((all (cons p (race-rivals r)))
+             (sorted (let ins ((xs all) (out '()))
+                       (if (null? xs) out
+                           (ins (cdr xs) (let put ((o out))
+                                           (cond ((null? o) (list (car xs)))
+                                                 ((< (racer-place (car xs)) (racer-place (car o))) (cons (car xs) o))
+                                                 (else (cons (car o) (put (cdr o)))))))))))
+        (rect! 100 52 280 (+ 44 (* 10 (length all))) "#0D0A1A")
+        (centred! "DELIVERED." 56 "#4DF2D9" 2)
+        (let loop ((xs sorted) (y 76))
+          (unless (null? xs)
+            (let* ((x (car xs))
+                   (col (if (eq? x p) "#FFCC33" "#CCE6FF"))
+                   (time (if (racer-finished x) (lap-clock (- (racer-finished x) (race-start-tick r))) "RUNNING")))
+              (text! (ordinal (racer-place x)) 112 y col)
+              (text! (racer-name x) 142 y col)
+              (text! time 218 y col)
+              (text! (string-append "BEST " (lap-clock (racer-best-lap x))) 290 y col))
+            (loop (cdr xs) (+ y 10))))
+        (centred! restart (+ 80 (* 10 (length all))) "#FFCC33")))
 
     ;; --- the tuning overlay ------------------------------------------------------------------
 
@@ -420,14 +509,22 @@
       (show-track! (track-name (race-track r)))
       (look! tuning)
       (let* ((m (racer-machine (race-player r)))
-             (c (scene-camera tuning m cam-heading))
+             (c (scene-camera tuning m cam-heading (cdr (assq 'kick info))))
              (dither? (> (tuning-ref tuning 'dither) 0.5))
              (f (view-fit win-w win-h VIEW-W VIEW-H integer-only: integer-only)))
         (set! *fit* f)
         (begin-frame)
         (with-3d-pass *view* (list 0.05 0.04 0.10 1.0)
           (mode7-draw-ground! c)
-          (draw-machines! c tuning r cam-heading (cdr (assq 'spark info))))
+          (draw-machines! c tuning r cam-heading (cdr (assq 'spark info)) (cdr (assq 'ghost info))))
+        ;; the frame's effects, for the lookup pass
+        (let ((v (min 1.0 (/ (machine-speed m) (handling-ref tuning 'top)))))
+          (set-pipeline-uniform! *lut-pipe* 'fx
+                                 (list (* (tuning-ref tuning 'speed-lines) (max 0.0 (min 1.0 (* 2.5 (- v 0.55)))) (+ 1.0 (cdr (assq 'kick info))))
+                                       (cdr (assq 'time info))
+                                       (cdr (assq 'glitch info))
+                                       (cdr (assq 'corrupt info))))
+          (set-pipeline-uniform! *lut-pipe* 'vp (list (* 0.5 VIEW-W) (tuning-ref tuning 'horizon) 0.0 0.0)))
         (when dither?
           (with-3d-pass *post* #f
             (if (> (tuning-ref tuning 'lut) 0.5)

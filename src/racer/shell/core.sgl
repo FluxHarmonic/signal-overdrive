@@ -29,10 +29,12 @@
           (racer handling)
           (racer race)
           (racer tuning)
-          (racer scene))
+          (racer scene)
+          (racer shell audio))
 
   (export core-boot! core-frame! core-keys core-sticks core-pad core-param! core-touch!
-          core-tap! core-race core-tuning core-describe core-probe core-knobs-markdown GAME-NAME)
+          core-tap! core-race core-tuning core-describe core-probe core-knobs-markdown GAME-NAME
+          core-audio-start!)
 
   (begin
     (define GAME-NAME "signal-overdrive")
@@ -53,6 +55,72 @@
     (define *cam-heading* #f)
     (define *flash* 0)
     (define *spark* #f)          ; (age-in-ticks . side) since the last wall hit
+    ;; pass 3's frame effects, eased per tick
+    (define *kick* 0.0)          ; a boost's camera punch, 1 then decaying
+    (define *glitch* 0.0)        ; the screen's glitch: wall hits, ICE
+    (define *corrupt* 0.0)       ; corrupt cargo, ramping to 1
+    (define *popups* '())        ; ((text colour age) ...) by the meter
+    (define (popup! text colour) (set! *popups* (cons (list text colour 0) *popups*)))
+
+    ;; The best lap's ghost. The player's positions are recorded every tick
+    ;; of the lap being driven; when a lap ends as the best yet on this
+    ;; track, its record becomes the ghost, replayed tick by tick against
+    ;; the current lap's clock. Positions, not inputs: replaying inputs
+    ;; would diverge the first time a rival bumped the live machine, since
+    ;; the ghost has no rivals to bump it. In memory only, per run.
+    (define *trail* '())
+    (define *ghost* #f)          ; a vector of (x y heading), one per tick
+    (define *ghost-track* #f)
+    (define *ghost-best* #f)
+
+    (define (ghost-tick! r)
+      (let* ((p (race-player r)) (m (racer-machine p)) (name (track-name (race-track r))))
+        (unless (eq? name *ghost-track*)
+          (set! *ghost-track* name) (set! *ghost* #f) (set! *ghost-best* #f) (set! *trail* '()))
+        (when (eq? (race-phase r) 'race)
+          ;; a new lap began this tick: was the one before it the best?
+          (when (= (racer-lap-start p) (race-tick r))
+            (let ((b (racer-best-lap p)))
+              (when (and b (equal? b (racer-last-lap p)) (pair? *trail*)
+                         (or (not *ghost-best*) (< b *ghost-best*)))
+                (set! *ghost* (list->vector (reverse *trail*)))
+                (set! *ghost-best* b)
+                (say "ghost: a new best lap, " (lap-clock b))))
+            (set! *trail* '()))
+          (when (> (racer-lap p) 0)
+            (set! *trail* (cons (list (machine-x m) (machine-y m) (machine-heading m)) *trail*))))))
+
+    (define (ghost-now r)
+      (let ((p (race-player r)))
+        (and *ghost* (eq? (race-phase r) 'race) (> (racer-lap p) 0)
+             (let ((i (- (race-tick r) (racer-lap-start p))))
+               (and (< i (vector-length *ghost*)) (vector-ref *ghost* i))))))
+
+    ;; The frame effects from this tick's events.
+    (define (effects-tick! r)
+      (let ((m (racer-machine (race-player r))))
+        (for-each (lambda (e)
+                    (when (eq? (car e) 'player)
+                      (let ((ev (cdr e)))
+                        (cond ((memq ev '(boost)) (set! *kick* 1.0)
+                               (popup! (string-append "-" (number->string (exact (round (handling-ref *tuning* 'boost-cost))))) "#FF9F1A"))
+                              ((eq? ev 'pad) (set! *kick* 0.8) (popup! "PAD" "#FFCC33"))
+                              ((eq? ev 'ice) (popup! "ICE" "#FF5959"))
+                              ((and (pair? ev) (eq? (car ev) 'wall))
+                               (set! *glitch* (max *glitch* (min 1.0 (/ (cdr ev) 300.0))))
+                               (let ((cost (exact (round (* (cdr ev) (handling-ref *tuning* 'wall-damage))))))
+                                 (when (>= cost 1) (popup! (string-append "-" (number->string cost)) "#FF5959"))))))))
+                  (race-events r))
+        (when (and (machine-on-repair m) (= 0 (modulo (race-tick r) 20)))
+          (popup! "+" "#4DF2D9"))
+        (when (> (machine-scramble m) 0.0) (set! *glitch* (max *glitch* 0.3)))
+        (set! *kick* (* *kick* 0.92))
+        (set! *glitch* (* *glitch* 0.9))
+        (set! *corrupt* (if (eq? (race-phase r) 'corrupt) (min 1.0 (+ *corrupt* 0.03)) 0.0))
+        (set! *popups* (let keep ((ps *popups*))
+                         (cond ((null? ps) '())
+                               ((> (caddr (car ps)) 50) (keep (cdr ps)))
+                               (else (cons (list (car (car ps)) (cadr (car ps)) (+ 1 (caddr (car ps)))) (keep (cdr ps)))))))))
     (define *overlay* #f)         ; the selected knob's row while the overlay is open
     (define *platform* 'desktop)
     (define *tapped* #f)
@@ -86,6 +154,7 @@
       (cond ((string=? kv "autopilot") (set! *autopilot* #t) (say "autopilot on"))
             ((string=? kv "start") (set! *start-now* #t))
             ((string=? kv "fps") (set! *fps-on* #t))
+            ((string=? kv "mute") (audio-mute!))
             ;; ?track=oval|loop as well as ?track=0|1
             ((and (> (string-length kv) 6) (string=? (substring kv 0 6) "track=")
                   (memq (string->symbol (substring kv 6 (string-length kv))) TRACKS))
@@ -126,6 +195,9 @@
     (define (trigger name) (max 0.0 (/ (+ 1.0 (pad-axis *pad* name)) 2.0)))   ; -1..1 at rest -1
 
     (define *boost-latch* #f)
+    (define *last-throttle* 0.0)
+    (define *frame-events* '())   ; the player's events over this frame's ticks, for the sound
+    (define (core-audio-start!) (audio-start!))
     ;; One tick's controls: the player's (racer handling) input.
     (define (controls)
       (let* ((ps (stick-analog (pad-axis *pad* 'lx) 0.0 0.18))
@@ -150,6 +222,7 @@
              (drift (or (held? 'shift 'c) (pad-held? *pad* 'lb) (pad-held? *pad* 'rb) (list-ref *touch* 4))))
         (set! *boost-latch* boost-now)
         (set! *touch-boost-pending* #f)
+        (set! *last-throttle* throttle)
         (if *autopilot*
             (let ((m (racer-machine (race-player *race*))))
               (ai-input (race-track *race*) m 0.0 #t))
@@ -216,6 +289,10 @@
                  (in (controls))
                  (r (race-step *tuning* *race* in start)))
             (set! *race* r)
+            (for-each (lambda (e) (when (eq? (car e) 'player) (set! *frame-events* (cons (cdr e) *frame-events*))))
+                      (race-events r))
+            (when (and (eq? (race-phase r) 'corrupt) (not (eq? was 'corrupt)))
+              (set! *frame-events* (cons 'corrupt *frame-events*)))
             (for-each (lambda (e)
                         (when (and (eq? (car e) 'player) (pair? (cdr e)) (eq? (cadr e) 'wall))
                           (set! *flash* 6)
@@ -223,6 +300,8 @@
                           (set! *spark* (cons 0 (if (> (machine-d (racer-machine (race-player r))) 0.0) 1 -1)))))
                       (race-events r))
             (record-best!)
+            (ghost-tick! r)
+            (effects-tick! r)
             (unless (eq? was (race-phase r))
               (say "phase " (symbol->string (race-phase r))
                    (if (memq (race-phase r) '(finished corrupt))
@@ -298,11 +377,24 @@
                     (list (cons 'best *best*)
                           (cons 'flash *flash*)
                           (cons 'spark *spark*)
+                          (cons 'kick *kick*)
+                          (cons 'glitch *glitch*)
+                          (cons 'corrupt *corrupt*)
+                          (cons 'popups *popups*)
+                          (cons 'ghost (ghost-now *race*))
+                          (cons 'time (/ (race-tick *race*) 60.0))
                           (cons 'start-line (if (eq? *platform* 'web) "PRESS ENTER OR TAP" "PRESS ENTER"))
                           (cons 'restart-line (if (eq? *platform* 'web) "ENTER OR TAP TO RUN IT AGAIN" "ENTER TO RUN IT AGAIN"))
                           (cons 'overlay *overlay*)
                           (cons 'fps (and *fps-on* (list *fps* *frame-ms* *sim-ms* *draw-ms*))))
                     win-w win-h integer-only)
        (set! *draw-ms* (ease *draw-ms* (ms-since t0))))
+      (let ((m (racer-machine (race-player *race*))))
+        (audio-frame! (if (memq (race-phase *race*) '(title countdown)) 0.0
+                          (/ (machine-speed m) (handling-ref *tuning* 'top)))
+                      (if (eq? (race-phase *race*) 'race) *last-throttle* 0.0)
+                      (> (machine-boost m) 0.0)
+                      *frame-events*))
+      (set! *frame-events* '())
       (keys-end-frame! *keys*)
       (pad-end-frame! *pad*))))

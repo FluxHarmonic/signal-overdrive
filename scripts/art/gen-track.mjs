@@ -70,6 +70,8 @@ const TRACKS = {
     control: stadium(2048, 2048, 1900, 740, 40),
     boost: [[0.10, -0.5, 0.1], [0.58, -0.1, 0.5]],
     repair: [0.86, 0.98, -1.0, -0.45],
+    // ICE: a glitch patch on the top straight's left half (there is room to dodge it)
+    ice: [[0.60, 0.645, -0.95, -0.05]],
     puddles: 60,
   },
   // the first track, widened: curves of every tightness and the hairpin
@@ -89,6 +91,7 @@ const TRACKS = {
     ],
     boost: [[0.050, -0.55, 0.05], [0.205, -0.10, 0.55], [0.560, -0.30, 0.30], [0.760, 0.00, 0.60]],
     repair: [0.905, 0.985, -1.0, -0.42],
+    ice: [[0.33, 0.355, 0.0, 0.9], [0.70, 0.725, -0.9, 0.0]],
     puddles: 70,
   },
 };
@@ -171,6 +174,7 @@ function build(name, def) {
   const ZONES = {
     boost: def.boost.map(([f, u0, u1]) => [at(f), at(f) + 100, u0, u1]),
     repair: [[at(def.repair[0]), at(def.repair[1]), def.repair[2], def.repair[3]]],
+    ice: (def.ice || []).map(([f0, f1, u0, u1]) => [at(f0), at(f1), u0, u1]),
   };
   const inZone = (z, s, u) => { let ds = s - z[0]; if (ds < 0) ds += LENGTH; return ds <= z[1] - z[0] && u >= z[2] && u <= z[3]; };
 
@@ -267,6 +271,17 @@ function build(name, def) {
           const lane = (u - z[2]) * HW;
           const edge = lane < 3 || lane > HW * (z[3] - z[2]) - 3;
           c = edge ? C.SELECTED : glyph(zs, lane) ? C.TEAL_MID : (bayerOn(0.25, x, y) ? C.TEAL : C.TEAL_DARK);
+        }
+        // ICE: a glitch patch, corrupted blocks in the ICE and TRACE_HOT
+        // roles over static (crossing it scrambles the steering)
+        for (const z of ZONES.ice) if (inZone(z, s, u)) {
+          const bx = Math.floor(x / 6), by = Math.floor(y / 4);
+          const h = ((bx * 73856093) ^ (by * 19349663)) >>> 0;
+          const v = (h % 97) / 97;
+          const lane = (u - z[2]) * HW, zs0 = s - z[0];
+          const rim = lane < 2 || lane > (z[3] - z[2]) * HW - 2 || zs0 < 2 || zs0 > z[1] - z[0] - 2;
+          c = rim ? C.TRACE_HOT : v < 0.18 ? C.ICE : v < 0.30 ? C.TRACE_HOT : v < 0.40 ? C.FACE_EDGE
+            : bayerOn(0.5, x, y) ? C.STATIC_B : C.RED;
         }
         // a guide line inside each edge, 4 texels, dashed along the track
         if (ad > HW - 10 && ad <= HW - 6 && (Math.floor(s / 32) & 1) === 0) c = C.TEXT_DIM;
@@ -376,11 +391,12 @@ ${body}        ))
                     (vector-set! v (+ k i) (vector-ref c i))
                     (copy (+ i 1))))
                 (loop (cdr cs) (+ k (vector-length c))))))))
-    ;; (name samples step boost repair)
+    ;; (name samples step boost repair ice)
     (define (${name}-track-data)
       (list '${name} (join CHUNKS) ${f(STEP)}
             '(${ZONES.boost.map(zone).join(" ")})
-            '(${ZONES.repair.map(zone).join(" ")})))))
+            '(${ZONES.repair.map(zone).join(" ")})
+            '(${ZONES.ice.map(zone).join(" ")})))))
 `;
   fs.mkdirSync(path.join(ROOT, "src/racer/track"), { recursive: true });
   fs.writeFileSync(path.join(ROOT, `src/racer/track/${name}-data.sgl`), src);

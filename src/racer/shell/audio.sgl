@@ -1,0 +1,59 @@
+;;; (racer shell audio) - The placeholder sound on a device: (racer sound)'s
+;;; synth pushed through (sigil audio sink), the same source natively
+;;; (miniaudio) and on the web (the WebAudio bridge).
+;;;
+;;;   (audio-mute!)                 never open a device (?mute, --mute; every
+;;;                                 headless check runs muted)
+;;;   (audio-start!)                open the context and the stream; on the web
+;;;                                 call it from a user gesture (autoplay
+;;;                                 policy), again on later gestures to resume
+;;;   (audio-frame! speed throttle boost events)
+;;;                                 once a frame: speed 0..1 of top, the
+;;;                                 player's events this frame ('boost, 'pad,
+;;;                                 (wall . impact), 'corrupt)
+;;;
+;;; The synth renders at 22,050 Hz and the sink upsamples (sigil-audio
+;;; 0.13's rate:), half the work of rendering at the device's rate. About
+;;; 60 ms is kept queued: enough to ride out a slow frame, short enough that
+;;; a wall hit is heard with it.
+
+(define-library (racer shell audio)
+  (import (sigil core)
+          (sigil audio sink)
+          (racer sound))
+
+  (export audio-mute! audio-start! audio-frame! audio-started?)
+
+  (begin
+    (define RATE 22050)
+    (define DEPTH (exact (floor (* 0.06 RATE))))
+    (define PUSH 1024)
+    (define *muted* #f)
+    (define *ctx* #f)
+    (define *stream* #f)
+    (define *synth* (make-synth RATE))
+    (define *buf* (make-bytevector (* 8 PUSH) 0))
+
+    (define (audio-mute!) (set! *muted* #t))
+    (define (audio-started?) (and *stream* #t))
+
+    (define (audio-start!)
+      (unless *muted*
+        (unless *ctx* (set! *ctx* (guard (e (#t #f)) (audio-context-open))))
+        (when *ctx* (guard (e (#t #f)) (audio-context-resume *ctx*)))
+        (unless *stream*
+          (set! *stream* (guard (e (#t #f)) (open-audio-stream channels: 2 buffer-frames: 8192 rate: RATE))))))
+
+    (define (audio-frame! speed throttle boost events)
+      (synth-set! *synth* speed throttle boost)
+      (for-each (lambda (e)
+                  (cond ((pair? e) (synth-event! *synth* (car e) (cdr e)))
+                        (else (synth-event! *synth* e 0))))
+                events)
+      (when *stream*
+        (let loop ()
+          (let ((n (min PUSH (audio-stream-room *stream*) (- DEPTH (audio-stream-depth *stream*)))))
+            (when (> n 0)
+              (synth-fill! *synth* *buf* n)
+              (push-audio-samples *stream* *buf* n)
+              (loop))))))))

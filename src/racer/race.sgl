@@ -27,7 +27,7 @@
           (racer handling))
 
   (export race race? race-new race-step race-start race-track
-          race-phase race-tick race-player race-rivals race-clock race-countdown race-events
+          race-phase race-tick race-player race-rivals race-clock race-countdown race-events race-start-tick
           racer racer? racer-machine racer-lap racer-lap-start racer-last-lap racer-best-lap
           racer-halfway racer-finished racer-place racer-name racer-colour racer-progress
           race-laps race-place-of race-tuning-ref RACE-DEFAULTS
@@ -39,7 +39,7 @@
     (define RACE-DEFAULTS
       '((track . 0.0)
         (laps . 3.0)
-        (rivals . 3.0)
+        (rivals . 5.0)
         (rival-pace . 0.97)     ; a rival's top speed as a share of yours
         (boost-lap . 2.0)       ; the first lap a boost press works on
         (bump . 0.6)))          ; restitution between two machines
@@ -77,6 +77,7 @@
       (player default: #f)
       (rivals default: '())
       (over-tick default: 0)
+      (start-tick default: 0)     ; the tick the race started (GO)
       (events default: '()))
 
     (define (race-laps tuning) (exact (round (race-tuning-ref tuning 'laps))))
@@ -148,6 +149,17 @@
                throttle: (if (> sharp 0.45) 0.4 1.0)
                brake: (if (and (> sharp 0.7) (> speed 260.0)) 0.6 0.0)
                boost: #f drift: (> sharp 0.32) boost-ok: boost-ok)))
+
+    ;; A rival with the player close behind moves across in front of it: its
+    ;; lane becomes the player's lateral place, less the racing line there.
+    (define (block-lane t x pm)
+      (let* ((m (racer-machine x))
+             (behind (s-ahead t (machine-s pm) (machine-s m))))
+        (if (and (> behind 20.0) (< behind 160.0) (not (racer-finished x)))
+            (let* ((i (track-index-at t (machine-s m)))
+                   (u (/ (machine-d pm) (track-hw t i))))
+              (max -0.7 (min 0.7 (- u (track-line t i)))))
+            (racer-lane x))))
 
     ;; --- laps ------------------------------------------------------------------------------
 
@@ -263,7 +275,7 @@
           ((countdown)
            (let ((r (race r countdown: (- (race-countdown r) 1))))
              (if (<= (race-countdown r) 0)
-                 (race r phase: 'race clock: 0)
+                 (race r phase: 'race clock: 0 start-tick: (race-tick r))
                  r)))
           (else (drive tuning t r controls #t)))))
 
@@ -281,7 +293,7 @@
              (rms (map (lambda (x)
                          (let ((h (handling-set tuning 'top (* (racer-pace x) (handling-ref tuning 'top)))))
                            (machine-step h t (racer-machine x)
-                                         (ai-input t (racer-machine x) (racer-lane x) #f) DT)))
+                                         (ai-input t (racer-machine x) (block-lane t x (racer-machine p)) #f) DT)))
                        (race-rivals r)))
              (bumped (bump-all tuning (cons pm rms)))
              (pm (car bumped))

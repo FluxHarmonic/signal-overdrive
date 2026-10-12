@@ -34,6 +34,8 @@
 ;;;     integrity drops by wall-damage per texel/s of impact speed.
 ;;;  6. zones: a boost pad starts a free boost (pad-time) once per visit; the
 ;;;     repair strip restores `repair` integrity per second.
+;;;  6b. ICE: entering a glitch patch scrambles the steering for ice-time
+;;;     seconds: the input's steer is inverted while it lasts.
 ;;;  7. a boost press: boost-time seconds of boost for boost-cost integrity,
 ;;;     refused while one runs, when boosts are not allowed (the first lap)
 ;;;     or when it would spend the last of the integrity.
@@ -48,7 +50,7 @@
           machine machine? make-machine
           machine-x machine-y machine-heading machine-vx machine-vy machine-integrity
           machine-boost machine-lean machine-hint machine-pad-lock machine-events machine-steer
-          machine-s machine-d machine-on-repair
+          machine-s machine-d machine-on-repair machine-scramble
           machine-speed machine-forward-speed machine-lateral-speed
           input input? input-steer input-throttle input-brake input-boost input-drift input-boost-ok
           make-input NO-INPUT
@@ -82,6 +84,7 @@
         (wall-drag . 0.30)       ; along-wall speed lost at a 300 texel/s impact
         (wall-damage . 0.045)    ; integrity per texel/s of impact speed
         (repair . 24.0)          ; integrity per second on the strip
+        (ice-time . 1.4)         ; s of scrambled steering after an ICE patch
         (radius . 9.0)))         ; the machine's half-width against walls
 
     (define (handling-keys) (map car default-handling))
@@ -111,6 +114,8 @@
       (hint default: #f)
       (pad-lock default: #f)
       (on-repair default: #f)
+      (scramble default: 0.0)    ; s of scrambled steering left (ICE)
+      (ice-lock default: #f)     ; on a patch last step (it fires once per visit)
       (s default: 0.0) (d default: 0.0)
       (events default: '()))
 
@@ -145,7 +150,7 @@
              (top-eff (if boosting (* top (P 'boost-speed)) top))
              (speed0 (machine-speed m))
              (drift (input-drift in))
-             (target (clamp -1.0 1.0 (input-steer in)))
+             (target (* (if (> (machine-scramble m) 0.0) -1.0 1.0) (clamp -1.0 1.0 (input-steer in))))
              (cur (machine-steer m))
              ;; 0. the ramp: out from centre at steer-in, back (or across) at steer-out
              (ramp (if (and (>= (* target cur) 0.0) (> (abs target) (abs cur))) (P 'steer-in) (P 'steer-out)))
@@ -226,6 +231,10 @@
                  (on-repair (track-on-repair? t p))
                  (integrity (if on-repair (min INTEGRITY-MAX (+ integrity (* (P 'repair) dt))) integrity))
                  (events (if on-repair (cons 'repair events) events))
+                 (on-ice (track-on-ice? t p))
+                 (ice-fires (and on-ice (not (machine-ice-lock m))))
+                 (scramble (if ice-fires (P 'ice-time) (max 0.0 (- (machine-scramble m) dt))))
+                 (events (if ice-fires (cons 'ice events) events))
                  ;; 7. a boost press
                  (fires (and (input-boost in) (input-boost-ok in)
                              (<= boost 0.0)
@@ -242,5 +251,6 @@
                      hint: (probe-i p)
                      pad-lock: on-pad
                      on-repair: on-repair
+                     scramble: scramble ice-lock: on-ice
                      s: (probe-s p) d: (probe-d p)
                      events: events)))))))

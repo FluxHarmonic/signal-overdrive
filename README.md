@@ -51,7 +51,7 @@ current values, and every knob takes a URL parameter of the same name, so
 `--grip=8.5`. Knobs that change the race (track, laps, rivals, rival pace) restart
 it on the grid.
 
-Other parameters: `?track=oval|loop` (the same as `track=0|1`),
+Other parameters: `?track=oval|loop` (the same as `track=0|1`), `?mute`,
 `?touch=zones|drag|stick`, `?autopilot` (the player drives the racing line),
 `?start` (skip the title), `?fps` (the F3 readout from the start).
 
@@ -80,11 +80,12 @@ The knobs, from `mode7-racer --knobs` (units are world texels, seconds and radia
 | `wall-drag` WALL DRAG | handling | 0.3 | 0 to 1 | 0.05 |
 | `wall-damage` WALL DAMAGE | handling | 0.045 | 0 to 0.3 | 0.005 |
 | `repair` REPAIR RATE | handling | 24 | 0 to 100 | 2 |
+| `ice-time` ICE SCRAMBLE TIME | handling | 1.4 | 0 to 5 | 0.1 |
 | `radius` RADIUS | handling | 9 | 4 to 30 | 1 |
 | `overspeed-drag` OVERSPEED DRAG | handling | 240 | 0 to 2000 | 20 |
 | `track` TRACK (0 OVAL 1 LOOP) | race | 0 | 0 to 1 | 1 |
 | `laps` LAPS | race | 3 | 1 to 9 | 1 |
-| `rivals` RIVALS | race | 3 | 0 to 5 | 1 |
+| `rivals` RIVALS | race | 5 | 0 to 5 | 1 |
 | `rival-pace` RIVAL PACE | race | 0.97 | 0.7 to 1.2 | 0.01 |
 | `boost-lap` BOOST FROM LAP | race | 2 | 1 to 9 | 1 |
 | `bump` BUMP | race | 0.6 | 0 to 1 | 0.05 |
@@ -95,6 +96,9 @@ The knobs, from `mode7-racer --knobs` (units are world texels, seconds and radia
 | `horizon` HORIZON | camera | 80 | 30 to 180 | 1 |
 | `cam-lag` CAM LAG | camera | 0.35 | 0 to 0.95 | 0.05 |
 | `sprite-size` MACHINE SIZE | camera | 18 | 8 to 60 | 1 |
+| `speed-fov` FOV AT SPEED | camera | 0.18 | 0 to 0.8 | 0.02 |
+| `speed-pull` PULL BACK AT SPEED | camera | 12 | 0 to 60 | 1 |
+| `speed-lines` SPEED LINES | look | 1 | 0 to 1 | 0.1 |
 | `fog` FOG | look | 1 | 0 to 1 | 1 |
 | `fog-start` FOG START | look | 900 | 100 to 4000 | 50 |
 | `fog-end` FOG END | look | 2800 | 200 to 8000 | 100 |
@@ -102,6 +106,7 @@ The knobs, from `mode7-racer --knobs` (units are world texels, seconds and radia
 | `far-end` FAR FADE TO | look | 3.2 | 0.5 to 12 | 0.1 |
 | `dither` DITHER | look | 1 | 0 to 1 | 1 |
 | `spread` SPREAD | look | 8 | 0 to 64 | 4 |
+| `lut` DITHER BY LOOKUP | look | 1 | 0 to 1 | 1 |
 | `palette` PALETTE | look | 0 | 0 to 1 | 1 |
 
 ## How it's built

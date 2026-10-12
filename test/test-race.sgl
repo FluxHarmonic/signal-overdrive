@@ -34,9 +34,9 @@
            (m (racer-machine (race-player c))))
       (assert-true (< (machine-speed m) 1e-9))))
 
-  (test "the grid has the player and three rivals, behind the line"
+  (test "the grid has the player and five rivals, behind the line"
     (let ((r (race-new T)))
-      (assert-equal 3 (length (race-rivals r)))
+      (assert-equal 5 (length (race-rivals r)))
       (assert-equal 0 (racer-lap (race-player r)))
       (assert-true (> (machine-s (racer-machine (race-player r))) (* 0.9 (track-length (race-track r))))))))
 
@@ -68,11 +68,11 @@
   (test "every rival completes laps too"
     (for-each (lambda (x) (assert-true (>= (racer-lap x) 2))) (race-rivals R2)))
 
-  (test "the places are 1 to 4, each once"
+  (test "the places are 1 to 6, each once"
     (let ((ps (cons (racer-place (race-player R2)) (map racer-place (race-rivals R2)))))
-      (assert-equal 10 (apply + ps))
+      (assert-equal 21 (apply + ps))
       (assert-equal 1 (apply min ps))
-      (assert-equal 4 (apply max ps))))
+      (assert-equal 6 (apply max ps))))
 
   (test "crossing the line again without passing halfway counts no lap"
     ;; just over the line on lap 1, put back 60 texels behind it, heading

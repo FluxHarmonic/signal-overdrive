@@ -278,6 +278,23 @@ for (let y = 0; y < CH; y++) for (let x = 0; x < PW; x++) {
     });
   }
 }
+// row 7 from x 208: the uplink gate. A pylon (32x80, its foot at the cell's
+// bottom) and the beam (32x16, tiled across between the pylon tops).
+{
+  const ox = 208, oy = 7 * CH;
+  for (let y = 0; y < CH; y++) for (let x = 6; x < 26; x++) {
+    const edge = x === 6 || x === 25;
+    const lit = (x === 11 || x === 20) && ((y >> 2) & 1) === 0;
+    sheet.set(ox + x, oy + y, edge ? C.BG : lit ? C.SELECTED : x < 16 ? C.SIDE : C.SIDE_DARK);
+  }
+  for (let y = 0; y < 6; y++) for (let x = 4; x < 28; x++) sheet.set(ox + x, oy + y, y === 0 || y === 5 ? C.BG : C.HIGHLIGHT);
+  const bx = 240;
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 32; x++) {
+    const border = y === 0 || y === 15;
+    const chev = ((x + Math.abs(y - 7.5)) % 16) < 5;
+    sheet.set(bx + x, oy + y, border ? C.BG : y === 1 || y === 14 ? C.HIGHLIGHT : chev ? C.SELECTED : C.BAR_C);
+  }
+}
 sheet.checkPalette("machines");
 fs.mkdirSync(path.join(ROOT, "assets/racer"), { recursive: true });
 sheet.save(path.join(ROOT, "assets/racer/machines.png"));

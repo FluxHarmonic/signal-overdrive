@@ -57,6 +57,17 @@
            sha: "318332fd7f005d4a6cdc834cb8a1e632c0ba923f"
            package-selector: "sigil-browser"
            version: "0.22.11")
+  (package name: "sigil-audio"
+           url: "codeberg:sigil/sigil-audio"
+           ref: "^0.13.0"
+           sha: "02183f9cdbd9f68167a09dd97cfcfa654f7bb7e1"
+           version: "0.13.0")
+  (package name: "sigil-wasm-audio"
+           url: "codeberg:sigil/sigil"
+           ref: ">=0.22.11, <0.22.12"
+           sha: "318332fd7f005d4a6cdc834cb8a1e632c0ba923f"
+           package-selector: "sigil-wasm-audio"
+           version: "0.22.11")
   (package name: "sigil-json"
            url: "codeberg:sigil/sigil-json"
            ref: "^0.16.0"

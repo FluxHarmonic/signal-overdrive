@@ -37,7 +37,7 @@
           (racer mode7 camera))
 
   (export mode7-init! mode7-set-world! mode7-set-sky! mode7-set-look! mode7-draw-ground!
-          mode7-draw-sprite! mode7-ready? mode7-set-far!)
+          mode7-draw-sprite! mode7-ready? mode7-set-far! mode7-sprite-style!)
 
   (begin
     (define GROUND-VERTEX
@@ -142,13 +142,21 @@ void main() {
 }
 ")
 
+    ;; style: x 1 for a see-through sprite (every other pixel, a
+    ;; checkerboard: the dither's own way to be translucent); y a wrap
+    ;; width in texels (0 none) and z its origin u: u repeats over
+    ;; [z, z + y), for a strip stretched wide (the gate's beam).
     (define SPRITE-FRAGMENT
       "uniform vec4 tint;
+uniform vec4 style;
 uniform sampler2D sheet;
 in vec2 v_uv;
 out vec4 frag_color;
 void main() {
-  vec4 c = texelFetch(sheet, ivec2(floor(v_uv)), 0);
+  if (style.x > 0.5 && ((int(gl_FragCoord.x) + int(gl_FragCoord.y)) & 1) == 0) discard;
+  vec2 uv = v_uv;
+  if (style.y > 0.5) uv.x = style.z + mod(uv.x - style.z, style.y);
+  vec4 c = texelFetch(sheet, ivec2(floor(uv)), 0);
   if (c.a < 0.5) discard;
   frag_color = vec4(mix(c.rgb, tint.rgb, tint.a), 1.0);
 }
@@ -238,6 +246,10 @@ void main() {
     ;; A sprite: the sheet's texels (u0, v0)..(u1, v1) (u1 < u0 mirrors it)
     ;; over the screen rect (x, y, w, h), mixed toward the fog colour by fog.
     (define *fogc* '(0.18 0.11 0.30))
+    ;; The style for the sprites drawn next: see-through, and a u wrap.
+    (define (mode7-sprite-style! see-through wrap-w wrap-u0)
+      (set-pipeline-uniform! *sprite* 'style (v4 (if see-through 1.0 0.0) wrap-w wrap-u0 0.0)))
+
     (define (mode7-draw-sprite! sheet x y w h u0 v0 u1 v1 fog fog-color)
       (set-pipeline-uniform! *sprite* 'rect (v4 x y w h))
       (set-pipeline-uniform! *sprite* 'uvr (v4 u0 v0 u1 v1))

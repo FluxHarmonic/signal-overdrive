@@ -77,7 +77,13 @@
       (gles3-start-loop "signal-overdrive-tick")
       0)
 
+    ;; the sound starts on the first user gesture (autoplay policy), and
+    ;; every later gesture resumes a context the browser suspended
+    (define (gesture! type)
+      (when (member type '("keydown" "pointerdown" "touch" "tap")) (core-audio-start!)))
+
     (define (web-dispatch type payload)
+      (gesture! type)
       (cond ((string=? type "frame") (tick! payload) 0)
             ((string=? type "param")
              (say "param " payload)

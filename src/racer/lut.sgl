@@ -22,20 +22,63 @@
   (begin
     ;; params: x spread, w the frame height. opts: x 1 when row 0 of
     ;; gl_FragCoord is the picture's bottom, y 1 to dither (0 copies).
+    ;; fx (pass 3, the frame's effects, all before the palette, so they
+    ;; dither like everything else): x the speed lines' strength 0..1, y the
+    ;; time in seconds, z the glitch 0..1 (rows torn sideways and the
+    ;; channels split: a wall hit, ICE), w corruption 0..1 (the glitch at
+    ;; full and the picture going red: corrupt cargo). vp: the vanishing
+    ;; point (x, y), rows from the top.
     (define LUT-FRAGMENT
       "uniform vec4 params;
 uniform vec4 opts;
+uniform vec4 fx;
+uniform vec4 vp;
 uniform sampler2D src;
 uniform sampler2D lut;
+float hash(float n) { return fract(sin(n * 12.9898) * 43758.5453); }
 out vec4 frag_color;
 const int B4[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
-  vec4 texel = texelFetch(src, p, 0);
+  int yt = opts.x > 0.5 ? int(params.w) - 1 - p.y : p.y;
+  // the glitch: bands of rows torn sideways, the red channel split off
+  float g = max(fx.z, fx.w);
+  vec4 texel;
+  if (g > 0.01) {
+    float band = floor(float(yt) / 3.0);
+    float f = floor(fx.y * 24.0);
+    float h = hash(band * 7.13 + f * 3.71);
+    int shift = h < g * 0.6 ? int((hash(band + f) - 0.5) * 60.0 * g) : 0;
+    ivec2 q = ivec2(clamp(p.x + shift, 0, 479), p.y);
+    texel = texelFetch(src, q, 0);
+    texel.r = texelFetch(src, ivec2(clamp(q.x + int(4.0 * g), 0, 479), p.y), 0).r;
+  } else {
+    texel = texelFetch(src, p, 0);
+  }
   if (opts.y < 0.5) { frag_color = vec4(texel.rgb, 1.0); return; }
   vec3 c = floor(texel.rgb * 255.0 + 0.5);
+  // the speed lines: streaks flying out from the vanishing point, some of
+  // the 96 lanes of angle lit, each streak a band of radius moving outward
+  if (fx.x > 0.01) {
+    vec2 d = vec2(float(p.x), float(yt)) - vp.xy;
+    float r = length(d);
+    float a = atan(d.y, d.x);
+    float lane = floor((a + 3.14159) * 96.0 / 6.28318);
+    float h = hash(lane * 1.77);
+    if (h > 0.6 && r > 70.0) {
+      // thin: only within 0.75 px of the lane's centre line (a lane is
+      // tens of pixels wide out at the edges)
+      float ac = (lane + 0.5) * 6.28318 / 96.0 - 3.14159;
+      float perp = r * abs(sin(a - ac));
+      float pos = fract(h * 9.1 + fx.y * (0.8 + h) * 1.6) * 420.0;
+      float len = 10.0 + 40.0 * fx.x;
+      if (perp < 0.75 && r > pos && r < pos + len) c = mix(c, vec3(204.0, 230.0, 255.0), 0.8 * fx.x);
+    }
+  }
+  // corruption: toward the trace's red
+  c = mix(c, vec3(204.0, 51.0, 64.0) * (0.4 + 0.6 * dot(c, vec3(0.0013))), 0.6 * fx.w);
   int x = p.x;
-  int y = opts.x > 0.5 ? int(params.w) - 1 - p.y : p.y;
+  int y = yt;
   float t = ((float(B4[(y % 4) * 4 + (x % 4)]) + 0.5) / 16.0 - 0.5) * params.x;
   vec3 q = clamp(c + vec3(t), 0.0, 255.0);
   ivec3 b = ivec3(min(floor(q / 4.0), vec3(63.0)));

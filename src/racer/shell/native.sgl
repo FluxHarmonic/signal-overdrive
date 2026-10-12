@@ -102,6 +102,8 @@
           (when (and d (pair? (cdr d)) t (pair? (cdr t)))
             (set! *shot-dir* (cadr d))
             (set! *shots* (map string->number (split-commas (cadr t))))))
+        ;; the sound (after the arguments: --mute keeps the device closed)
+        (core-audio-start!)
         (let* ((qa (member "--quit-after" args))
                (quit-after (and qa (pair? (cdr qa)) (string->number (cadr qa))))
                (scaler (make-window-scaler VIEW-W VIEW-H min-scale: 2 max-scale: 6
