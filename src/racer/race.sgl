@@ -26,7 +26,7 @@
           (racer track)
           (racer handling))
 
-  (export race race? race-new race-step race-start
+  (export race race? race-new race-step race-start race-track
           race-phase race-tick race-player race-rivals race-clock race-countdown race-events
           racer racer? racer-machine racer-lap racer-lap-start racer-last-lap racer-best-lap
           racer-halfway racer-finished racer-place racer-name racer-colour racer-progress
@@ -37,7 +37,8 @@
     (define DT (/ 1.0 60.0))
 
     (define RACE-DEFAULTS
-      '((laps . 3.0)
+      '((track . 0.0)
+        (laps . 3.0)
         (rivals . 3.0)
         (rival-pace . 0.97)     ; a rival's top speed as a share of yours
         (boost-lap . 2.0)       ; the first lap a boost press works on
@@ -68,6 +69,7 @@
     ;; clock: ticks since the start (the race's time). events: this
     ;; tick's, as (who . event) pairs; who is 'player or a rival's index.
     (define-struct race
+      (track default: #f)
       (phase default: 'title)
       (tick default: 0)
       (clock default: 0)
@@ -91,8 +93,13 @@
         ;; heading from the tangent: forward is (sin h, -cos h)
         (machine (make-machine (car p) (cadr p) heading) hint: (track-index-at t s) s: s)))
 
+    ;; The track the tuning names (the track knob: 0 the oval, 1 the loop).
+    (define (tuning-track tuning)
+      (let ((i (exact (round (race-tuning-ref tuning 'track)))))
+        (track-named (list-ref TRACKS (max 0 (min (- (length TRACKS) 1) i))))))
+
     (define (race-new tuning)
-      (let* ((t (loop-track))
+      (let* ((t (tuning-track tuning))
              (n (max 0 (min 5 (exact (round (race-tuning-ref tuning 'rivals))))))
              (pace (race-tuning-ref tuning 'rival-pace))
              (slots '((0 . 0) (0 . 1) (1 . 0) (2 . 0) (2 . 1)))
@@ -108,7 +115,8 @@
                                                 pace: (* pace (- 1.0 (* 0.012 i)))
                                                 lane: (* 0.25 (- (modulo (* i 7) 3) 1)))
                                          acc)))))))
-        (race player: (racer machine: (grid-machine t 1 1) name: "ZERO")
+        (race track: t
+              player: (racer machine: (grid-machine t 1 1) name: "ZERO")
               rivals: rivals
               phase: 'title)))
 
@@ -232,7 +240,7 @@
              racers)))
 
     (define (race-step tuning r controls start?)
-      (let* ((t (loop-track))
+      (let* ((t (race-track r))
              (tick (+ (race-tick r) 1))
              (r (race r tick: tick events: '())))
         (case (race-phase r)

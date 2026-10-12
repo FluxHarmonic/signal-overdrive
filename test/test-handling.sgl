@@ -85,9 +85,45 @@
       (assert-true (> (machine-heading r) EAST))
       (assert-true (< (machine-heading l) EAST))))
 
+  (test "a held turn turns the heading continuously: every tick a little more, never a jump"
+    ;; David's note on the first draft: the turn seemed to snap to angles
+    (let loop ((m (moving 300.0)) (i 0) (last 0.0) (deltas '()))
+      (if (< i 60)
+          (let* ((m2 (run-free H m (make-input 1.0 1.0 0.0 #f #f) 1))
+                 (d (- (machine-heading m2) (machine-heading m))))
+            (loop m2 (+ i 1) d (cons d deltas)))
+          (let* ((ds (reverse deltas))
+                 (full (* (P 'steer) (/ 1.0 60.0))))
+            ;; it starts gently: the first tick is under a fifth of full lock
+            (assert-true (< (car ds) (* 0.2 full)))
+            ;; every tick turns, and none turns more than full lock allows
+            (for-each (lambda (d) (assert-true (> d 0.0)) (assert-true (<= d (+ full 1e-9)))) ds)
+            ;; it ramps up: each of the first 7 ticks turns more than the one
+            ;; before (the ramp takes 1/steer-in = 7.5 ticks)
+            (let check ((ds ds) (k 0))
+              (when (< k 6)
+                (assert-true (> (cadr ds) (car ds)))
+                (check (cdr ds) (+ k 1))))
+            ;; then no jumps: tick to tick it changes by under 2% (the rate
+            ;; drifts as the speed changes, smoothly)
+            (let check ((ds (list-tail ds 8)))
+              (when (pair? (cdr ds))
+                (assert-true (< (abs (- (cadr ds) (car ds))) (* 0.02 (car ds))))
+                (check (cdr ds))))
+            ;; and reaches the full rate for its speed within a quarter second
+            (assert-true (> (list-ref ds 15) (* 0.6 full)))))))
+
+  (test "letting go returns the steering to centre within a tenth of a second"
+    (let* ((held (run-free H (moving 300.0) (make-input 1.0 1.0 0.0 #f #f) 30))
+           (let-go (run-free H held (make-input 0.0 1.0 0.0 #f #f) 6)))
+      (assert-true (> (machine-steer held) 0.99))
+      (assert-true (< (abs (machine-steer let-go)) 1e-9))))
+
   (test "steering is slower at top speed"
-    (let ((slow (run-free H (moving 50.0) (make-input 1.0 0.0 0.0 #f #f) 1))
-          (fast (run-free H (moving (P 'top)) (make-input 1.0 0.0 0.0 #f #f) 1)))
+    ;; one tick at full lock (the ramp already done), at 50 and at top speed
+    (let* ((full (lambda (v) (machine (moving v) steer: 1.0)))
+           (slow (run-free H (full 50.0) (make-input 1.0 0.0 0.0 #f #f) 1))
+           (fast (run-free H (full (P 'top)) (make-input 1.0 0.0 0.0 #f #f) 1)))
       (assert-true (< (- (machine-heading fast) EAST) (* 0.8 (- (machine-heading slow) EAST))))))
 
   (test "grip takes the slide out at the grip rate"
@@ -132,6 +168,14 @@
            (drift (run-free H m (make-input 1.0 1.0 0.0 #f #t) 20)))
       (assert-true (> (abs (machine-lateral-speed drift)) (* 1.5 (abs (machine-lateral-speed grip)))))
       (assert-true (> (machine-heading drift) (machine-heading grip)))))
+
+  (test "drift lowers the grip by the drift factor (no steering, so drift-steer plays no part)"
+    (let* ((m (machine (moving 300.0) vy: 200.0))
+           (grip (run-free H m NO-INPUT 30))
+           (drift (run-free H m (make-input 0.0 0.0 0.0 #f #t) 30)))
+      (assert-true (near? (machine-lateral-speed drift)
+                          (* 200.0 (exp (* -0.5 (P 'grip) (P 'drift)))) 2.0))
+      (assert-true (> (abs (machine-lateral-speed drift)) (* 3.0 (abs (machine-lateral-speed grip)))))))
 
   (test "the sprite leans into the turn"
     (let ((m (run-free H (moving 300.0) (make-input 1.0 1.0 0.0 #f #f) 30)))

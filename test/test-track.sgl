@@ -66,6 +66,13 @@
       (assert-true (track-on-repair? st rep))
       (assert-false (track-on-repair? st rep-wrong-side))))
 
+  (test "the oval: two boost pads, a repair strip, and wider than the loop"
+    (let ((o (track-named 'oval)))
+      (assert-equal 'oval (track-name o))
+      (assert-equal 2 (length (track-boost o)))
+      (assert-equal 1 (length (track-repair o)))
+      (assert-true (> (track-hw o 0) (track-hw T 0)))))
+
   (test "the loop has four boost pads and a repair strip"
     (assert-equal 4 (length (track-boost T)))
     (assert-equal 1 (length (track-repair T)))))

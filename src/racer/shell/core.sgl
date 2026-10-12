@@ -79,6 +79,10 @@
       (cond ((string=? kv "autopilot") (set! *autopilot* #t) (say "autopilot on"))
             ((string=? kv "start") (set! *start-now* #t))
             ((string=? kv "fps") (set! *fps-on* #t))
+            ;; ?track=oval|loop as well as ?track=0|1
+            ((and (> (string-length kv) 6) (string=? (substring kv 0 6) "track=")
+                  (memq (string->symbol (substring kv 6 (string-length kv))) TRACKS))
+             (core-param! (string-append "track=" (number->string (track-index-of (string->symbol (substring kv 6 (string-length kv))))))))
             (else
              (let ((t (tuning-parse! *tuning* kv)))
                (when t
@@ -141,7 +145,7 @@
         (set! *touch-boost-pending* #f)
         (if *autopilot*
             (let ((m (racer-machine (race-player *race*))))
-              (ai-input (loop-track) m 0.0 #t))
+              (ai-input (race-track *race*) m 0.0 #t))
             (make-input steer throttle brake boost drift))))
 
     (define (start-asked?)
@@ -184,7 +188,7 @@
     (define (after-knob! key)
       (say "tuning " (symbol->string key) "=" (tuning-format-value (tuning-ref *tuning* key))
            " query ?" (tuning-query *tuning*))
-      (when (memq key '(laps rivals rival-pace))
+      (when (memq key '(track laps rivals rival-pace))
         (set! *race* (race-new *tuning*))))
 
     ;; --- a frame ----------------------------------------------------------------------------

@@ -11,6 +11,9 @@
 ;;; (cos h, sin h).
 ;;;
 ;;; The model, per step:
+;;;  0. the steering ramps: the applied steer moves toward the input at
+;;;     steer-in per second (to full lock in 1/steer-in s) and back toward
+;;;     centre at steer-out, so a key (all or nothing) steers like a stick.
 ;;;  1. steer: the heading turns at `steer` rad/s at full lock, falling to
 ;;;     steer * steer-high at top speed; holding drift multiplies it by
 ;;;     drift-steer.
@@ -44,7 +47,7 @@
   (export handling handling? default-handling handling-ref handling-set handling-keys
           machine machine? make-machine
           machine-x machine-y machine-heading machine-vx machine-vy machine-integrity
-          machine-boost machine-lean machine-hint machine-pad-lock machine-events
+          machine-boost machine-lean machine-hint machine-pad-lock machine-events machine-steer
           machine-s machine-d machine-on-repair
           machine-speed machine-forward-speed machine-lateral-speed
           input input? input-steer input-throttle input-brake input-boost input-drift input-boost-ok
@@ -63,6 +66,8 @@
         (coast . 70.0)           ; texels/s^2 off the throttle
         (overspeed-drag . 240.0) ; texels/s^2 above top speed
         (steer . 2.5)            ; rad/s at full lock, at a standstill
+        (steer-in . 8.0)         ; how fast the applied steer moves toward the input, per second
+        (steer-out . 12.0)       ; how fast it returns toward centre, per second
         (steer-high . 0.62)      ; the share of steer left at top speed
         (grip . 7.0)             ; lateral decay per second
         (drift . 0.30)           ; grip multiplier while drifting
@@ -102,6 +107,7 @@
       (integrity default: 100.0)
       (boost default: 0.0)
       (lean default: 0.0)
+      (steer default: 0.0)       ; the applied steer, after the ramp
       (hint default: #f)
       (pad-lock default: #f)
       (on-repair default: #f)
@@ -139,7 +145,11 @@
              (top-eff (if boosting (* top (P 'boost-speed)) top))
              (speed0 (machine-speed m))
              (drift (input-drift in))
-             (steer (clamp -1.0 1.0 (input-steer in)))
+             (target (clamp -1.0 1.0 (input-steer in)))
+             (cur (machine-steer m))
+             ;; 0. the ramp: out from centre at steer-in, back (or across) at steer-out
+             (ramp (if (and (>= (* target cur) 0.0) (> (abs target) (abs cur))) (P 'steer-in) (P 'steer-out)))
+             (steer (+ cur (clamp (- (* ramp dt)) (* ramp dt) (- target cur))))
              ;; 1. steer
              (rate (* (P 'steer)
                       (+ 1.0 (* (- (P 'steer-high) 1.0) (clamp 0.0 1.0 (/ speed0 top))))
@@ -225,7 +235,7 @@
                  (events (if fires (cons 'boost events) events))
                  (lean-to (clamp -1.0 1.0 (* steer (if drift 1.0 0.7))))
                  (lean (+ (machine-lean m) (* (- lean-to (machine-lean m)) (min 1.0 (* 10.0 dt))))))
-            (machine m x: x y: y heading: heading vx: vx vy: vy
+            (machine m x: x y: y heading: heading vx: vx vy: vy steer: steer
                      integrity: (max 0.0 integrity)
                      boost: (max 0.0 boost)
                      lean: lean

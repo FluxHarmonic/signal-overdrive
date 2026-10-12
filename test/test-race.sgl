@@ -15,7 +15,7 @@
   (let loop ((r r) (i 0))
     (if (= i n)
         r
-        (let ((in (ai-input (loop-track) (racer-machine (race-player r)) 0.0 #t)))
+        (let ((in (ai-input (race-track r) (racer-machine (race-player r)) 0.0 #t)))
           (loop (race-step tuning r in #f) (+ i 1))))))
 
 (define (started tuning) (race-step tuning (race-new tuning) NO-INPUT #t))
@@ -38,7 +38,7 @@
     (let ((r (race-new T)))
       (assert-equal 3 (length (race-rivals r)))
       (assert-equal 0 (racer-lap (race-player r)))
-      (assert-true (> (machine-s (racer-machine (race-player r))) (* 0.9 (track-length (loop-track))))))))
+      (assert-true (> (machine-s (racer-machine (race-player r))) (* 0.9 (track-length (race-track r))))))))
 
 (test-group "race: laps"
   ;; one long run, shared by the cases below: two laps on the line
@@ -53,10 +53,17 @@
       (assert-equal 'finished (race-phase R2))
       (assert-true (racer-finished p))
       (assert-true (racer-best-lap p))
-      ;; a lap on this loop is 14,538 texels: at most 560 texels/s, so
-      ;; never under 26 s, and the line should take less than 45
-      (assert-true (> (racer-best-lap p) (* 60 26)))
-      (assert-true (< (racer-best-lap p) (* 60 45)))))
+      ;; the default track is the oval, 8,448 texels: at most 560 texels/s,
+      ;; so never under 15 s, and the line should take less than 25
+      (assert-true (> (racer-best-lap p) (* 60 15)))
+      (assert-true (< (racer-best-lap p) (* 60 25)))))
+
+  (test "on the loop too, the autopilot and every rival complete a lap"
+    (let* ((tu (handling-set (handling-set T 'track 1.0) 'laps 1.0))
+           (r (run tu (started tu) (* 60 50))))
+      (assert-equal 'loop (track-name (race-track r)))
+      (assert-equal 'finished (race-phase r))
+      (for-each (lambda (x) (assert-true (racer-finished x))) (race-rivals r))))
 
   (test "every rival completes laps too"
     (for-each (lambda (x) (assert-true (>= (racer-lap x) 2))) (race-rivals R2)))
@@ -66,6 +73,22 @@
       (assert-equal 10 (apply + ps))
       (assert-equal 1 (apply min ps))
       (assert-equal 4 (apply max ps))))
+
+  (test "crossing the line again without passing halfway counts no lap"
+    ;; just over the line on lap 1, put back 60 texels behind it, heading
+    ;; on: it crosses the line a second time, which is not a lap
+    (let* ((r (run T (started T) (+ 181 120)))
+           (t (race-track r))
+           (p (race-player r))
+           (pt (track-point t (- (track-length t) 60.0) 0.0))
+           (m (machine (racer-machine p) x: (car pt) y: (cadr pt)
+                       heading: (atan (caddr pt) (- (cadddr pt))) hint: #f
+                       s: (- (track-length t) 60.0)))
+           (r2 (run T (race r player: (racer p machine: m)) 120)))
+      (assert-equal 1 (racer-lap (race-player r)))
+      ;; it did cross: it is past the line again
+      (assert-true (< (machine-s (racer-machine (race-player r2))) 1000.0))
+      (assert-equal 1 (racer-lap (race-player r2)))))
 
   (test "driving backwards over the line counts no lap"
     ;; turned round on the grid: full throttle the wrong way for 10 s

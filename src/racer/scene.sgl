@@ -64,10 +64,14 @@
             (loop (cdr fs) (+ k 4))))
         bv))
 
-    ;; Textures from the shell (each loaded natively or fetched on the web).
-    (define (scene-init! atlas tmap tavg sky sheet)
+    ;; Textures from the shell (each loaded natively or fetched on the web):
+    ;; tracks is ((name atlas map avg) ...), one entry per track.
+    (define *tracks* '())
+    (define *shown* #f)          ; the track whose textures the ground has
+    (define (scene-init! tracks sky sheet)
       (mode7-init! VIEW-W VIEW-H)
-      (mode7-set-world! atlas tmap tavg 32.0 64.0 128.0 3.2)
+      (set! *tracks* tracks)
+      (show-track! (caar tracks))
       (mode7-set-sky! sky 96.0 0.30 0.55 0.85)
       (set-texture-sampling! sheet 'nearest 'clamp)
       (set! *sheet* sheet)
@@ -81,6 +85,12 @@
       (set! *post* (make-render-target VIEW-W VIEW-H 'nearest 'depth))
       (set! *view-tex* (render-target->texture *view*))
       (set! *presenter* (make-presenter VIEW-W VIEW-H)))
+
+    (define (show-track! name)
+      (unless (eq? name *shown*)
+        (let ((e (or (assq name *tracks*) (car *tracks*))))
+          (mode7-set-world! (cadr e) (caddr e) (cadddr e) 32.0 64.0 128.0 3.2)
+          (set! *shown* name))))
 
     ;; The post pass's palette and spread, when they change.
     (define (sync-post! tuning)
@@ -312,6 +322,7 @@
     ;; (restart-line . text) (overlay . selected-row-or-#f).
     (define (scene-frame! tuning r cam-heading info win-w win-h integer-only)
       (sync-post! tuning)
+      (show-track! (track-name (race-track r)))
       (look! tuning)
       (let* ((m (racer-machine (race-player r)))
              (c (scene-camera tuning m cam-heading))

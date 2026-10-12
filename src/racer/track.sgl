@@ -2,7 +2,8 @@
 ;;; from the centreline, and whether it is on a boost pad or the repair strip.
 ;;;
 ;;; A track is its centreline sampled at even arc lengths (the generator's
-;;; samples, (racer track loop-data)): per sample x y, the unit tangent,
+;;; samples, (racer track oval-data) and (racer track loop-data); TRACKS
+;;; names them, track-named builds one): per sample x y, the unit tangent,
 ;;; the half-width and the racing line. A probe finds the nearest sample
 ;;; (near a hint when one is given, so a probe per machine per tick costs a
 ;;; few dozen distance checks), projects the point onto the segments either
@@ -20,11 +21,12 @@
   (import (sigil core)
           (sigil struct)
           (sigil math)
+          (racer track oval-data)
           (racer track loop-data))
 
   (export track track? track-n track-length track-step track-samples track-cumulative
           track-boost track-repair
-          make-track loop-track
+          make-track track-named loop-track TRACKS track-name track-index-of
           track-x track-y track-tx track-ty track-hw track-line track-s
           probe probe? probe-s probe-d probe-hw probe-tx probe-ty probe-i
           track-probe track-point track-index-at wrap-s s-ahead
@@ -35,6 +37,7 @@
     (define HINT-WINDOW 10)
 
     (define-struct track
+      (name default: 'unnamed)
       (n default: 0)
       (length default: 0.0)
       (step default: 16.0)
@@ -56,7 +59,7 @@
     (define (track-line t i) (field t i 5))
     (define (track-s t i) (vector-ref (track-cumulative t) i))
 
-    (define (make-track samples step boost repair)
+    (define (make-track samples step boost repair . name)
       (let* ((n (quotient (vector-length samples) FIELDS))
              (cum (make-vector (+ n 1) 0.0)))
         (let loop ((i 1))
@@ -66,14 +69,25 @@
                    (bx (vector-ref samples (* b FIELDS))) (by (vector-ref samples (+ (* b FIELDS) 1))))
               (vector-set! cum i (+ (vector-ref cum a) (sqrt (+ (square (- bx ax)) (square (- by ay))))))
               (loop (+ i 1)))))
-        (track n: n length: (vector-ref cum n) step: step samples: samples cumulative: cum
+        (track name: (if (pair? name) (car name) 'unnamed)
+               n: n length: (vector-ref cum n) step: step samples: samples cumulative: cum
                boost: boost repair: repair)))
 
-    (define *loop* #f)
-    (define (loop-track)
-      (unless *loop*
-        (set! *loop* (make-track LOOP-SAMPLES LOOP-STEP LOOP-BOOST LOOP-REPAIR)))
-      *loop*)
+    ;; The tracks, in the order of the track knob: 0 the oval (the wide test
+    ;; track), 1 the loop. Each built once, on first use.
+    (define TRACKS '(oval loop))
+    (define *built* '())
+    (define (track-index-of name)
+      (let loop ((ts TRACKS) (i 0)) (cond ((null? ts) 0) ((eq? (car ts) name) i) (else (loop (cdr ts) (+ i 1))))))
+    (define (track-named name)
+      (let ((e (assq name *built*)))
+        (if e
+            (cdr e)
+            (let* ((d (case name ((loop) (loop-track-data)) (else (oval-track-data))))
+                   (t (make-track (list-ref d 1) (list-ref d 2) (list-ref d 3) (list-ref d 4) (car d))))
+              (set! *built* (cons (cons name t) *built*))
+              t))))
+    (define (loop-track) (track-named 'loop))
 
     (define (wrap-i t i) (modulo i (track-n t)))
     (define (wrap-s t s)

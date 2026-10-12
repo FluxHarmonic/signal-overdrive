@@ -18,12 +18,16 @@
           (substratic input events)
           (substratic input pad)
           (racer scene)
+          (racer track)
           (racer shell core))
 
   (export web-main web-dispatch)
 
   (begin
-    (define NAMES '("track-atlas.png" "track-map.png" "track-avg.png" "sky.png" "machines.png"))
+    (define (track-files t)
+      (let ((n (symbol->string t)))
+        (list (string-append n "-atlas.png") (string-append n "-map.png") (string-append n "-avg.png"))))
+    (define NAMES (append (apply append (map track-files TRACKS)) '("sky.png" "machines.png")))
     (define *fetches* '())
     (define *started* #f)
     (define *last-ms* #f)
@@ -58,7 +62,7 @@
                (when (= *frames* 2) (say "ready"))
                (when (= 0 (modulo *frames* 600)) (say (core-describe))))
               ((fetched?)
-               (scene-init! (texture "track-atlas.png") (texture "track-map.png") (texture "track-avg.png")
+               (scene-init! (map (lambda (t) (cons t (map texture (track-files t)))) TRACKS)
                             (texture "sky.png") (texture "machines.png"))
                (set! *started* #t)))))
 
