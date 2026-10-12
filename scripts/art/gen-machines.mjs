@@ -3,14 +3,18 @@
 //
 //   node scripts/art/gen-machines.mjs [--zoom]
 //
-// Writes assets/racer/machines.png, 2048x400, in rows 80 px tall (scene.sgl's
+// Writes assets/racer/machines.png, 2048x640, in rows 80 px tall (scene.sgl's
 // CELL-H) with the ground point 48 px down (ANCHOR-Y), centred across:
-//   row 0   80 px cells (PLAYER-CELL-W): the player from behind: hard left, left, centre, right, hard
-//           right (banked and slightly yawed), then the same five boosting
-//   rows 1-3 128 px cells (RIVAL-CELL-W; a side view is ~116 px long):
-//           a rival in each colour, 16 directions: k * 22.5 degrees, the
-//           machine turned right of the line of sight (0: its back to you)
-//   row 4   the shadow, in an 80 px cell
+//   row 0    80 px cells (PLAYER-CELL-W): the player (the falcon) from
+//            behind, in four runs of five leans (hard left, left, centre,
+//            right, hard right; banked and slightly yawed): idle, boosting,
+//            then both again with the thrusters' second flicker frame
+//   rows 1-3 128 px cells (RIVAL-CELL-W; a side view is ~116 px long): a
+//            rival per colour and model (orange needle, magenta brick,
+//            violet delta), 16 directions: k * 22.5 degrees, the machine
+//            turned right of the line of sight (0: its back to you)
+//   rows 4-6 the same, the thrusters' second flicker frame
+//   row 7    the shadow in an 80 px cell, then four 32x32 spark frames
 // and with --zoom docs/machines-zoom.png, the sheet at 4x for review.
 //
 // How: each part of the model is a hexahedron (eight corners, so a box that
@@ -55,45 +59,114 @@ function box(x0, x1, y0, y1, z0, z1, mat) {
               [[x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]], mat);
 }
 
-function model(boost) {
+// Shared: the exhausts and their flames at the back. len: the flame's
+// length; flick: the second flicker frame (a longer flame).
+function exhausts(parts, xs, y, z0, z1, w, len) {
+  for (const cx of xs) {
+    parts.push(box(cx - w, cx + w, y - 0.015, y, z0, z1, "glow"));
+    const zm = (z0 + z1) / 2, h = (z1 - z0) * 0.35;
+    parts.push(hexa([[cx - w * 0.75, y - 0.015, zm - h], [cx + w * 0.75, y - 0.015, zm - h], [cx + w * 0.75, y - 0.015, zm + h], [cx - w * 0.75, y - 0.015, zm + h]],
+                    [[cx - 0.005, y - 0.015 - len, zm - 0.005], [cx + 0.005, y - 0.015 - len, zm - 0.005], [cx + 0.005, y - 0.015 - len, zm + 0.005], [cx - 0.005, y - 0.015 - len, zm + 0.005]], "glow"));
+  }
+}
+const sym = (s, a, b) => [Math.min(a * s, b * s), Math.max(a * s, b * s)];
+
+// The player's: one wide flat wedge, a raised spine with the canopy, an
+// engine block across the back with three exhausts, two fins.
+function falcon(len) {
   const parts = [];
-  // the deck: one wide flat wedge, full width at the back, a narrow nose
   parts.push(hexa([[-0.52, -0.70, 0.05], [0.52, -0.70, 0.05], [0.50, -0.70, 0.16], [-0.50, -0.70, 0.16]],
                   [[-0.10, 0.88, 0.05], [0.10, 0.88, 0.05], [0.08, 0.88, 0.09], [-0.08, 0.88, 0.09]], "body"));
-  // side skirts: the deck's lower edge in the dark trim, a little wider
   for (const s of [-1, 1]) {
-    const x0 = Math.min(0.46 * s, 0.55 * s), x1 = Math.max(0.46 * s, 0.55 * s);
+    const [x0, x1] = sym(s, 0.46, 0.55);
     parts.push(hexa([[x0, -0.72, 0.03], [x1, -0.72, 0.03], [x1, -0.72, 0.09], [x0, -0.72, 0.09]],
                     [[x0 * 0.45, 0.55, 0.03], [x1 * 0.45, 0.55, 0.03], [x1 * 0.45, 0.55, 0.06], [x0 * 0.45, 0.55, 0.06]], "trim"));
   }
-  // the spine, raised down the middle, with the canopy on it
   parts.push(hexa([[-0.20, -0.66, 0.15], [0.20, -0.66, 0.15], [0.15, -0.66, 0.30], [-0.15, -0.66, 0.30]],
                   [[-0.07, 0.55, 0.08], [0.07, 0.55, 0.08], [0.04, 0.55, 0.12], [-0.04, 0.55, 0.12]], "stripe"));
   parts.push(hexa([[-0.12, -0.25, 0.25], [0.12, -0.25, 0.25], [0.08, -0.20, 0.36], [-0.08, -0.20, 0.36]],
                   [[-0.06, 0.30, 0.12], [0.06, 0.30, 0.12], [0.03, 0.22, 0.17], [-0.03, 0.22, 0.17]], "glass"));
-  // the engine block across the back
   parts.push(box(-0.40, 0.40, -0.84, -0.66, 0.05, 0.27, "pod"));
-  // three exhausts and their flames
-  for (const cx of [-0.25, 0, 0.25]) {
-    parts.push(box(cx - 0.08, cx + 0.08, -0.855, -0.84, 0.09, 0.22, "glow"));
-    const len = (boost ? 0.42 : 0.10) * (cx === 0 ? 1.15 : 1);
-    parts.push(hexa([[cx - 0.06, -0.855, 0.11], [cx + 0.06, -0.855, 0.11], [cx + 0.06, -0.855, 0.20], [cx - 0.06, -0.855, 0.20]],
-                    [[cx - 0.005, -0.855 - len, 0.15], [cx + 0.005, -0.855 - len, 0.15], [cx + 0.005, -0.855 - len, 0.16], [cx - 0.005, -0.855 - len, 0.16]], "glow"));
-  }
-  // two fins at the rear corners
+  exhausts(parts, [-0.25, 0, 0.25], -0.84, 0.09, 0.22, 0.08, len);
   for (const s of [-1, 1]) {
-    const x0 = Math.min(0.44 * s, 0.48 * s), x1 = Math.max(0.44 * s, 0.48 * s);
+    const [x0, x1] = sym(s, 0.44, 0.48);
     parts.push(hexa([[x0, -0.72, 0.15], [x1, -0.72, 0.15], [x1, -0.80, 0.34], [x0, -0.80, 0.34]],
                     [[x0, -0.36, 0.15], [x1, -0.36, 0.15], [x1, -0.56, 0.20], [x0, -0.56, 0.20]], "stripe"));
   }
   return parts;
 }
 
+// A needle: a long thin fuselage, two outrigger engines on thin wings, one
+// tall fin. Reads long and fast from the side.
+function needle(len) {
+  const parts = [];
+  parts.push(hexa([[-0.15, -0.72, 0.06], [0.15, -0.72, 0.06], [0.13, -0.72, 0.26], [-0.13, -0.72, 0.26]],
+                  [[-0.03, 1.00, 0.08], [0.03, 1.00, 0.08], [0.02, 1.00, 0.11], [-0.02, 1.00, 0.11]], "body"));
+  parts.push(hexa([[-0.09, -0.10, 0.22], [0.09, -0.10, 0.22], [0.06, -0.05, 0.32], [-0.06, -0.05, 0.32]],
+                  [[-0.04, 0.45, 0.12], [0.04, 0.45, 0.12], [0.02, 0.40, 0.16], [-0.02, 0.40, 0.16]], "glass"));
+  for (const s of [-1, 1]) {
+    const [w0, w1] = sym(s, 0.12, 0.40);
+    parts.push(box(w0, w1, -0.55, -0.05, 0.10, 0.14, "stripe"));
+    const [p0, p1] = sym(s, 0.36, 0.52);
+    parts.push(hexa([[p0, -0.78, 0.04], [p1, -0.78, 0.04], [p1, -0.78, 0.20], [p0, -0.78, 0.20]],
+                    [[p0 + 0.02 * s, 0.30, 0.07], [p1 - 0.03 * s, 0.30, 0.07], [p1 - 0.03 * s, 0.30, 0.14], [p0 + 0.02 * s, 0.30, 0.14]], "pod"));
+    exhausts(parts, [0.44 * s], -0.78, 0.07, 0.17, 0.06, len);
+  }
+  parts.push(hexa([[-0.02, -0.70, 0.25], [0.02, -0.70, 0.25], [0.02, -0.82, 0.52], [-0.02, -0.82, 0.52]],
+                  [[-0.02, -0.30, 0.25], [0.02, -0.30, 0.25], [0.02, -0.55, 0.30], [-0.02, -0.55, 0.30]], "stripe"));
+  return parts;
+}
+
+// A brick: wide, tall and square, short nose, armoured sides, four
+// engines in two stacks. Reads heavy.
+function brick(len) {
+  const parts = [];
+  parts.push(hexa([[-0.48, -0.70, 0.05], [0.48, -0.70, 0.05], [0.44, -0.70, 0.34], [-0.44, -0.70, 0.34]],
+                  [[-0.30, 0.70, 0.05], [0.30, 0.70, 0.05], [0.24, 0.70, 0.16], [-0.24, 0.70, 0.16]], "body"));
+  for (const s of [-1, 1]) {
+    const [x0, x1] = sym(s, 0.46, 0.54);
+    parts.push(hexa([[x0, -0.66, 0.04], [x1, -0.66, 0.04], [x1, -0.66, 0.24], [x0, -0.66, 0.24]],
+                    [[x0 - 0.06 * s, 0.50, 0.04], [x1 - 0.12 * s, 0.50, 0.04], [x1 - 0.12 * s, 0.50, 0.14], [x0 - 0.06 * s, 0.50, 0.14]], "pod"));
+  }
+  parts.push(hexa([[-0.20, -0.30, 0.33], [0.20, -0.30, 0.33], [0.16, -0.26, 0.42], [-0.16, -0.26, 0.42]],
+                  [[-0.14, 0.30, 0.18], [0.14, 0.30, 0.18], [0.10, 0.24, 0.24], [-0.10, 0.24, 0.24]], "glass"));
+  parts.push(box(-0.44, 0.44, -0.78, -0.68, 0.06, 0.34, "pod"));
+  exhausts(parts, [-0.26, 0.26], -0.78, 0.08, 0.18, 0.10, len);
+  exhausts(parts, [-0.26, 0.26], -0.78, 0.21, 0.31, 0.10, len * 0.8);
+  parts.push(box(-0.30, 0.30, -0.72, -0.52, 0.34, 0.37, "stripe"));
+  return parts;
+}
+
+// A delta: a flat triangular wing from the nose to the rear corners, a
+// central pod and twin fins at the wing tips.
+function delta(len) {
+  const parts = [];
+  parts.push(hexa([[-0.54, -0.70, 0.06], [0.54, -0.70, 0.06], [0.54, -0.70, 0.11], [-0.54, -0.70, 0.11]],
+                  [[-0.02, 0.92, 0.06], [0.02, 0.92, 0.06], [0.02, 0.92, 0.08], [-0.02, 0.92, 0.08]], "body"));
+  parts.push(hexa([[-0.16, -0.74, 0.08], [0.16, -0.74, 0.08], [0.12, -0.74, 0.28], [-0.12, -0.74, 0.28]],
+                  [[-0.05, 0.60, 0.08], [0.05, 0.60, 0.08], [0.03, 0.60, 0.13], [-0.03, 0.60, 0.13]], "pod"));
+  parts.push(hexa([[-0.09, -0.20, 0.25], [0.09, -0.20, 0.25], [0.06, -0.15, 0.34], [-0.06, -0.15, 0.34]],
+                  [[-0.04, 0.38, 0.12], [0.04, 0.38, 0.12], [0.02, 0.32, 0.16], [-0.02, 0.32, 0.16]], "glass"));
+  exhausts(parts, [-0.07, 0.07], -0.74, 0.11, 0.24, 0.05, len);
+  for (const s of [-1, 1]) {
+    const [x0, x1] = sym(s, 0.46, 0.50);
+    parts.push(hexa([[x0, -0.70, 0.10], [x1, -0.70, 0.10], [x1, -0.78, 0.36], [x0, -0.78, 0.36]],
+                    [[x0 + 0.02 * s, -0.40, 0.10], [x1 + 0.02 * s, -0.40, 0.10], [x1 + 0.02 * s, -0.55, 0.16], [x0 + 0.02 * s, -0.55, 0.16]], "stripe"));
+  }
+  return parts;
+}
+
+const MODELS = { falcon, needle, brick, delta };
+function model(kind, boost, flick) {
+  const len = (boost ? 0.42 : 0.10) * (flick ? 1.35 : 1);
+  return MODELS[kind](len);
+}
+
 // ---- rasterize -------------------------------------------------------------------------
 const FACES = [[0, 1, 2, 3], [5, 4, 7, 6], [4, 0, 3, 7], [1, 5, 6, 2], [3, 2, 6, 7], [4, 5, 1, 0]];
 const LIGHT = (() => { const l = [-0.45, 0.35, 0.82]; const n = Math.hypot(...l); return l.map((v) => v / n); })();
 
-function render(canvas, ox, oy, colours, { yaw, roll, elev, boost, cw, scale }) {
+function render(canvas, ox, oy, colours, { kind, yaw, roll, elev, boost, flick, cw, scale }) {
   CW = cw; AX = cw / 2; SCALE = scale;
   const zbuf = new Float32Array(CW * CH).fill(Infinity);
   const cy = Math.cos(yaw), sy = Math.sin(yaw), cr = Math.cos(roll), sr = Math.sin(roll);
@@ -106,7 +179,7 @@ function render(canvas, ox, oy, colours, { yaw, roll, elev, boost, cw, scale }) 
     return [x2, y2, z1 + hover];
   };
   const toScreen = ([x, y, z]) => [AX + x * SCALE, AY - (z * ce + y * se) * SCALE, y * ce - z * se];
-  for (const part of model(boost)) {
+  for (const part of model(kind, boost, flick)) {
     const wv = part.v.map(xf);
     const centre = wv.reduce((a, v) => [a[0] + v[0] / 8, a[1] + v[1] / 8, a[2] + v[2] / 8], [0, 0, 0]);
     const ramp5 = part.mat === "body" ? colours.body : part.mat === "pod" ? colours.pod
@@ -123,7 +196,7 @@ function render(canvas, ox, oy, colours, { yaw, roll, elev, boost, cw, scale }) 
       if ((fc[0] - centre[0]) * n[0] + (fc[1] - centre[1]) * n[1] + (fc[2] - centre[2]) * n[2] < 0) n = n.map((k) => -k);
       // facing the camera? the view looks along +y and down: toward the viewer is (0, -ce, se)
       if (n[1] * -ce + n[2] * se <= 0) continue;
-      const lit = part.mat === "glow" ? 0.42 + 0.3 * Math.max(0, n[2])
+      const lit = part.mat === "glow" ? (flick ? 0.55 : 0.42) + 0.3 * Math.max(0, n[2])
         : Math.max(0, n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2]) * 0.8 + 0.12;
       const s = q.map(toScreen);
       for (const tri of [[s[0], s[1], s[2]], [s[0], s[2], s[3]]]) fill(tri, (x, y, z) => {
@@ -164,24 +237,46 @@ function fill([a, b, c], plot) {
 }
 
 // ---- the sheet --------------------------------------------------------------------------
-const sheet = new Canvas(RW * 16, CH * 5);
-const PLAYER = { body: RAMPS.player, pod: RAMPS.trim, stripe: RAMPS.player };
+const sheet = new Canvas(RW * 16, CH * 8);
+const PLAYER = { kind: "falcon", body: RAMPS.player, pod: RAMPS.trim, stripe: RAMPS.player };
 const RIVALS = [
-  { body: RAMPS.orange, pod: RAMPS.trim, stripe: RAMPS.magenta },
-  { body: RAMPS.magenta, pod: RAMPS.trim, stripe: RAMPS.player },
-  { body: RAMPS.violet, pod: RAMPS.trim, stripe: RAMPS.orange },
+  { kind: "needle", body: RAMPS.orange, pod: RAMPS.trim, stripe: RAMPS.magenta },
+  { kind: "brick", body: RAMPS.magenta, pod: RAMPS.trim, stripe: RAMPS.player },
+  { kind: "delta", body: RAMPS.violet, pod: RAMPS.trim, stripe: RAMPS.orange },
 ];
 const ELEV_PLAYER = 17 * DEG, ELEV_RIVAL = 12 * DEG;
 const LEAN = [[-26, -10], [-12, -4], [0, 0], [12, 4], [26, 10]];   // roll, yaw (deg)
-for (let boost = 0; boost < 2; boost++) LEAN.forEach(([r, y], i) =>
-  render(sheet, (i + boost * 5) * PW, 0, PLAYER, { yaw: y * DEG, roll: r * DEG, elev: ELEV_PLAYER, boost: !!boost, cw: PW, scale: PLAYER_SCALE }));
-RIVALS.forEach((col, row) => {
-  for (let k = 0; k < 16; k++) render(sheet, k * RW, (row + 1) * CH, col, { yaw: k * 22.5 * DEG, roll: 0, elev: ELEV_RIVAL, boost: false, cw: RW, scale: RIVAL_SCALE });
+// row 0: idle, boosting, idle (flicker), boosting (flicker); five leans each
+for (let flick = 0; flick < 2; flick++) for (let boost = 0; boost < 2; boost++) LEAN.forEach(([r, y], i) =>
+  render(sheet, (i + boost * 5 + flick * 10) * PW, 0, PLAYER,
+         { kind: PLAYER.kind, yaw: y * DEG, roll: r * DEG, elev: ELEV_PLAYER, boost: !!boost, flick: !!flick, cw: PW, scale: PLAYER_SCALE }));
+// rows 1-3 and, flickering, 4-6
+for (let flick = 0; flick < 2; flick++) RIVALS.forEach((col, row) => {
+  for (let k = 0; k < 16; k++) render(sheet, k * RW, (row + 1 + flick * 3) * CH, col,
+    { kind: col.kind, yaw: k * 22.5 * DEG, roll: 0, elev: ELEV_RIVAL, boost: false, flick: !!flick, cw: RW, scale: RIVAL_SCALE });
 });
-// the shadow: a dithered ellipse under the anchor
+// row 7: the shadow, a dithered ellipse under the anchor
 for (let y = 0; y < CH; y++) for (let x = 0; x < PW; x++) {
   const e = ((x + 0.5 - PW / 2) / 34) ** 2 + ((y + 0.5 - AY - 2) / 9) ** 2;
-  if (e < 1 && ((x + y) & 1) === 0) sheet.set(x, 4 * CH + y, C.BG);
+  if (e < 1 && ((x + y) & 1) === 0) sheet.set(x, 7 * CH + y, C.BG);
+}
+// row 7 from x 80: four frames of sparks, 32x32, a burst flung outward
+// and upward that thins and cools frame by frame
+{
+  const R2 = (() => { let a = 99; return () => { a = (a * 1103515245 + 12345) & 0x7fffffff; return a / 0x7fffffff; }; })();
+  const streaks = Array.from({ length: 14 }, () => ({ a: -Math.PI * (0.1 + 0.8 * R2()), v: 4 + 9 * R2(), l: 2 + 3 * R2() }));
+  for (let fr = 0; fr < 4; fr++) {
+    const ox = PW + fr * 32, oy = 7 * CH, t = (fr + 1) / 4;
+    const cols = [C.FACE_EDGE, C.LABEL_LIT, C.ICE, C.HOT];
+    streaks.forEach((st, i) => {
+      if (i % 4 < fr) return;                       // fewer as it fades
+      const r = st.v * t * 1.6;
+      for (let k = 0; k < st.l; k++) {
+        const x = Math.round(16 + Math.cos(st.a) * (r - k)), y = Math.round(26 + Math.sin(st.a) * (r - k) + 6 * t * t);
+        if (x > 0 && y > 0 && x < 31 && y < 31) sheet.set(ox + x, oy + y, cols[Math.min(3, fr + (k > 1 ? 1 : 0))]);
+      }
+    });
+  }
 }
 sheet.checkPalette("machines");
 fs.mkdirSync(path.join(ROOT, "assets/racer"), { recursive: true });

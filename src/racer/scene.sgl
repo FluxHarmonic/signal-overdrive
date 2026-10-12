@@ -9,7 +9,9 @@
 ;;; right, hard right) then the same five boosting; rows 1-3 one rival
 ;;; colour each in 128 px cells, 16 directions (0 seen from behind, then
 ;;; clockwise in 22.5 degree steps: the machine turned that far to its right
-;;; of the line of sight); row 4 the shadow in an 80 px cell. The player's
+;;; of the line of sight); rows 4-6 the same with the thrusters' second
+;;; flicker frame (and row 0's cells 10-19 the player's); row 7 the shadow
+;;; in an 80 px cell, then four 32x32 spark frames. The player's
 ;;; body is 64 px wide, a rival's 58 (PLAYER-BODY, RIVAL-BODY): a machine is
 ;;; drawn sprite-size texels wide whichever cell it comes from.
 
@@ -130,7 +132,8 @@
         (* t t (- 3.0 (* 2.0 t)))))
 
     ;; (depth draw-thunk) for one machine, or #f when it is not in view.
-    (define (machine-sprite c tuning m cell-col cell-row player?)
+    ;; after: a thunk drawn just after the machine (the player's sparks), or #f.
+    (define (machine-sprite c tuning m cell-col cell-row player? after)
       (let ((p (camera-project c (machine-x m) (machine-y m) 0.0 4.0)))
         (and p
              (let* ((cw (if player? PLAYER-CELL-W RIVAL-CELL-W))
@@ -153,14 +156,35 @@
                (and (> w 1.0) (< x VIEW-W) (> (+ x w) 0.0) (< y VIEW-H) (> (+ y h) 0.0)
                     (list (projected-depth p)
                           (lambda ()
-                            (mode7-draw-sprite! *sheet* sx y sw h 0.0 (* 4 CELL-H) PLAYER-CELL-W (* 5 CELL-H) fog fc)
-                            (mode7-draw-sprite! *sheet* x y w h u0 v0 (+ u0 cw) (+ v0 CELL-H) fog fc))))))))
+                            (mode7-draw-sprite! *sheet* sx y sw h 0.0 (* 7 CELL-H) PLAYER-CELL-W (* 8 CELL-H) fog fc)
+                            (mode7-draw-sprite! *sheet* x y w h u0 v0 (+ u0 cw) (+ v0 CELL-H) fog fc)
+                            (when after (after (projected-x p) (projected-y p) k)))))))))
+
+    ;; Sparks at the side of the machine that hit the wall: four 32x32
+    ;; frames in row 7 from x 80, three ticks each. spark: (age . side),
+    ;; side -1 left, 1 right.
+    (define (sparks-drawer spark)
+      (and spark (< (car spark) 12)
+           (lambda (px py k)
+             (let* ((fr (quotient (car spark) 3))
+                    (side (cdr spark))
+                    (size (round (* k 32 1.5)))
+                    (x (round (+ px (* side k 30) (- (* 0.5 size)))))
+                    (y (round (- py (* k 30))))
+                    (u0 (+ PLAYER-CELL-W (* fr 32))))
+               ;; mirrored for the left wall, so the burst flies away from it
+               (if (> side 0)
+                   (mode7-draw-sprite! *sheet* x y size size u0 (* 7 CELL-H) (+ u0 32) (+ (* 7 CELL-H) 32) 0.0 '(0.0 0.0 0.0))
+                   (mode7-draw-sprite! *sheet* x y size size (+ u0 32) (* 7 CELL-H) u0 (+ (* 7 CELL-H) 32) 0.0 '(0.0 0.0 0.0)))))))
 
     (define (player-frame m cam-heading)
       (let* ((yaw (wrap-angle (- (machine-heading m) cam-heading)))
              (v (+ (machine-lean m) (* 2.5 yaw)))
              (k (cond ((< v -0.7) 0) ((< v -0.22) 1) ((<= v 0.22) 2) ((<= v 0.7) 3) (else 4))))
         (+ k (if (> (machine-boost m) 0.0) 5 0))))
+
+    ;; The thrusters' flicker: the second frame every other 3 ticks.
+    (define (flick? r) (odd? (quotient (race-tick r) 3)))
 
     (define (rival-dir c m)
       (let* ((dx (- (machine-x m) (cam-x c)))
@@ -170,12 +194,14 @@
              (k (exact (round (/ rel (/ PI 8.0))))))
         (modulo k 16)))
 
-    (define (draw-machines! c tuning r cam-heading)
+    (define (draw-machines! c tuning r cam-heading spark)
       (let* ((pm (racer-machine (race-player r)))
-             (items (cons (machine-sprite c tuning pm (player-frame pm cam-heading) 0 #t)
+             (fl (flick? r))
+             (items (cons (machine-sprite c tuning pm (+ (player-frame pm cam-heading) (if fl 10 0)) 0 #t
+                                          (sparks-drawer spark))
                           (map (lambda (x)
                                  (let ((m (racer-machine x)))
-                                   (machine-sprite c tuning m (rival-dir c m) (+ 1 (racer-colour x)) #f)))
+                                   (machine-sprite c tuning m (rival-dir c m) (+ 1 (racer-colour x) (if fl 3 0)) #f #f)))
                                (race-rivals r))))
              (items (filter (lambda (x) x) items)))
         ;; far to near
@@ -332,7 +358,7 @@
         (begin-frame)
         (with-3d-pass *view* (list 0.05 0.04 0.10 1.0)
           (mode7-draw-ground! c)
-          (draw-machines! c tuning r cam-heading))
+          (draw-machines! c tuning r cam-heading (cdr (assq 'spark info))))
         (when dither?
           (with-3d-pass *post* #f
             (draw-mesh *post-pipe* *tri* *view-tex*)))
@@ -344,7 +370,11 @@
         ;; F3: frames per second and the frame's interval, smoothed
         (let ((fps (cdr (assq 'fps info))))
           (when fps
-            (text! (string-append (number->string (exact (round (car fps)))) " FPS "
-                                  (number->string (/ (round (* 10.0 (cdr fps))) 10.0)) " MS")
-                   8 (- VIEW-H 14) "#4DF2D9")))
+            ;; FPS, the frame's interval, and the CPU's share: the race's
+            ;; steps (SIM) and building the frame (DRAW). A slow frame with
+            ;; small SIM and DRAW is the GPU's.
+            (let ((r1 (lambda (v) (number->string (/ (round (* 10.0 v)) 10.0)))))
+              (text! (string-append (number->string (exact (round (car fps)))) " FPS  "
+                                    (r1 (cadr fps)) " MS  SIM " (r1 (caddr fps)) "  DRAW " (r1 (cadddr fps)))
+                     8 (- VIEW-H 14) "#4DF2D9"))))
         (end-frame)))))
