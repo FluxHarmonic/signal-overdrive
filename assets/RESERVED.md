@@ -12,9 +12,10 @@ here, which are reserved and not licensed for reuse:
   with everything rendered from them (`docs/logo/corrupt/`,
   `docs/logo/site/`)
 - The Flux Harmonic mark, wherever it appears: the card before the title
-  (`assets/signal/fh-mark.png`, made by `scripts/art/gen-mark.mjs` from
-  `refs/mark/flux-harmonic.png`, which is kept outside `assets/` and does
-  not ship)
+  (`assets/signal/fh-mark.png`, the mark with the word PRESENTS under it,
+  made by `scripts/art/gen-mark.mjs` from `refs/mark/flux-harmonic.png`,
+  which is kept outside `assets/` and does not ship, and from the logo's
+  companion alphabet `assets/src/logo/presents.txt`)
 
 The tracks, machines, skyline, palette, HUD, sound effects and music are
 not reserved.

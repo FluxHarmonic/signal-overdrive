@@ -1,0 +1,83 @@
+# presents: a small companion to the CORRUPT alphabet (narrow.txt), drawn
+# by hand for the word PRESENTS under the Flux Harmonic mark on the card
+# before the title (scripts/art/gen-mark.mjs draws each cell as 2x2
+# pixels of the mark's picture). One character a cell (█ ink, · ground).
+#
+# narrow's rules at cap 10: stems 2 wide, bars 2 rows (top 0-1, middle
+# 4-5, bottom 8-9), square inside, every outermost corner bevelled by one
+# cell. The S carries short spurs at its terminals and the R's bowl steps
+# in over its leg, as in narrow; the N's diagonal steps down two cells at
+# a time. Only the letters of PRESENTS are drawn.
+height 10
+
+= P
+·████·
+██████
+██··██
+██··██
+██████
+█████·
+██····
+██····
+██····
+·█····
+
+= R
+·████·
+██████
+██··██
+██··██
+██████
+█████·
+██··██
+██··██
+██··██
+·█··█·
+
+= E
+·████·
+██████
+██····
+██····
+████··
+████··
+██····
+██····
+██████
+·████·
+
+= S
+·████·
+██████
+██··██
+██····
+█████·
+·█████
+····██
+██··██
+██████
+·████·
+
+= N
+·█··█·
+██··██
+███·██
+███·██
+██████
+██████
+██·███
+██·███
+██··██
+·█··█·
+
+= T
+·████·
+██████
+··██··
+··██··
+··██··
+··██··
+··██··
+··██··
+··██··
+··██··

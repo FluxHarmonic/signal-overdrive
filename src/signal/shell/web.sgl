@@ -70,7 +70,7 @@
                             (list (cons 'embers (texture "lut-embers.png")) (cons 'crash (texture "lut-crash.png"))))
                (title-set-logo! (texture "title-logo.png"))
                (decal-init! VIEW-W VIEW-H)
-               (intro-set-mark! (texture "fh-mark.png") 380 188)
+               (intro-set-mark! (texture "fh-mark.png"))
                (set! *started* #t)))))
 
     (define (web-main)

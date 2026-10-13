@@ -7,7 +7,9 @@
 ;;; rest exactly on the title's first camera, which speeds up from rest:
 ;;; no cut and no jolt. Its interference locks with the sound as the zoom
 ;;; arrives; the mark sits on clear road and leaves it only once the
-;;; attract camera has passed it, for good; its events pair. And the
+;;; attract camera has passed it, for good. PRESENTS is part of the same
+;;; picture, under the mark, whole in frame through the zoom and the tilt
+;;; and tall enough to read as the zoom arrives. Its events pair. And the
 ;;; tuning-in sound: a glide with no steps that ends on its tone, with the
 ;;; static gone after the lock.
 
@@ -19,6 +21,7 @@
         (signal mode7 camera)
         (signal title)
         (signal intro)
+        (signal intro mark)
         (signal tunein))
 
 (define TUNING (tuning-defaults))
@@ -59,6 +62,18 @@
     (list (+ (car MARK) (* a w (cos hd)) (* b h (sin hd)))
           (+ (cadr MARK) (* a w (sin hd)) (* b h (- (cos hd)))))))
 (define CORNERS (map (lambda (ab) (apply mark-point ab)) '((-0.5 -0.5) (0.5 -0.5) (-0.5 0.5) (0.5 0.5))))
+;; a pixel (px, py) of the picture on the ground: its top row is the far edge
+(define (pic-point px py) (mark-point (- (/ px MARK-PX-W) 0.5) (- 0.5 (/ py MARK-PX-H))))
+(define WORD-CORNERS
+  (map (lambda (xy) (apply pic-point xy))
+       (list (list PRESENTS-X PRESENTS-Y) (list (+ PRESENTS-X PRESENTS-W) PRESENTS-Y)
+             (list PRESENTS-X (+ PRESENTS-Y PRESENTS-H)) (list (+ PRESENTS-X PRESENTS-W) (+ PRESENTS-Y PRESENTS-H)))))
+;; the word's height on screen, down its middle
+(define (word-px c)
+  (let* ((mx (+ PRESENTS-X (* 0.5 PRESENTS-W)))
+         (a (camera-project c (car (pic-point mx PRESENTS-Y)) (cadr (pic-point mx PRESENTS-Y)) 0.0 1.0))
+         (b (camera-project c (car (pic-point mx (+ PRESENTS-Y PRESENTS-H))) (cadr (pic-point mx (+ PRESENTS-Y PRESENTS-H))) 0.0 1.0)))
+    (and a b (abs (- (projected-y b) (projected-y a))))))
 (define CENTRE (mark-point 0.0 0.0))
 (define (on-screen c pt)
   (let ((p (camera-project c (car pt) (cadr pt) 0.0 1.0)))
@@ -238,12 +253,27 @@
               (w (cadddr m)) (h (list-ref m 4))
               (hw (track-hw tr (track-index-at tr MARK-S))))
          (assert-true (<= w (- (* 2.0 hw) 12.0)))
-         (assert-true (near? (/ w h) (/ 170.0 84.0) 1e-6))
+         (assert-true (near? (/ w h) (/ MARK-PX-W MARK-PX-H) 1e-6))
          (for-each (lambda (z)
                      (assert-true (or (< (cadr z) (- MARK-S (* 0.5 h) 8.0))
                                       (> (car z) (+ MARK-S (* 0.5 h) 8.0)))))
                    (append (track-boost tr) (track-repair tr) (track-ice tr)))))
-     '(0.0 1.0))))
+     '(0.0 1.0)))
+  (test "PRESENTS is in the decal's picture: under the mark, centred, inside it"
+    (assert-true (>= PRESENTS-Y (+ MARK-ART-H 8)))
+    (assert-true (<= (+ PRESENTS-Y PRESENTS-H) MARK-PX-H))
+    (assert-true (> PRESENTS-H 0))
+    (assert-true (and (>= PRESENTS-X 0) (<= (+ PRESENTS-X PRESENTS-W) MARK-PX-W)))
+    (assert-true (<= (abs (- (+ PRESENTS-X (* 0.5 PRESENTS-W)) (* 0.5 MARK-PX-W))) 1.0))
+    ;; the decal on the road is the whole picture, word and all
+    (assert-true (near? (/ (cadddr MARK) (list-ref MARK 4)) (/ MARK-PX-W MARK-PX-H) 1e-6)))
+  (test "PRESENTS is whole in frame through the zoom and the tilt, and readable as the zoom arrives"
+    (let ((cs (in-beat 0.0 (caddr BEATS))))
+      (for-each (lambda (e)
+                  (for-each (lambda (pt) (assert-true (on-screen (cdr e) pt))) WORD-CORNERS))
+                cs)
+      ;; at the zoom's end: at least 14 px tall (its cells 1.4 px or more)
+      (assert-true (>= (word-px (cdr (last-of (in-beat 0.0 (cadr BEATS))))) 14.0)))))
 
 (test-group "events and skips"
   (test "the title or the card off: nothing at all"

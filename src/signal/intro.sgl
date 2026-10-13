@@ -8,8 +8,9 @@
 ;;; Natively there is no gate; the card starts at once.
 ;;;
 ;;; The card (about 5 seconds; any start press or tap skips it) is four
-;;; beats, each its own knob, with the Flux Harmonic mark lying flat on the
-;;; road (a (signal mode7 decal)):
+;;; beats, each its own knob, with the Flux Harmonic mark and the word
+;;; PRESENTS under it lying flat on the road, one picture ((signal intro
+;;; mark)) drawn as a (signal mode7 decal):
 ;;;   hold  card-hold seconds high above the road (card-height texels),
 ;;;         looking straight down: the mark small in a wide view of the track
 ;;;   zoom  card-zoom seconds straight down onto the mark, still looking
@@ -42,7 +43,8 @@
           (signal tuning)
           (signal mode7 camera)
           (signal mode7 decal)
-          (signal title))
+          (signal title)
+          (signal intro mark))
 
   (export intro intro? intro-new intro-none intro-skip intro-step intro-follow intro-phase intro-events
           intro-active? intro-camera intro-fade intro-glitch intro-mark-shown? intro-draw-mark!
@@ -127,19 +129,19 @@
 
     ;; --- the mark ------------------------------------------------------------------
 
-    ;; The mark: on the centre line MARK-S texels down the track from the
-    ;; start (clear of every pad on both tracks), its top toward the road
-    ;; ahead, MARK-W x MARK-H texels or narrower to keep MARK-EDGE texels of
-    ;; road each side. (x y heading w h).
+    ;; The mark's picture (the mark, PRESENTS under it): centred on the
+    ;; centre line MARK-S texels down the track from the start (clear of
+    ;; every pad on both tracks), its top toward the road ahead, MARK-W
+    ;; texels wide or narrower to keep MARK-EDGE texels of road each side,
+    ;; and as long as its picture's shape says. (x y heading w h).
     (define MARK-S 560.0)
     (define MARK-W 170.0)
-    (define MARK-H 84.0)
     (define MARK-EDGE 8.0)
     (define (intro-mark tr)
       (let* ((p (track-point tr MARK-S 0.0))
              (hw (track-hw tr (track-index-at tr MARK-S)))
              (w (min MARK-W (- (* 2.0 hw) (* 2.0 MARK-EDGE)))))
-        (list (car p) (cadr p) (atan (caddr p) (- (cadddr p))) w (* w (/ MARK-H MARK-W)))))
+        (list (car p) (cadr p) (atan (caddr p) (- (cadddr p))) w (* w (/ MARK-PX-H MARK-PX-W)))))
 
     ;; --- the card's camera ----------------------------------------------------------
 
@@ -244,15 +246,15 @@
     (define (intro-mark-shown? i)
       (or (intro-active? i) (not (intro-gone i))))
 
+    ;; the picture's texture (assets/signal/fh-mark.png, MARK-PX-W x MARK-PX-H)
     (define *mark* #f)
-    (define *mark-size* (list 380 188))
-    (define (intro-set-mark! tex w h) (set! *mark* tex) (set! *mark-size* (list w h)))
+    (define (intro-set-mark! tex) (set! *mark* tex))
 
     (define (intro-draw-mark! c race)
       (when *mark*
         (let ((m (intro-mark (race-track race))))
           (draw-decal! c *mark* (car m) (cadr m) (caddr m) (cadddr m) (list-ref m 4)
-                       (car *mark-size*) (cadr *mark-size*)))))
+                       MARK-PX-W MARK-PX-H))))
 
     ;; The gate's line, by the pointer the page reported.
     (define (intro-gate-line touch?)
