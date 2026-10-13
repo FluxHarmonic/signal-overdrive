@@ -23,11 +23,14 @@ through the Flux Harmonic palette and Bayer dither pass.</p>
 </ul>
 <h2>What is in it</h2>
 <ul>
-<li>Before the title, the Flux Harmonic card: the mark lies on the road seen from
-above, then the camera tilts down to the driving angle as it slides away and
-the picture's interference locks clean, to a radio's tuning-in sound (on the
-web, a TAP TO TUNE IN gate first: the browser needs a gesture before sound).
-The CARD knobs; any start skips it; <code>?card=0</code> leaves it out.</li>
+<li>Before the title, the Flux Harmonic card, in four beats: high above the
+track looking straight down, the mark small on the road; a zoom straight
+down until it fills the frame, as the picture's interference and a radio's
+tuning-in sound lock clean together; a tilt into perspective; then the
+camera pulls back and down as the mark recedes up the road, coming to rest
+where the title's camera begins (on the web, a TAP TO TUNE IN gate first:
+the browser needs a gesture before sound). The CARD knobs; any start skips
+it; <code>?card=0</code> leaves it out.</li>
 <li>A title screen: the camera wanders the track by itself while the CORRUPT
 logo glitches on the beat; a start fades out into the race's countdown and
 fades back in (the TITLE knobs; <code>?title=0</code> skips it).</li>
@@ -659,21 +662,42 @@ the stream instead of as cues, the old way), <code>?hitchlog</code> (every frame
 <td>1</td>
 </tr>
 <tr>
-<td><code>card-len</code> CARD LENGTH</td>
+<td><code>card-height</code> CARD START HEIGHT</td>
 <td>card</td>
-<td>4</td>
-<td>1 to 10</td>
-<td>0.1</td>
+<td>2600</td>
+<td>200 to 4000</td>
+<td>50</td>
 </tr>
 <tr>
-<td><code>card-hold</code> CARD HOLD (FLAT)</td>
+<td><code>card-hold</code> CARD HOLD (HIGH)</td>
 <td>card</td>
-<td>0.5</td>
+<td>0.4</td>
 <td>0 to 3</td>
 <td>0.05</td>
 </tr>
 <tr>
-<td><code>card-tilt</code> CARD TILT EASE</td>
+<td><code>card-zoom</code> CARD ZOOM TIME</td>
+<td>card</td>
+<td>1.8</td>
+<td>0.2 to 5</td>
+<td>0.05</td>
+</tr>
+<tr>
+<td><code>card-tilt</code> CARD TILT TIME</td>
+<td>card</td>
+<td>1.4</td>
+<td>0.2 to 5</td>
+<td>0.05</td>
+</tr>
+<tr>
+<td><code>card-move</code> CARD MOVE TIME</td>
+<td>card</td>
+<td>1.4</td>
+<td>0.2 to 5</td>
+<td>0.05</td>
+</tr>
+<tr>
+<td><code>card-ease</code> CARD EASE</td>
 <td>card</td>
 <td>2</td>
 <td>1 to 5</td>
@@ -692,13 +716,6 @@ the stream instead of as cues, the old way), <code>?hitchlog</code> (every frame
 <td>880</td>
 <td>200 to 2000</td>
 <td>10</td>
-</tr>
-<tr>
-<td><code>tone-lock</code> TONE LOCKS AT</td>
-<td>card</td>
-<td>2.2</td>
-<td>0.5 to 6</td>
-<td>0.1</td>
 </tr>
 </tbody>
 </table>
