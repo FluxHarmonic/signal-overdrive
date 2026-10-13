@@ -25,6 +25,8 @@ const ROOT = path.resolve(process.env.CONDUCTOR_ROOT || process.cwd());
 const RUN = path.resolve(process.argv[2]);
 const BIN = path.resolve(process.env.CONDUCTOR_BINARY || path.join(ROOT, "build/release/bin/signal-overdrive"));
 const GC_PROFILE = process.env.CONDUCTOR_GC_PROFILE === "1";
+// A null sink with no loopback, used by nothing else during the run.
+const SINK = process.env.CONDUCTOR_SINK || "worker-null";
 if (fs.existsSync(RUN)) throw new Error("the check requires a fresh evidence directory");
 if (!fs.existsSync(BIN)) throw new Error("no release binary");
 fs.mkdirSync(RUN, { recursive: true });
@@ -44,24 +46,28 @@ function owned(pid) {
 }
 
 try {
-  const sink = pulse(["list", "short", "sinks"]).split("\n").map(l => l.split(/\s+/)).find(f => f[1] === "worker-null");
-  if (!sink) throw new Error("worker-null absent; refusing audio");
+  const sinks = pulse(["list", "short", "sinks"]).split("\n").map(l => l.split(/\s+/));
+  const sink = sinks.find(f => f[1] === SINK);
+  const sinkName = index => sinks.find(f => f[0] === String(index))?.[1] ?? "unknown";
+  if (!sink) throw new Error(`${SINK} absent; refusing audio`);
+  const others = JSON.parse(pulse(["-f", "json", "list", "sink-inputs"])).filter(i => String(i.sink) === sink[0]);
+  if (others.length) throw new Error(`${SINK} is in use by another client; refusing`);
   const display = await privateDisplay(pool, RUN);
   const env = { ...process.env, DISPLAY: display.display, XDG_SESSION_TYPE: "x11", SIGIL_APP_PLATFORM: "x11",
-    SIGIL_AUDIO_BACKEND: "pulseaudio", SIGIL_AUDIO_VERBOSE: "1", PULSE_SINK: "worker-null", PIPEWIRE_NODE: "worker-null",
+    SIGIL_AUDIO_BACKEND: "pulseaudio", SIGIL_AUDIO_VERBOSE: "1", PULSE_SINK: SINK, PIPEWIRE_NODE: SINK,
     XDG_DATA_HOME: path.join(RUN, "xdg"), LIBGL_ALWAYS_SOFTWARE: "1", LP_NUM_THREADS: "1", GALLIUM_DRIVER: "llvmpipe" };
   delete env.WAYLAND_DISPLAY;
   if (GC_PROFILE) env.SIGIL_GC_STATS_FILE = path.join(RUN, "game-gc.jsonl");
   fs.mkdirSync(path.join(env.XDG_DATA_HOME, "signal-overdrive"), { recursive: true });
   fs.writeFileSync(path.join(env.XDG_DATA_HOME, "signal-overdrive/scale.sgl"), "2\n");
-  monitor = pool.launch("parec", ["--device=worker-null.monitor", "--format=s16le", "--rate=48000", "--channels=2", "--raw"],
+  monitor = pool.launch("parec", [`--device=${SINK}.monitor`, "--format=s16le", "--rate=48000", "--channels=2", "--raw"],
     { env, stdio: ["ignore", "pipe", "pipe"] });
   monitor.stdout.on("data", bytes => {
     for (let i = 0; i + 1 < bytes.length; i += 2) { const x = bytes.readInt16LE(i) / 32768; energy += x * x; samples++; }
   });
   monitor.stderr.on("data", b => fs.appendFileSync(path.join(RUN, "monitor.log"), b));
   await sleep(300);
-  if (monitor.exitCode !== null) throw new Error("worker-null monitor failed");
+  if (monitor.exitCode !== null) throw new Error(`${SINK} monitor failed`);
   fd = fs.openSync(path.join(RUN, "game.log"), "w");
   game = pool.launch(path.join(ROOT, "scripts/dev"), [BIN, "--start", "--autopilot", "--track=loop", "--musiclog", "--quit-after", "400"],
     { env, stdio: ["ignore", "pipe", "pipe"] });
@@ -71,15 +77,18 @@ try {
     const inputs = JSON.parse(pulse(["-f", "json", "list", "sink-inputs"]))
       .filter(i => owned(Number(i.properties?.["application.process.id"])));
     if (!inputs.length) return false;
-    if (inputs.some(i => String(i.sink) !== sink[0])) throw new Error("owned audio escaped worker-null");
+    for (const i of inputs) fs.appendFileSync(path.join(RUN, "routing.jsonl"), JSON.stringify({ wall_ms: Date.now(),
+      index: i.index, sink: i.sink, sink_name: sinkName(i.sink) }) + "\n");
+    const stray = inputs.find(i => String(i.sink) !== sink[0]);
+    if (stray) throw new Error(`owned stream ${stray.index} on sink ${stray.sink} (${sinkName(stray.sink)}), not ${SINK}`);
     fs.writeFileSync(path.join(RUN, "routing.json"), JSON.stringify(inputs.map(i =>
       ({ index: i.index, sink: i.sink, pid: i.properties["application.process.id"] })), null, 2));
     return true;
   }
   let routed = false;
-  for (let i = 0; i < 200 && !(routed = route()); i++) {
+  for (let i = 0; i < 1000 && !(routed = route()); i++) {
     if (game.exitCode !== null) throw new Error("game exited before audio");
-    await sleep(50);
+    await sleep(10);
   }
   if (!routed) throw new Error("no verified owned stream");
   const xdotool = cachedTool("xdotool", "xdotool");
@@ -127,7 +136,7 @@ try {
     resyncs: Number(trace.clocks.at(-1).metrics.resyncs), dropped_ms: Number(trace.clocks.at(-1).metrics["dropped-ms"]) };
   fs.writeFileSync(path.join(RUN, "verification.json"), JSON.stringify(evidence, null, 2));
   if (underruns !== 0) throw new Error(`sounding underruns: ${underruns}`);
-  if (!(rms > 1e-4)) throw new Error("silent actual worker-null monitor");
+  if (!(rms > 1e-4)) throw new Error(`silent actual ${SINK} monitor`);
   fs.writeFileSync(path.join(RUN, "RESULT"), "RESULT: PASS (native graphical full race/music, zero sounding underruns, clean exit)\n");
 } catch (error) {
   fs.writeFileSync(path.join(RUN, "RESULT"), `RESULT: FAIL (native race verification: ${error.message})\n`);

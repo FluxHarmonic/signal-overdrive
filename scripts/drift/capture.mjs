@@ -18,6 +18,9 @@ const GC_PROFILE = process.env.CONDUCTOR_GC_PROFILE === "1";
 // Diagnostic only: the engine silent and no one-shots, music alone in the
 // capture. The gate's verdict is defined on the normal mix.
 const MUSIC_ONLY = process.env.CONDUCTOR_MUSIC_ONLY === "1";
+// The capture sink must be a null sink with no loopback to any device,
+// used by nothing else during the run (worker-null is shared by sessions).
+const SINK = process.env.CONDUCTOR_SINK || "worker-null";
 const BIN = path.resolve(process.env.CONDUCTOR_BINARY || path.join(ROOT, "build/release/bin/signal-overdrive"));
 if (!fs.existsSync(BIN)) throw new Error("no release binary");
 fs.mkdirSync(RUN, { recursive: true });
@@ -28,16 +31,27 @@ let logFD, capFD, clockFD, gameText = "", captureBytes = 0;
 let game, capture, xserver, reference;
 const timeout = setTimeout(() => { for (const child of children) stop(child, "SIGKILL"); }, 600000);
 try {
-  const nullSink = pulse(["list", "short", "sinks"]).split("\n").map(line => line.split(/\s+/))
-    .find(fields => fields[1] === "worker-null");
-  if (!nullSink) throw new Error("worker-null is absent; refusing to initialize audio");
-  if (!pulse(["list", "short", "sources"]).split("\n").some(line => line.split(/\s+/)[1] === "worker-null.monitor"))
-    throw new Error("worker-null monitor is absent");
+  const sinks = pulse(["list", "short", "sinks"]).split("\n").map(line => line.split(/\s+/));
+  const nullSink = sinks.find(fields => fields[1] === SINK);
+  const sinkName = index => sinks.find(fields => fields[0] === String(index))?.[1] ?? "unknown";
+  if (!nullSink) throw new Error(`${SINK} is absent; refusing to initialize audio`);
+  if (!pulse(["list", "short", "sources"]).split("\n").some(line => line.split(/\s+/)[1] === `${SINK}.monitor`))
+    throw new Error(`${SINK} monitor is absent`);
+  // Anything else playing into the capture sink would be mixed into the
+  // capture: refuse to start, and abort if it appears mid-run.
+  function foreignOnSink(inputs) {
+    return inputs.filter(input => String(input.sink) === nullSink[0]).filter(input => {
+      const pid = input.properties?.["application.process.id"];
+      try { return !pid || fs.realpathSync(`/proc/${pid}/exe`) !== fs.realpathSync(BIN); } catch { return true; }
+    }).map(input => `${input.properties?.["application.name"] ?? "?"} pid ${input.properties?.["application.process.id"] ?? "?"}`);
+  }
+  const foreignAtStart = foreignOnSink(JSON.parse(pulse(["-f", "json", "list", "sink-inputs"])));
+  if (foreignAtStart.length) throw new Error(`${SINK} is in use by another client (${foreignAtStart.join(", ")}); refusing a mixed capture`);
   const privateX = HEADLESS ? { display: "", child: null } : await privateDisplay(pool, RUN);
   xserver = privateX.child;
   const env = { ...process.env, DISPLAY: privateX.display, SIGIL_APP_PLATFORM: "x11",
-    SIGIL_AUDIO_BACKEND: "pulseaudio", SIGIL_AUDIO_VERBOSE: "1", PULSE_SINK: "worker-null",
-    PIPEWIRE_NODE: "worker-null", XDG_DATA_HOME: path.join(RUN, "xdg"),
+    SIGIL_AUDIO_BACKEND: "pulseaudio", SIGIL_AUDIO_VERBOSE: "1", PULSE_SINK: SINK,
+    PIPEWIRE_NODE: SINK, XDG_DATA_HOME: path.join(RUN, "xdg"),
     LIBGL_ALWAYS_SOFTWARE: "1", LP_NUM_THREADS: GL_THREADS, GALLIUM_DRIVER: "llvmpipe" };
   delete env.WAYLAND_DISPLAY;
   if (GC_PROFILE) env.SIGIL_GC_STATS_FILE = path.join(RUN, "game-gc.jsonl");
@@ -47,7 +61,7 @@ try {
   logFD = fs.openSync(path.join(RUN, "game.log"), "w");
   capFD = fs.openSync(path.join(RUN, "capture.pcm"), "w");
   clockFD = fs.openSync(path.join(RUN, "capclock.txt"), "w");
-  capture = launch("parec", ["--device=worker-null.monitor", "--format=s16le", "--rate=48000", "--channels=2", "--latency-msec=10", "--raw"],
+  capture = launch("parec", [`--device=${SINK}.monitor`, "--format=s16le", "--rate=48000", "--channels=2", "--latency-msec=10", "--raw"],
     { env, stdio: ["ignore", "pipe", "pipe"] });
   capture.stdout.on("data", bytes => {
     fs.writeSync(capFD, bytes); captureBytes += bytes.length;
@@ -71,17 +85,25 @@ try {
       if (!pid) return false;
       try { return fs.realpathSync(`/proc/${pid}/exe`) === fs.realpathSync(BIN); } catch { return false; }
     });
+    const foreign = foreignOnSink(inputs);
+    if (foreign.length) throw new Error(`another client began playing into ${SINK} (${foreign.join(", ")}); capture is mixed`);
     if (!ours.length) return false;
-    if (ours.some(input => String(input.sink) !== nullSink[0])) throw new Error("game stream escaped worker-null");
+    // Every observation, from the stream's first appearance on.
+    for (const input of ours) fs.appendFileSync(path.join(RUN, "routing.jsonl"), JSON.stringify({ wall_ms: Date.now(),
+      index: input.index, sink: input.sink, sink_name: sinkName(input.sink), corked: input.corked ?? null }) + "\n");
+    const stray = ours.find(input => String(input.sink) !== nullSink[0]);
+    if (stray) throw new Error(`game stream ${stray.index} on sink ${stray.sink} (${sinkName(stray.sink)}), not ${SINK}`);
     verifiedPID = ours[0].properties["application.process.id"];
     fs.writeFileSync(path.join(RUN, "routing.json"), JSON.stringify(ours.map(input => ({ index: input.index, sink: input.sink, pid: input.properties["application.process.id"] })), null, 2));
     return true;
   }
-  for (let i = 0; i < 200 && !verifyRoute(); i++) {
+  // Poll fast until the stream appears: a stray route is killed within
+  // about one poll plus a pactl call.
+  for (let i = 0; i < 1000 && !verifyRoute(); i++) {
     if (game.exitCode !== null) throw new Error("game exited before opening its Pulse stream");
-    await sleep(50);
+    await sleep(10);
   }
-  if (!verifiedPID) throw new Error("no verified game stream on worker-null");
+  if (!verifiedPID) throw new Error(`no verified game stream on ${SINK}`);
   if (!HEADLESS) {
     const xdotool = cachedTool("xdotool", "xdotool");
     let windowID;
@@ -94,7 +116,7 @@ try {
     execFileSync(xdotool, ["windowfocus", "--sync", windowID], { env, timeout: 5000 });
   }
   fs.writeFileSync(path.join(RUN, "meta.json"), JSON.stringify({ arm: ARM, binary: BIN, display: env.DISPLAY,
-    game_pid: verifiedPID, null_sink: nullSink[0], cpu, niceness: pool.niceness, headless_race: HEADLESS, music_only: MUSIC_ONLY, gc_profile: GC_PROFILE,
+    game_pid: verifiedPID, null_sink: nullSink[0], sink_name: SINK, cpu, niceness: pool.niceness, headless_race: HEADLESS, music_only: MUSIC_ONLY, gc_profile: GC_PROFILE,
     gc_young_threshold_kb: process.env.SIGIL_YOUNG_THRESHOLD || "default",
     gc_young_threshold_max_kb: process.env.SIGIL_YOUNG_THRESHOLD_MAX || "default",
     software_rendering_threads: HEADLESS ? 0 : GL_THREADS,
@@ -116,7 +138,7 @@ try {
   for (let i = 0; i < 400; i++) {
     await sleep(1000);
     sampleScheduling();
-    if (i % 2 === 0 && !verifyRoute()) throw new Error("game Pulse stream disappeared");
+    if (!verifyRoute()) throw new Error("game Pulse stream disappeared");
     const trace = parseTrace(gameText), final = trace.jumps.find(jump => jump.mark === "results");
     if (final && trace.clocks.at(-1)?.song > final.bar * 12 / 7 + 4) { complete = true; break; }
     if (game.exitCode !== null) break;
