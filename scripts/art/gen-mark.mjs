@@ -13,7 +13,7 @@
 // the pixel and clear elsewhere: the card lays it on the Mode 7 road, where
 // a texel is either drawn or not. The mark is RESERVED (assets/RESERVED.md).
 //
-// Under the mark, GAP pixels down, the word PRESENTS in a quieter grey,
+// Under the mark, GAP pixels down, the word PRESENTS in the site's orange,
 // from the hand-drawn companion alphabet assets/src/logo/presents.txt, a
 // cell 2x2 pixels, the letters TRACK cells apart, centred: the picture
 // grows to 380x222, all of it one decal on the road. Every colour in it
@@ -39,13 +39,16 @@ const WORD = "PRESENTS", CELL = 2, TRACK = 4, GAP = 14;
 const STEP = 8;
 // the three colours: the lettering, the ring's darker orange, its yellow
 const LETTER = "#F0F0F0", RING = "#F2731A", GOLD = "#FFCC33";
-// the word's, quieter than the lettering so the mark stays the subject
-const QUIET = "#8A8FA0";
+// the word's: the site's orange, an accent that reads on the road (against
+// the road under it at the zoom's end, 5.25:1 by WCAG's measure, where the
+// first choice, the grey #8A8FA0, gave 3.35:1), between the ring's two
+// colours so it belongs to the mark
+const WORD_COLOUR = "#FF9F1A";
 
 const want = fs.readFileSync(NOTE, "utf8").match(/^sha256: ([0-9a-f]{64})$/m)?.[1];
 const got = createHash("sha256").update(fs.readFileSync(RAW)).digest("hex");
 if (!want || want !== got) throw new Error(`gen-mark: ${RAW} does not hash to its note's sha256`);
-for (const c of [LETTER, RING, GOLD, QUIET]) if (!EMBERS.includes(c)) throw new Error(`gen-mark: ${c} is not an embers colour`);
+for (const c of [LETTER, RING, GOLD, WORD_COLOUR]) if (!EMBERS.includes(c)) throw new Error(`gen-mark: ${c} is not an embers colour`);
 
 const raw = readRGBA(RAW);
 const w = Math.floor(raw.w / STEP), h = Math.ceil(raw.h / STEP);
@@ -84,7 +87,7 @@ let wx = wordX, quiet = 0;
 for (const g of glyphs) {
   for (let r = 0; r < g.h; r++) for (let c = 0; c < g.w; c++) {
     if (!g.rows[r][c]) continue;
-    for (let j = 0; j < CELL; j++) for (let i = 0; i < CELL; i++) { C.set(wx + c * CELL + i, wordY + r * CELL + j, QUIET); quiet++; }
+    for (let j = 0; j < CELL; j++) for (let i = 0; i < CELL; i++) { C.set(wx + c * CELL + i, wordY + r * CELL + j, WORD_COLOUR); quiet++; }
   }
   wx += (g.w + TRACK) * CELL;
 }
