@@ -15,10 +15,12 @@
 //              serve-site applies), gives the game's path /<game>/ and its
 //              files COOP same-origin, COEP require-corp and CORP same-origin,
 //              and gives the landing, the 404 and the other site files none
-//              of the three: only the game is isolated
+//              of the three: only the game is isolated; and no path gets one
+//              of them from two rules (Pages joins repeated values with a
+//              comma, and Chrome reads "same-origin, same-origin" as no COOP)
 //   em-dash    no em dash in the site's own text files
 //   analytics  every HTML page in the tree, the game's page included, carries
-//              David's Plausible snippet in its gated form (the script tag is
+//              the Plausible snippet in its gated form (the script tag is
 //              added only on signaloverdrive.net) with the site's script ID,
 //              exactly once, in <head>, and no other site's
 //                (scripts/plausible-check.mjs, shared with the other game sites)
@@ -29,15 +31,21 @@
 //              pictures 480x270, the reactive-music section, the How it's
 //              made disclosure, the font license link, no em dash in the
 //              rendered text, every request 2xx
+//   preview    og:image and twitter:image name https://signaloverdrive.net/
+//              shots/og.png, a 1200x630 PNG in the tree; og:url and the
+//              canonical link are https://signaloverdrive.net/
 //   play       PLAY 0.1 is a disabled button that says so, a click on it goes
 //              nowhere, the page says it is coming soon, and nothing on the
 //              landing links the game's path yet
-//   carousel   the pictures change by themselves, a click on a dot shows that
-//              picture and its caption, one shows at a time, and under
-//              prefers-reduced-motion nothing changes by itself
+//   carousel   the pictures change by themselves (the caption silent while they
+//              do), a click on a dot shows that picture and its caption and
+//              stops the rotation, keyboard focus on a dot pauses it, one
+//              shows at a time, and under prefers-reduced-motion nothing
+//              changes by itself
 //   phone      at 390 CSS px (a phone, emulated), / and the 404 have no
 //              horizontal scroll, and the logo and PLAY 0.1 fit on screen
-//   404        a missing page shows the 404's number and a link home
+//   404        a missing page shows the 404's number and a link home, and the
+//              same 404, styled, under the game's path
 //   local      every leg above ran at the loopback host, as a private preview
 //              does: nothing asked plausible.io for anything, no script ran
 //   privacy    the landing's footer has the privacy line and its link
@@ -112,6 +120,13 @@ const text = (p) => fs.readFileSync(path.join(DIR, p), "utf8");
     for (const p of gamePaths) {
       const h = headersFor(rules, p);
       for (const [k, v] of Object.entries(ISOLATION)) if (h[k] !== v) detail.push(`${p}: ${k} is ${h[k] ?? "absent"} (want ${v})`);
+      // serve-site lets the last matching rule win; Pages joins every value
+      // with a comma, and "same-origin, same-origin" is no COOP to Chrome
+      // (measured: crossOriginIsolated false). So each header once, per path.
+      for (const k of Object.keys(ISOLATION)) {
+        const n = rules.filter((r) => r.re.test(p)).reduce((a, r) => a + r.headers.filter(([name]) => name === k).length, 0);
+        if (n > 1) detail.push(`${p}: ${k} is set ${n} times (Pages joins them with a comma, which breaks isolation)`);
+      }
     }
     // the rest of the site: none of the three
     const sitePaths = ["/", "/no-such-page", ...files.filter((f) => !f.startsWith(SLUG + "/") && !f.startsWith(ROUTE + "/") && f !== "_headers" && f !== "_redirects").map((f) => "/" + f)];
@@ -143,7 +158,7 @@ const text = (p) => fs.readFileSync(path.join(DIR, p), "utf8");
   const absent = must.filter((p) => !pages.includes(p));
   if (absent.length) problems.push(`pages missing from the walk: ${absent.join(", ")}`);
   problems.length ? bad("analytics", problems.slice(0, 6).join("; "))
-    : ok("analytics", `David's snippet, gated to ${PLAUSIBLE_DOMAIN}, with ${PLAUSIBLE_ID} once, in <head>, on all ${pages.length} HTML pages: ${pages.join(", ")}`);
+    : ok("analytics", `the Plausible snippet, gated to ${PLAUSIBLE_DOMAIN}, with ${PLAUSIBLE_ID} once, in <head>, on all ${pages.length} HTML pages: ${pages.join(", ")}`);
 }
 
 // ---- the browser -------------------------------------------------------------------------
@@ -268,6 +283,27 @@ try {
       : ok("landing", `title and h1 logo; ${f.faces.filter((x) => x.endsWith("/loaded")).length} JetBrains Mono faces loaded; ${f.imgs.length} images decoded (${shots.length} 480x270 pictures); the music and How it's made sections; ${netSince(n0).length} requests, all 2xx`);
   }
 
+  // ---- preview: the link card and the canonical URL ------------------------------------------
+  {
+    const detail = [];
+    const m = await evalJS(`(() => { const q = (s) => { const e = document.querySelector(s); return e ? e.getAttribute("content") ?? e.getAttribute("href") : null; };
+      return { og: q('meta[property="og:image"]'), tw: q('meta[name="twitter:image"]'), url: q('meta[property="og:url"]'),
+               card: q('meta[name="twitter:card"]'), canon: q('link[rel="canonical"]'),
+               w: q('meta[property="og:image:width"]'), h: q('meta[property="og:image:height"]'), alt: q('meta[property="og:image:alt"]') }; })()`);
+    const want = `${REAL}/shots/og.png`;
+    if (m.og !== want || m.tw !== want) detail.push(`og:image ${m.og}, twitter:image ${m.tw} (want ${want})`);
+    if (m.url !== `${REAL}/` || m.canon !== `${REAL}/`) detail.push(`og:url ${m.url}, canonical ${m.canon} (want ${REAL}/)`);
+    if (m.card !== "summary_large_image") detail.push(`twitter:card ${m.card}`);
+    if (!m.alt || m.alt.length < 20) detail.push("og:image has no real alt text");
+    // the file the card names, in the tree: a PNG of the size the page says
+    const f = files.includes("shots/og.png") ? fs.readFileSync(path.join(DIR, "shots/og.png")) : null;
+    const dims = f && f.subarray(1, 4).toString("latin1") === "PNG" ? [f.readUInt32BE(16), f.readUInt32BE(20)] : null;
+    if (!dims) detail.push("shots/og.png is not a PNG in the tree");
+    else if (dims.join("x") !== "1200x630" || m.w !== "1200" || m.h !== "630") detail.push(`shots/og.png is ${dims.join("x")}, the page says ${m.w}x${m.h} (want 1200x630)`);
+    detail.length ? bad("preview", detail.join("; "))
+      : ok("preview", `og:image and twitter:image are ${want}, a 1200x630 PNG in the tree; og:url and the canonical link are ${REAL}/`);
+  }
+
   // ---- play: disabled until 0.1 ------------------------------------------------------------
   {
     const detail = [];
@@ -308,7 +344,7 @@ try {
                shown: imgs.map((i, k) => i.classList.contains("shown") ? k : -1).filter((k) => k >= 0),
                visible: imgs.map((i, k) => getComputedStyle(i).opacity === "1" ? k : -1).filter((k) => k >= 0),
                current: dots.map((b, k) => b.getAttribute("aria-current") === "true" ? k : -1).filter((k) => k >= 0),
-               caption: cap ? cap.textContent : null, labels: dots.map((b) => b.getAttribute("aria-label")),
+               caption: cap ? cap.textContent : null, ariaLive: cap ? cap.getAttribute("aria-live") : null, labels: dots.map((b) => b.getAttribute("aria-label")),
                alts: imgs.every((i) => (i.getAttribute("alt") || "").length > 10),
                every: Number(c.getAttribute("data-interval")) }; })()`);
     await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 1, y: 1 });
@@ -321,6 +357,8 @@ try {
       if (s0.shown.join() !== "0" || s0.current.join() !== "0") detail.push(`at load: shown ${s0.shown}, dot ${s0.current} (want 0, 0)`);
       if (s0.caption !== s0.labels[0]) detail.push(`at load the caption is "${s0.caption}", not "${s0.labels[0]}"`);
       if (!s0.alts) detail.push("a picture without a real alt text");
+      // rotating by itself, the caption is not announced (every 6 s would be noise)
+      if (s0.ariaLive !== "off") detail.push(`while rotating the caption is aria-live="${s0.ariaLive}" (want off)`);
       const moved = await waitFor(async () => { const s = await state(); return s.shown.length === 1 && s.shown[0] !== 0 ? s : null; }, s0.every + 3000);
       if (!moved) detail.push(`no automatic change within ${s0.every + 3000} ms`);
       const last = s0.ndots - 1;
@@ -330,6 +368,19 @@ try {
       const s1 = await state();
       if (s1.shown.join() !== `${last}` || s1.current.join() !== `${last}` || s1.visible.join() !== `${last}`) detail.push(`after a click on the last dot: shown ${s1.shown}, dot ${s1.current}, opaque ${s1.visible} (want ${last})`);
       if (s1.caption !== s1.labels[last]) detail.push(`after the click the caption is "${s1.caption}", not "${s1.labels[last]}"`);
+      // a choice stops the rotation for good (WCAG 2.2.2), and from then on the caption is announced
+      if (s1.ariaLive !== "polite") detail.push(`after a click the caption is aria-live="${s1.ariaLive}" (want polite)`);
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 1, y: 1 });
+      await sleep(s0.every + 1500);
+      const s1b = await state();
+      if (s1b.shown.join() !== `${last}`) detail.push(`${s0.every + 1500} ms after a click the picture moved on to ${s1b.shown} (a click must stop the rotation)`);
+      // keyboard focus inside the carousel pauses it
+      await visit("/");
+      await evalJS(`document.querySelector(".carousel .dots button").focus()`);
+      await sleep(s0.every + 2000);
+      const sf = await state();
+      if (sf.shown.join() !== "0") detail.push(`with a dot focused the picture changed to ${sf.shown}`);
+      await evalJS("document.activeElement && document.activeElement.blur()");
       await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 1, y: 1 });
       await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
       await visit("/");
@@ -337,7 +388,7 @@ try {
       const s2 = await state();
       if (s2.shown.join() !== "0") detail.push(`under prefers-reduced-motion the picture changed to ${s2.shown}`);
       await send("Emulation.setEmulatedMedia", { features: [] });
-      if (!detail.length) ok("carousel", `${s0.n} pictures, one shown; moved to ${moved.shown[0]} by itself within ${s0.every + 3000} ms; the last dot shows the last picture and its caption; still under reduced motion for ${s0.every + 2000} ms`);
+      if (!detail.length) ok("carousel", `${s0.n} pictures, one shown; moved to ${moved.shown[0]} by itself within ${s0.every + 3000} ms; the last dot shows the last picture and its caption and stops the rotation; paused while a dot has focus; silent while rotating; still under reduced motion for ${s0.every + 2000} ms`);
     }
     if (detail.length) bad("carousel", detail.join("; "));
   }
@@ -375,6 +426,16 @@ try {
     f.h1 === "404" && f.home && /Signal Overdrive/.test(f.title) ? ok("404", `a missing page shows "${f.title}", its 404 and a link home`)
       : bad("404", `h1 "${f.h1}", link home ${f.home}, title "${f.title}"`);
     note(`${MISSING} (the 404)`, e0, n0);
+    // a missing page under the game's path: the 404 is served from there,
+    // so a relative link in it would resolve under /${SLUG}/ and break
+    const e1 = consoleErrors.length, n1 = net.size, sub = `/${SLUG}${MISSING}`;
+    await send("Page.navigate", { url: BASE + sub });
+    await waitFor(() => evalJS("document.readyState === 'complete' && document.fonts.status === 'loaded'"), 15000);
+    const g = await evalJS(`({ h1: (document.querySelector("h1") || {}).textContent, css: [...document.styleSheets].some((x) => x.href && x.cssRules.length > 0) })`);
+    if (g.h1 !== "404" || !g.css) bad("404", `${sub}: h1 "${g.h1}", stylesheet loaded ${g.css}`);
+    else ok("404", `${sub} shows the same 404, styled`);
+    errorsAt[`${sub} (the 404 under the game)`] = [...consoleErrors.slice(e1).filter((l) => !(l.endsWith(` ${BASE}${sub}`) && /status of 404/.test(l))),
+      ...badRequests(netSince(n1).filter((r) => !(r.status === 404 && r.url === BASE + sub))).map((r) => `request ${fmtReq(r)}`)];
   }
 
   // ---- isolation: the game's path, and the landing as the control --------------------------
@@ -402,8 +463,9 @@ try {
     }
     const wasm = netSince(n0).filter((r) => /\.wasm$/.test(new URL(r.url).pathname));
     if (!wasm.some(good)) detail.push(`the wasm did not load: ${wasm.map(fmtReq).join(", ") || "never asked for"}`);
-    await sleep(500);
-    note(`/${SLUG}/ (the game)`, e0, n0);
+    // watch the running game a while for late errors (the race runs on the title's autostart)
+    await sleep(8000);
+    note(`/${SLUG}/ (the game, 8 s after its probe)`, e0, n0);
     // the control: the landing, which must NOT be isolated, so the probe above
     // is seen to tell the two apart
     await visit("/");

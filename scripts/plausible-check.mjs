@@ -1,7 +1,6 @@
 // plausible-check.mjs - the Plausible Analytics tag, for the site gates of
-// the Flux Harmonic game sites (the same file in Phantom Burn,
-// Harkfell, Crash The Stack and Signal Overdrive; each passes its own
-// site's script ID).
+// the Flux Harmonic game sites (shared by Phantom Burn, Harkfell, Crash
+// The Stack and Signal Overdrive; each passes its own site's script ID).
 //
 //   import { auditTree, plausibleStub, PRIVACY } from "./plausible-check.mjs";
 //   node scripts/plausible-check.mjs --live ID    (needs the internet)

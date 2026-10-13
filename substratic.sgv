@@ -14,7 +14,7 @@
           preview-branch: "preview"
           domains: ("signaloverdrive.net" "www.signaloverdrive.net")
           zone: "signaloverdrive.net"
-          ;; the newest date this box's wrangler 4.112 workerd supports
+          ;; the newest date the workerd bundled with wrangler 4.112 supports
           compatibility-date: "2026-07-14")
   ;; the wasm in R2, served by the generated Function at
   ;; /w/<sha16>/signal-overdrive.wasm with its own CORP and COEP; the

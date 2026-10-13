@@ -1,0 +1,66 @@
+#!/bin/sh
+# Check a deployed site's cross-origin isolation from outside, as a browser
+# gets it: the game's path must answer COOP same-origin, COEP require-corp
+# and CORP same-origin, each exactly once and with nothing joined to it (Pages
+# joins values from overlapping _headers rules with a comma, and Chrome reads
+# "same-origin, same-origin" as no COOP at all); the landing must answer none
+# of the three. Neither check-site (a local server) nor verify-live (files and
+# the wasm) looks at these on the real deployment.
+#
+#   scripts/check-isolation https://signaloverdrive.net
+#   scripts/check-isolation https://<deployment>.signaloverdrive.pages.dev
+#   scripts/check-isolation --insecure https://HOST:PORT      (a self-signed preview)
+#
+# The game's path is substratic.sgv's mount:. Exit 0 green, 1 red, 2 setup
+# failed (no answer, or no mount in the config).
+set -u
+cd "$(dirname "$(readlink -f "$0")")/.." || exit 2
+K=""
+if [ "${1:-}" = "--insecure" ]; then K="-k"; shift; fi
+BASE="${1:-}"
+[ -n "$BASE" ] || { echo "usage: scripts/check-isolation [--insecure] URL" >&2; exit 2; }
+BASE="${BASE%/}"
+SLUG=$(sed -n 's/^ *mount: "\([a-z][a-z0-9-]*\)".*/\1/p' substratic.sgv | head -1)
+[ -n "$SLUG" ] || { echo "SETUP-FAILED: no mount: \"...\" in substratic.sgv" >&2; exit 2; }
+
+fail=0
+TMP=$(mktemp -d) || exit 2
+trap 'rm -rf "$TMP"' EXIT INT TERM HUP
+
+# headers PATH -> the response's header lines, lower-cased names, in $TMP/h
+headers() {
+  if ! curl -sS $K -m 30 -o /dev/null -D "$TMP/raw" "$BASE$1" 2> "$TMP/err"; then
+    echo "SETUP-FAILED: $BASE$1: $(cat "$TMP/err")"; exit 2
+  fi
+  tr -d '\r' < "$TMP/raw" | awk -F': ' 'NF >= 2 { printf "%s: %s\n", tolower($1), substr($0, length($1) + 3) }' > "$TMP/h"
+  sed -n '1p' "$TMP/raw" | tr -d '\r' > "$TMP/status"
+}
+count() { grep -c "^$1: " "$TMP/h"; }
+value() { sed -n "s/^$1: //p" "$TMP/h" | head -1; }
+
+# the page and a file it loads (every staged web build has the bridges file)
+for p in "/$SLUG/" "/$SLUG/sigil-wasm-bridges.js"; do
+  headers "$p"
+  st=$(cat "$TMP/status")
+  case "$st" in *" 200"*) ;; *) echo "  FAIL $p answered $st"; fail=1 ;; esac
+  for kv in "cross-origin-opener-policy same-origin" "cross-origin-embedder-policy require-corp" "cross-origin-resource-policy same-origin"; do
+    k=${kv% *}; want=${kv#* }
+    n=$(count "$k"); v=$(value "$k")
+    if [ "$n" -ne 1 ] || [ "$v" != "$want" ]; then
+      echo "  FAIL $p: $k is \"$v\" ($n header lines; want exactly \"$want\")"; fail=1
+    fi
+  done
+done
+for p in "/" "/no-such-page-$$"; do
+  headers "$p"
+  for k in cross-origin-opener-policy cross-origin-embedder-policy cross-origin-resource-policy; do
+    if [ "$(count "$k")" -ne 0 ]; then echo "  FAIL $p: has $k: $(value "$k") (the landing is not isolated)"; fail=1; fi
+  done
+done
+
+if [ "$fail" -eq 0 ]; then
+  echo "GREEN: $BASE/$SLUG/ answers COOP same-origin, COEP require-corp, CORP same-origin, once each; / and a missing page answer none of them"
+  exit 0
+fi
+echo "RED: $BASE"
+exit 1

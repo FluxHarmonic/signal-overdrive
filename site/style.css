@@ -1,5 +1,5 @@
 /* signaloverdrive.net: one page and a 404.
-   The colours are the game's own (Crash The Stack's palette roles): the
+   The colors are the game's own (Crash The Stack's palette roles): the
    violet-black of the night city, the title's magenta, the cyan of your
    live signal (Zero's machine, the integrity meter), the yellow of the
    start line, and C-TEXT for reading. The face is JetBrains Mono (OFL 1.1,
@@ -76,7 +76,7 @@ h1.logo img {
 .carousel .dots { display: none; justify-content: center; gap: 0.2rem; margin-top: 0.3rem; }
 .carousel.live .dots { display: flex; }
 .carousel .dots button { width: 28px; height: 28px; padding: 0; border: 0; background: none; cursor: pointer; }
-.carousel .dots button::before { content: ""; display: block; width: 8px; height: 8px; margin: auto; background: var(--line); }
+.carousel .dots button::before { content: ""; display: block; width: 8px; height: 8px; margin: auto; background: #7380a6; }   /* C-TEXT-DIM: 5:1 on the dark */
 .carousel .dots button[aria-current="true"]::before { background: var(--cyan); }
 .carousel .dots button:hover::before { background: var(--magenta); }
 .carousel .dots button:focus-visible { outline: 2px solid var(--cyan); outline-offset: -4px; }

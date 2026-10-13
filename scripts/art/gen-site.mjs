@@ -8,7 +8,7 @@
 //   site/favicon.png    32x32: Zero's machine from behind, 16x16 cells at 2x
 //   site/favicon.ico    the same machine at 16 and 32 (PNG entries)
 //   site/shots/og.png   1200x630 link preview: site/shots/title.png at 2x
-//                       (nearest), centred on the game's darkness
+//                       (nearest), centered on the game's darkness
 //
 //   node scripts/art/gen-site.mjs
 //

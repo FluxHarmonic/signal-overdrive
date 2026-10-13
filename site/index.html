@@ -14,12 +14,13 @@
   <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="The title SIGNAL OVERDRIVE in magenta pixel letters over a night skyline, with Zero's cyan machine on the starting grid between two rivals.">
+  <meta property="og:image:alt" content="The title SIGNAL OVERDRIVE in magenta pixel letters over a night skyline, and Zero's cyan machine on the starting grid behind a rival, with another machine to its left.">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Signal Overdrive">
   <meta name="twitter:description" content="The city's wire belongs to Gibson. The air doesn't. A Mode 7 racer in Crash The Stack's world.">
   <meta name="twitter:image" content="https://signaloverdrive.net/shots/og.png">
-  <meta name="twitter:image:alt" content="The title SIGNAL OVERDRIVE in magenta pixel letters over a night skyline, with Zero's cyan machine on the starting grid between two rivals.">
+  <meta name="twitter:image:alt" content="The title SIGNAL OVERDRIVE in magenta pixel letters over a night skyline, and Zero's cyan machine on the starting grid behind a rival, with another machine to its left.">
+  <link rel="canonical" href="https://signaloverdrive.net/">
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/style.css">
@@ -50,7 +51,7 @@
         <img class="shot" src="/shots/title.png" width="480" height="270" aria-hidden="true"
              alt="The title screen: SIGNAL OVERDRIVE over the starting grid, and the line COURIER ZERO. ONE PACKAGE. DON'T LET IT CORRUPT.">
       </div>
-      <p class="caption" aria-live="polite">Lap 1, in the pack</p>
+      <p class="caption" aria-live="off">Lap 1, in the pack</p>
       <div class="dots" role="group" aria-label="Pictures of Signal Overdrive">
         <button type="button" aria-label="Lap 1, in the pack" aria-current="true"></button>
         <button type="button" aria-label="Integrity under 10: the signal tearing apart"></button>
@@ -95,9 +96,12 @@
   </footer>
   <script>
     // The pictures: one at a time, crossfading every data-interval ms, with
-    // the caption following. The dots pick one; the pointer over the
-    // pictures pauses them; a reader who asked for reduced motion gets no
-    // automatic change. Without this script the first picture simply stays.
+    // the caption following. A click on a dot shows that picture and stops
+    // the rotation for good; the pointer over the pictures, or keyboard focus
+    // on a dot, pauses it; a reader who asked for reduced motion gets no
+    // automatic change. The caption is only announced once the reader has
+    // picked a picture, not on every automatic change. Without this script
+    // the first picture simply stays.
     (function () {
       var c = document.querySelector(".carousel");
       if (!c) return;
@@ -106,7 +110,7 @@
       var cap = c.querySelector(".caption");
       var every = Number(c.getAttribute("data-interval")) || 6000;
       var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      var at = 0, timer = null;
+      var at = 0, timer = null, chosen = false;
       function show(n) {
         at = (n + imgs.length) % imgs.length;
         for (var k = 0; k < imgs.length; k++) {
@@ -116,13 +120,15 @@
         }
         if (cap && dots[at]) cap.textContent = dots[at].getAttribute("aria-label");
       }
-      function start() { if (!still && !timer && !document.hidden) timer = setInterval(function () { show(at + 1); }, every); }
+      function start() { if (!still && !chosen && !timer && !document.hidden) timer = setInterval(function () { show(at + 1); }, every); }
       function stop() { clearInterval(timer); timer = null; }
       for (var k = 0; k < dots.length; k++) (function (k) {
-        dots[k].addEventListener("click", function () { stop(); show(k); start(); });
+        dots[k].addEventListener("click", function () { chosen = true; stop(); if (cap) cap.setAttribute("aria-live", "polite"); show(k); });
       })(k);
       c.querySelector(".frames").addEventListener("mouseenter", stop);
       c.querySelector(".frames").addEventListener("mouseleave", start);
+      c.addEventListener("focusin", stop);
+      c.addEventListener("focusout", start);
       document.addEventListener("visibilitychange", function () { document.hidden ? stop() : start(); });
       c.classList.add("live");
       start();

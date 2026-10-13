@@ -20,7 +20,18 @@
 # is scoped to its bucket and cannot see or create buckets, so --create needs
 # the account's admin token in the environment.
 set -eu
-cd "$(dirname "$0")/.." || exit 1
+# an argument that names an existing file or directory is made absolute
+# first, so it means what it meant where this was run; then to the repo root
+# (through any symlink to this script)
+for a in "$@"; do
+  shift
+  case "$a" in
+    -*) ;;
+    *) if [ -e "$a" ]; then a=$(cd "$(dirname "$a")" && pwd)/$(basename "$a"); fi ;;
+  esac
+  set -- "$@" "$a"
+done
+cd "$(dirname "$(readlink -f "$0")")/.." || exit 1
 if [ ! -f .sigil/deps/substratic/tasks/cloudflare-setup.sgl ]; then
   echo "cloudflare-setup: substratic's tasks are not installed here; run: sigil deps install" >&2
   exit 2

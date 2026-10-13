@@ -26,7 +26,18 @@
 # pass entry; with the two variables set it makes one read-only request (a
 # read of the wasm's key) to show the token reaches the bucket.
 set -eu
-cd "$(dirname "$0")/.." || exit 1
+# an argument that names an existing file or directory is made absolute
+# first, so it means what it meant where this was run; then to the repo root
+# (through any symlink to this script)
+for a in "$@"; do
+  shift
+  case "$a" in
+    -*) ;;
+    *) if [ -e "$a" ]; then a=$(cd "$(dirname "$a")" && pwd)/$(basename "$a"); fi ;;
+  esac
+  set -- "$@" "$a"
+done
+cd "$(dirname "$(readlink -f "$0")")/.." || exit 1
 if [ ! -f .sigil/deps/substratic/tasks/publish-web.sgl ]; then
   echo "publish-web: substratic's tasks are not installed here; run: sigil deps install" >&2
   exit 2
