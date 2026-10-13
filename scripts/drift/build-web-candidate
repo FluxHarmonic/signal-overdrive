@@ -13,7 +13,7 @@ export ZIG_GLOBAL_CACHE_DIR=/tmp/signal-conductor-zig-global
 ulimit -v 4194304
 CONDUCTOR_CPU="$(awk '/Cpus_allowed_list/ {split($2,a,","); split(a[1],b,"-"); print b[1]}' /proc/self/status)"
 timeout 1800 taskset -c "$CONDUCTOR_CPU" nice -n 15 scripts/dev \
-  /home/daviwil/.sigil/versions/0.22.11/sigil build --config web \
+  /home/daviwil/.sigil/versions/0.22.11/sigil build --config web --verbose \
   > "$CONDUCTOR_RUN/build.log" 2>&1
 CONDUCTOR_CODE="$?"
 if [ "$CONDUCTOR_CODE" -eq 0 ]; then
