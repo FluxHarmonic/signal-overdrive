@@ -1,0 +1,49 @@
+;;; Source-only shell checks: muted, no graphics and no device calls.
+(import (sigil test)
+        (substratic input keys)
+        (substratic store kv)
+        (signal race)
+        (signal shell core))
+
+(set-store-root! "/tmp/signal-conductor-shell-test-store")
+(core-param! "mute")
+
+(test-group "shell: fixed ticks and pause"
+  (test "muted frames advance on wall time and retain the six-tick stall cap"
+    (core-boot! 'desktop)
+    (core-advance! (/ 1.0 60.0))
+    (assert-equal 1 (race-tick (core-race)))
+    (core-advance! 2.0)
+    (assert-equal 7 (race-tick (core-race))))
+
+  (test "lost focus freezes ticks and drops the returning hidden interval"
+    (core-boot! 'web)
+    (core-advance! (/ 1.0 60.0))
+    (core-focus! #f)
+    (assert-true (core-paused?))
+    (core-advance! 10.0)
+    (assert-equal 1 (race-tick (core-race)))
+    (core-focus! #t)
+    (core-advance! 10.0)
+    (assert-equal 1 (race-tick (core-race)))
+    (core-advance! (/ 1.0 60.0))
+    (assert-equal 2 (race-tick (core-race))))
+
+  (test "F5 pause remains paused across focus loss and return"
+    (core-boot! 'desktop)
+    (keys-down! (core-keys) 'f5)
+    (core-advance! (/ 1.0 60.0))
+    (keys-up! (core-keys) 'f5)
+    (keys-end-frame! (core-keys))
+    (assert-true (core-paused?))
+    (assert-equal 0 (race-tick (core-race)))
+    (core-focus! #f)
+    (core-focus! #t)
+    (core-advance! 10.0)
+    (assert-equal 0 (race-tick (core-race)))
+    (keys-down! (core-keys) 'f5)
+    (core-advance! (/ 1.0 60.0))
+    (keys-up! (core-keys) 'f5)
+    (keys-end-frame! (core-keys))
+    (assert-false (core-paused?))
+    (assert-equal 1 (race-tick (core-race)))))

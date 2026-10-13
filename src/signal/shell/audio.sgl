@@ -34,12 +34,13 @@
           (signal sound))
 
   (export audio-mute! audio-depth! audio-cues! audio-start! audio-frame! audio-started? audio-readout
-          audio-context)
+          audio-context audio-pause!)
 
   (begin
     (define RATE 22050)
     (define PUSH 1024)
     (define *muted* #f)
+    (define *paused* #f)
     (define *depth-ms* 250)
     (define *cues-on* #t)
     (define *ctx* #f)
@@ -67,7 +68,7 @@
                         (loop (cdr ks) (if c (cons (cons (caar ks) c) acc) acc)))))))))
 
     (define (audio-start!)
-      (unless *muted*
+      (unless (or *muted* *paused*)
         (unless *ctx* (set! *ctx* (guard (e (#t #f)) (audio-context-open))))
         (when *ctx* (guard (e (#t #f)) (audio-context-resume *ctx*)))
         (unless *stream*
@@ -76,6 +77,17 @@
                                                                buffer-frames: (max 8192 (* 2 (depth-frames)))
                                                                rate: RATE))))
         (load-cues!)))
+
+    (define (audio-pause! paused?)
+      (unless (eq? paused? *paused*)
+        (set! *paused* paused?)
+        (if paused?
+            (begin
+              (when *stream*
+                (close-audio-stream! *stream*)
+                (set! *stream* #f))
+              (when *ctx* (stop-audio-cues!)))
+            (when *ctx* (audio-start!)))))
 
     ;; A one-shot: a cue when there is one, else into the synth's stream.
     (define (one-shot! kind strength)
@@ -91,11 +103,12 @@
 
     (define (audio-frame! speed throttle boost events)
       (synth-set! *synth* speed throttle boost)
-      (for-each (lambda (e)
+      (unless *paused*
+       (for-each (lambda (e)
                   (cond ((and (pair? e) (eq? (car e) 'wall)) (one-shot! 'wall (cdr e)))
                         ((memq e '(boost pad ice corrupt)) (one-shot! e 0))
                         (else #f)))
-                events)
+                events))
       (when *stream*
         (let loop ()
           (let ((n (min PUSH (audio-stream-room *stream*) (- (depth-frames) (audio-stream-depth *stream*)))))

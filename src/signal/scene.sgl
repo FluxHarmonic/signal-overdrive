@@ -725,6 +725,9 @@
         (view-present! *presenter* (if dither? *post* *view*) f)
         (set-blend-mode 'normal)
         (when (cdr (assq 'hud info)) (hud! tuning r info))
+        (let ((paused (assq 'paused info)))
+          (when (and paused (cdr paused))
+            (text! "PAUSED" 216 122 "#4DF2D9")))
         (let ((sel (cdr (assq 'overlay info))))
           (when sel (overlay! tuning sel)))
         ;; F3: frames per second and the frame's interval, smoothed

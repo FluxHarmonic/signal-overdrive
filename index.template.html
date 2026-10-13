@@ -111,8 +111,34 @@
     function send(type, payload) {
       if (app) app.dispatch(type, payload); else pending = [type, payload];
     }
+    // Track the bridge's context so output and base latency follow the
+    // current device route. The wrapper preserves the native prototype.
+    var audioContexts = [];
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (typeof AC === "function") {
+      var WrappedAudioContext = function () {
+        var ctx = arguments.length ? new AC(arguments[0]) : new AC();
+        audioContexts.push(ctx);
+        return ctx;
+      };
+      WrappedAudioContext.prototype = AC.prototype;
+      Object.setPrototypeOf(WrappedAudioContext, AC);
+      window.AudioContext = WrappedAudioContext;
+      if (window.webkitAudioContext) window.webkitAudioContext = WrappedAudioContext;
+    }
+    setInterval(function () {
+      var ctx = audioContexts[0];
+      if (app && ctx && ctx.state === "running")
+        send("audio-latency", String(1000 * ((ctx.outputLatency || 0) + (ctx.baseLatency || 0))));
+    }, 500);
+    var focused = true;
+    function focusState() { send("focus", focused && !document.hidden ? "1" : "0"); }
+    window.addEventListener("blur", function () { focused = false; focusState(); });
+    window.addEventListener("focus", function () { focused = true; focusState(); });
+    document.addEventListener("visibilitychange", focusState);
     document.addEventListener("sigil-web-app-ready", function (e) {
       app = e.detail; if (pending) app.dispatch(pending[0], pending[1]);
+      focusState();
       app.dispatch("param", "touch-scheme=" + scheme);
       // the audio bridge's stream mode, as the bridge itself decides it
       // (sigil-wasm-audio.js): an AudioWorklet and a SharedArrayBuffer

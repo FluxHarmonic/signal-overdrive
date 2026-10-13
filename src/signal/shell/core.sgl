@@ -15,8 +15,7 @@
 ;;;               it, 0 resets it); P the palette; / the dither
 
 (define-library (signal shell core)
-  (import (sigil core)
-          (sigil math)
+  (import (sigil math)
           (sigil string)
           (sigil list)
           (sigil time)
@@ -34,11 +33,14 @@
           (signal shell audio)
           (signal fx beat)
           (signal fx state)
-          (signal fx showcase))
+          (signal fx showcase)
+          (signal shell music)
+          (signal music conductor)
+          (signal music clock))
 
   (export core-boot! core-frame! core-keys core-sticks core-pad core-param! core-touch!
           core-tap! core-race core-tuning core-describe core-probe core-knobs-markdown GAME-NAME
-          core-audio-start!)
+          core-audio-start! core-focus! core-paused? core-advance!)
 
   (begin
     (define GAME-NAME "signal-overdrive")
@@ -52,6 +54,22 @@
     (define *tuning* (tuning-defaults))
     (define *race* #f)
     (define *clock* (clock-new))
+    (define *pacing* (pacing-new))
+    (define *paused* #f)
+    (define *focused* #t)
+    (define *skip-interval* #f)
+    (define *resync-requests* 0)
+
+    (define (core-paused?) (or *paused* (not *focused*)))
+
+    (define (core-focus! focused?)
+      (unless (eq? focused? *focused*)
+        (set! *focused* focused?)
+        ;; The first returning frame includes the hidden interval. It
+        ;; must not owe catch-up ticks after the race was paused.
+        (set! *skip-interval* #t)
+        (audio-pause! (core-paused?))
+        (when *race* (music-frame! (race-song *race*) (core-paused?)))))
     (define *keys* (make-keys))
     (define *sticks* (make-sticks))
     (define *pad* (make-pad))
@@ -247,6 +265,14 @@
 
     (define (core-boot! platform)
       (set! *platform* platform)
+      (set! *clock* (clock-new))
+      (set! *pacing* (pacing-new))
+      (set! *paused* #f)
+      (set! *focused* #t)
+      (set! *skip-interval* #f)
+      (set! *resync-requests* 0)
+      (music-close!)
+      (audio-pause! #f)
       (set-store-app! GAME-NAME)
       (set-store-prefix! "signal-overdrive:")
       (set! *race* (race-new *tuning*))
@@ -273,6 +299,12 @@
             ((string=? kv "mute") (audio-mute!))
             ((string=? kv "hitchlog") (set! *hitch-print* #t))
             ((string=? kv "cues=0") (audio-cues! #f))
+            ((and (> (string-length kv) 14) (string=? (substring kv 0 14) "audio-latency="))
+             (let ((v (string->number (substring kv 14 (string-length kv)))))
+               (when v (music-latency! (/ v 1000.0)))))
+            ((and (> (string-length kv) 11) (string=? (substring kv 0 11) "musicdepth="))
+             (let ((v (string->number (substring kv 11 (string-length kv)))))
+               (when v (music-depth! v))))
             ((and (> (string-length kv) 11) (string=? (substring kv 0 11) "audiodepth="))
              (let ((v (string->number (substring kv 11 (string-length kv)))))
                (when v (audio-depth! v) (say "audio depth " (number->string v) " ms"))))
@@ -323,7 +355,11 @@
     (define *boost-latch* #f)
     (define *last-throttle* 0.0)
     (define *frame-events* '())   ; the player's events over this frame's ticks, for the sound
-    (define (core-audio-start!) (audio-start!))
+    (define (core-audio-start!)
+      (audio-start!)
+      (when (and *race* (not (core-paused?)))
+        (music-start! (audio-context) (race-song *race*))
+        (music-frame! (race-song *race*) #f)))
     ;; One tick's controls: the player's (signal handling) input.
     (define (controls)
       (let* ((ps (stick-analog (pad-axis *pad* 'lx) 0.0 0.18))
@@ -465,7 +501,20 @@
                                         " mode " *audio-mode*
                                         " cues " (let ((m (list-ref a 4))) (if (symbol? m) (symbol->string m) "?"))
                                         " cue-lag " (number->string (list-ref a 5)) " cue-plays " (number->string (list-ref a 7))
-                                        " hitches " (number->string *hitch-count*) " audio-ms " (r3 *audio-ms*))))))
+                                        " hitches " (number->string *hitch-count*) " audio-ms " (r3 *audio-ms*)))
+                       (music-text)
+                       " paused " (if (core-paused?) "1" "0"))))
+
+    (define (music-text)
+      (let ((m (music-readout)))
+        (string-append " music " (if (car m) "on" "off")
+                       " music-depth " (r1 (list-ref m 2))
+                       " music-underruns " (number->string (list-ref m 3))
+                       " music-ms " (r1 (list-ref m 5))
+                       " music-missed " (number->string (list-ref m 6))
+                       " clock-gap-ms " (r1 (* 1000.0 (pacing-gap *pacing*)))
+                       " resync-requests " (number->string *resync-requests*)
+                       " dropped-ms " (r1 (* 1000.0 (clock-dropped *clock*))))))
 
     ;; The knob table as markdown, for the README (native --knobs).
     (define (core-knobs-markdown)
@@ -549,10 +598,16 @@
                        " s " (number->string (exact (round (machine-s m))))
                        " speed " (number->string (speed-kmh m))
                        " integrity " (number->string (exact (round (machine-integrity m))))
-                       (fx-describe))))
+                       (fx-describe)
+                       (music-text))))
 
-    (define (core-frame! dt win-w win-h integer-only)
-      (set! *clock* (clock-advance *clock* dt))
+    ;; Advance a frame without drawing. Headless checks exercise this
+    ;; same input, pacing and fixed-tick path as both graphical shells.
+    (define (core-advance! dt)
+      (when (pressed? 'f5)
+        (set! *paused* (not *paused*))
+        (audio-pause! (core-paused?))
+        (music-frame! (race-song *race*) (core-paused?)))
       (when (> dt 0.0)
         (set! *fps* (+ (* 0.95 *fps*) (* 0.05 (/ 1.0 dt))))
         (set! *frame-ms* (+ (* 0.95 *frame-ms*) (* 0.05 (* 1000.0 dt)))))
@@ -562,12 +617,33 @@
       (when (or (pressed? 'r) (pad-pressed? *pad* 'back))
         (set! *race* (race-start *tuning* *race*))
         (set! *cam-heading* #f)
+        (music-close!)
+        (set! *clock* (clock-new))
+        (set! *pacing* (pacing-new))
         (say "restart"))
+      (let* ((interval (if *skip-interval* 0.0 dt))
+             (c (race-song *race*))
+             ;; The ear is sampled at this frame's time. Compare it to
+             ;; the simulation this interval would produce, respecting
+             ;; Substratic's six-tick cap rather than hiding stalls.
+             (candidate (clock-advance *clock* (if (core-paused?) 0.0 interval)))
+             (sim (+ (/ (+ (conductor-tick c) (clock-steps candidate)) 60.0)
+                     (clock-acc candidate)))
+             (ear (music-audible-seconds)))
+        (set! *skip-interval* #f)
+        (set! *pacing* (pace-frame *pacing* interval sim (or ear sim)
+                                 (music-running?) (core-paused?) (conductor-bar c)))
+        (when (pacing-resync? *pacing*)
+          (set! *resync-requests* (+ *resync-requests* 1)))
+        (set! *clock* (clock-advance *clock* (pacing-dt *pacing*))))
       (let ((t0 (current-jiffy)))
         (set! *fx-frame-ms* 0.0)
         (step! (clock-steps *clock*))
         (set! *fx-ms* (ease *fx-ms* *fx-frame-ms*))
-        (set! *sim-ms* (ease *sim-ms* (ms-since t0))))
+        (set! *sim-ms* (ease *sim-ms* (ms-since t0)))))
+
+    (define (core-frame! dt win-w win-h integer-only)
+      (core-advance! dt)
       (let ((t0 (current-jiffy)))
        (scene-frame! *tuning* *race* (or *cam-heading* 0.0)
                     (list (cons 'best *best*)
@@ -590,6 +666,7 @@
                           (cons 'start-line (if (eq? *platform* 'web) "PRESS ENTER OR TAP" "PRESS ENTER"))
                           (cons 'restart-line (if (eq? *platform* 'web) "ENTER OR TAP TO RUN IT AGAIN" "ENTER TO RUN IT AGAIN"))
                           (cons 'overlay *overlay*)
+                          (cons 'paused (core-paused?))
                           (cons 'fps (and *fps-on* (list *fps* *frame-ms* *sim-ms* *draw-ms*)))
                           (cons 'instruments (and *fps-on* (list *history* *hist-i* (history-max) *hitch-count*
                                                                  *audio-mode* (audio-readout) *audio-ms*))))
@@ -597,6 +674,7 @@
        (set! *draw-ms* (ease *draw-ms* (ms-since t0))))
       (frame-record! (* 1000.0 dt) *sim-ms* *draw-ms*)
       (let ((m (racer-machine (race-player *race*))) (t0 (current-jiffy)))
+        (music-frame! (race-song *race*) (core-paused?))
         (audio-frame! (if (memq (race-phase *race*) '(title countdown)) 0.0
                           (/ (machine-speed m) (handling-ref *tuning* 'top)))
                       (if (eq? (race-phase *race*) 'race) *last-throttle* 0.0)

@@ -54,6 +54,7 @@ site under `/shots/`.
 | Palette, dither | P, / | |
 | FPS, frame graph, sound readout | F3 | |
 | Print the hitch log (console) | F4 | |
+| Pause or resume | F5 | |
 
 **On a phone** the machine accelerates by itself. Three schemes, picked with
 the SCHEME button (top left) or `?touch=zones|drag|stick`:
@@ -100,6 +101,7 @@ current values, and every knob takes a URL parameter of the same name, so
 it on the grid.
 
 Other parameters: `?track=oval|loop` (the same as `track=0|1`), `?mute`,
+`?musicdepth=MS` (the song's queue, default 250),
 `?audiodepth=MS` (the engine sound's queue, default 250), `?cues=0` (the one-shot sounds in
 the stream instead of as cues, the old way), `?hitchlog` (every frame over 33 ms to the console),
 `?touch=zones|drag|stick`, `?autopilot` (the player drives the racing line),

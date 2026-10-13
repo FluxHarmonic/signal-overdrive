@@ -3,7 +3,8 @@
 The game owns song time in simulation ticks. `(signal music conductor)`
 computes rows directly from ticks and records section landings as
 `#(tick absolute-bar mark)`, newest first. The audible clock and pacing
-policy are separate in `(signal music clock)`; the shell will apply them.
+policy are separate in `(signal music clock)`; the shell applies the
+nudge before feeding Substratic's fixed clock.
 
 The race state carries its conductor. Starting or restarting a delivery
 resets the song to grid; GO and lap1 start together after four complete
@@ -70,8 +71,8 @@ compiler matching the game lock, with its cache in `/tmp` and nice 15.
 
 `scripts/test-conductor` checks the clock, loops, decisions and pacing.
 `scripts/test-score` checks compiled triggers and multi-bar patterns.
-The captured-audio drift gate and live shell integration are separate
-work; these source tests do not establish audio synchronization.
+The captured-audio drift gate remains separate work; these source tests
+do not establish audio synchronization.
 
 `(signal music playback)` owns the Motif pull path shared by the live
 stream and offline reference. It waits until the actual walker timeline
@@ -92,5 +93,14 @@ discards the old queue, including a restart at the same tick.
 
 `test/test-music-sink.sgl` exercises the actual native ring with the
 sink's drain shim, asserting that no audio device initialized. This
-adapter is prepared separately; core pacing and resync integration are
-still outstanding.
+core uses the adapter alongside the engine/cue stream. F5 pauses both
+audio paths and simulation ticks. Web blur/visibility changes also pause,
+and the first returning frame discards its hidden interval. The page
+reports WebAudio output+base latency every 500 ms. Native window-focus
+integration and bar-boundary resync execution are still outstanding;
+the readout currently reports resync requests, not completed actions.
+
+`core-advance!` is the same input/pacing/tick path used by each graphical
+frame, exposed without drawing for headless checks. The muted
+`test/test-shell-clock.sgl` checks wall pacing, the six-tick stall cap,
+focus pause and explicit pause across focus changes.
