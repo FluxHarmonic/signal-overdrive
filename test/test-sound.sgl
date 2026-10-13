@@ -97,4 +97,31 @@
       (synth-event! s 'wall 2000.0)
       (synth-event! s 'corrupt 0)
       (let ((xs (render s RATE)))
-        (assert-true (< (apply max (map abs xs)) 1.0))))))
+        (assert-true (< (apply max (map abs xs)) 1.0)))))
+
+  ;; The noise generator used to form seed * 1103515245 directly, up to
+  ;; 2^61, which is past Sigil's 47-bit fixnums: every sample made a
+  ;; bignum, about 4 MB a second of garbage on the main thread at 22,050 Hz,
+  ;; and with it a minor collection (tens of ms) about every second.
+  (test "the noise step is the 31-bit LCG, number for number"
+    (for-each
+      (lambda (seed)
+        (assert-equal (modulo (+ (* seed 1103515245) 12345) 2147483648) (lcg-next seed)))
+      (list 0 1 2 12345 32767 32768 65535 65536 1103515245 2147483646 2147483647))
+    (let loop ((seed 12345) (i 0))
+      (when (< i 2000)
+        (let ((next (lcg-next seed)))
+          (assert-equal (modulo (+ (* seed 1103515245) 12345) 2147483648) next)
+          (loop next (+ i 1))))))
+
+  (test "a block of engine audio, scrape and all, makes almost no garbage"
+    ;; Measured 372 bytes a sample with the bignum step and 6 without it
+    ;; (the wall scrape runs the generator twice a sample).
+    (let ((s (settled 0.9 1.0))
+          (buf (make-bytevector (* 8 4096) 0))
+          (young (lambda () (cdr (assq (quote young-allocated-bytes) (%gc-stats))))))
+      (synth-event! s (quote wall) 2000.0)
+      (synth-fill! s buf 4096)
+      (let ((before (young)))
+        (synth-fill! s buf 4096)
+        (assert-true (< (/ (- (young) before) 4096.0) 32.0))))))
