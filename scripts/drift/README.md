@@ -7,6 +7,12 @@ The conductor is being prepared for integration with this failure recorded;
 a fresh worker takes the drift investigation. No captured sabotage PASS
 has been established.
 
+`sh scripts/drift/test-candidate RUNDIR` runs the default project Sigil
+tests through the pinned CLI's linked native-dependency harness, with
+one CPU/nice 15, 4 GiB and a 30-minute build/test bound. This is required
+for the DSP/ring checks; plain source evaluation has no `dsp-init` binding.
+It writes RESULT and the test log/report, with null audio and no display.
+
 | Actual normal capture | p95 | Worst | Matching coverage | Sounding underruns | Resyncs |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Checkpoint 33, best worst-error result with zero underruns | 55.86 ms | 83.83 ms | 62.45% | 0 | 14 |
