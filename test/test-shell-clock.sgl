@@ -47,3 +47,18 @@
     (keys-end-frame! (core-keys))
     (assert-false (core-paused?))
     (assert-equal 1 (race-tick (core-race)))))
+
+(test-group "shell: deliberate clock-skew arm"
+  (test "the skew arm plants 1% even with audio muted, and none restores wall time"
+    (core-boot! 'desktop)
+    (core-param! "music-sabotage=skew")
+    (let frames ((n 600))
+      (when (> n 0)
+        (core-advance! (/ 1.0 60.0))
+        (frames (- n 1))))
+    (assert-true (> (race-tick (core-race)) 600))
+    (assert-true (<= (race-tick (core-race)) 606))
+    (core-param! "music-sabotage=none")
+    (core-boot! 'desktop)
+    (core-advance! (/ 1.0 60.0))
+    (assert-equal 1 (race-tick (core-race)))))

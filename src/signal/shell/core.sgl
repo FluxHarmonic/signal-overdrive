@@ -59,6 +59,13 @@
     (define *focused* #t)
     (define *skip-interval* #f)
     (define *resync-requests* 0)
+    (define *music-trace* #f)
+    (define *music-trace-first* #f)
+    (define *music-trace-log* '())
+    (define *music-trace-frame* 0)
+    (define *frame-wall* 0.0)
+    (define *frame-ear* #f)
+    (define *skew-arm* #f)
 
     (define (core-paused?) (or *paused* (not *focused*)))
 
@@ -302,6 +309,13 @@
             ((string=? kv "nosprites") (set! *no-sprites* #t))
             ((string=? kv "mute") (audio-mute!))
             ((string=? kv "hitchlog") (set! *hitch-print* #t))
+            ((string=? kv "musiclog") (set! *music-trace* #t))
+            ((and (> (string-length kv) 15) (string=? (substring kv 0 15) "music-sabotage="))
+             (let ((arm (string->symbol (substring kv 15 (string-length kv)))))
+               (unless (memq arm '(none depth immediate skew))
+                 (error "unknown music sabotage arm" arm))
+               (set! *skew-arm* (eq? arm 'skew))
+               (music-sabotage! arm)))
             ((string=? kv "cues=0") (audio-cues! #f))
             ((and (> (string-length kv) 14) (string=? (substring kv 0 14) "audio-latency="))
              (let ((v (string->number (substring kv 14 (string-length kv)))))
@@ -521,6 +535,34 @@
                        " resyncs " (number->string (list-ref m 7))
                        " dropped-ms " (r1 (* 1000.0 (clock-dropped *clock*))))))
 
+    ;; The reference uses these simulation landings, never driver landings.
+    ;; Clock samples are dated at frame advancement, before draw/render CPU.
+    (define (music-trace!)
+      (when *music-trace*
+        (let* ((c (race-song *race*))
+               (first (car (reverse (conductor-log c)))))
+          (unless (eq? first *music-trace-first*)
+            (set! *music-trace-first* first)
+            (set! *music-trace-log* '())
+            (say "conductor reset wall " (number->string *frame-wall*)
+                 " mark " (symbol->string (conductor-section c))))
+          (for-each
+            (lambda (entry)
+              (unless (memq entry *music-trace-log*)
+                (say "conductor intended tick " (number->string (vector-ref entry 0))
+                     " bar " (number->string (vector-ref entry 1))
+                     " mark " (symbol->string (vector-ref entry 2)))))
+            (reverse (conductor-log c)))
+          (set! *music-trace-log* (conductor-log c))
+          (set! *music-trace-frame* (+ *music-trace-frame* 1))
+          (when (= 0 (modulo *music-trace-frame* 6))
+            (say "conductor clock wall " (number->string *frame-wall*)
+                 " song " (number->string (+ (/ (conductor-tick c) 60.0) (clock-acc *clock*)))
+                 " audio " (if *frame-ear* (number->string *frame-ear*) "-")
+                 " tick " (number->string (conductor-tick c))
+                 " phase " (symbol->string (race-phase *race*))
+                 (music-text))))))
+
     ;; The knob table as markdown, for the README (native --knobs).
     (define (core-knobs-markdown)
       (apply string-append
@@ -609,6 +651,7 @@
     ;; Advance a frame without drawing. Headless checks exercise this
     ;; same input, pacing and fixed-tick path as both graphical shells.
     (define (core-advance! dt)
+      (set! *frame-wall* (* 1000.0 (current-second)))
       (when (pressed? 'f5)
         (set! *paused* (not *paused*))
         (audio-pause! (core-paused?))
@@ -626,7 +669,7 @@
         (set! *clock* (clock-new))
         (set! *pacing* (pacing-new))
         (say "restart"))
-      (let* ((interval (if *skip-interval* 0.0 dt))
+      (let* ((interval (if *skip-interval* 0.0 (* dt (if *skew-arm* 1.01 1.0))))
              (c (race-song *race*))
              ;; The ear is sampled at this frame's time. Compare it to
              ;; the simulation this interval would produce, respecting
@@ -636,12 +679,16 @@
                      (clock-acc candidate)))
              (ear (music-audible-seconds)))
         (set! *skip-interval* #f)
+        (set! *frame-ear* ear)
         (set! *pacing* (pace-frame *pacing* interval sim (or ear sim)
                                  (music-running?) (core-paused?) (conductor-bar c)))
         (when (pacing-resync? *pacing*)
           (set! *resync-requests* (+ *resync-requests* 1))
           (music-request-resync!))
-        (set! *clock* (clock-advance *clock* (pacing-dt *pacing*))))
+        (set! *clock* (clock-advance *clock*
+                                   (if (and *skew-arm* (not (core-paused?)))
+                                       interval
+                                       (pacing-dt *pacing*)))))
       (let ((t0 (current-jiffy)))
         (set! *fx-frame-ms* 0.0)
         (step! (clock-steps *clock*))
@@ -687,6 +734,7 @@
                       (> (machine-boost m) 0.0)
                       *frame-events*)
         (set! *audio-ms* (ease *audio-ms* (ms-since t0))))
+      (music-trace!)
       (set! *frame-events* '())
       (keys-end-frame! *keys*)
       (pad-end-frame! *pad*))))

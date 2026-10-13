@@ -15,7 +15,7 @@
           (signal music inserts))
   (export music-start! music-frame! music-close! music-running?
           music-audible-seconds music-depth! music-latency! music-readout
-          music-request-resync! music-log)
+          music-request-resync! music-log music-sabotage!)
   (begin
     (define PUSH 256)
     (define *ctx* #f)
@@ -30,6 +30,8 @@
     (define *resync-pending* #f)
     (define *resyncs* 0)
     (define *last-resync-bar* -1)
+    (define *subtract-depth* #t)
+    (define *handoff-mode* 'planned)
     (define *delivered* 0)
     (define *silence* 0)
     (define *start-conductor* #f)
@@ -44,6 +46,11 @@
     (define (music-depth! ms)
       (set! *depth-ms* (max 10 (min 2000 ms))))
 
+    ;; Explicit diagnostic arms; the game ships the normal path by default.
+    (define (music-sabotage! arm)
+      (set! *subtract-depth* (not (eq? arm 'depth)))
+      (set! *handoff-mode* (if (eq? arm 'immediate) 'immediate 'planned)))
+
     ;; WebAudio reports outputLatency + baseLatency, in seconds.
     (define (music-latency! seconds)
       (set! *latency* (max 0.0 seconds)))
@@ -57,7 +64,7 @@
     (define (music-audible-seconds)
       (and *stream*
            (let ((heard (* *rate* (audible-seconds *delivered*
-                                                  (audio-stream-depth *stream*)
+                                                  (if *subtract-depth* (audio-stream-depth *stream*) 0)
                                                   *rate* *latency* 0))))
              ;; A seek changes time when its first corrected sample
              ;; reaches the ear, after the queue and device latency.
@@ -101,7 +108,8 @@
           (when *stream*
             (guard (e (#t (music-close!) (raise e)))
               (set! *playback* (playback-open *tune* *rate*
-                                            (transport-start-conductor plan) MUSIC-INSERTS)))
+                                            (transport-start-conductor plan) MUSIC-INSERTS
+                                            mode: *handoff-mode*)))
             (set! *epoch* (transport-start-epoch plan))
             (set! *last-resync-bar* -1)
             (set! *start-conductor* (transport-start-conductor plan))

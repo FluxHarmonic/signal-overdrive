@@ -117,3 +117,15 @@ later planned landings and delayed audible epochs without a device.
 frame, exposed without drawing for headless checks. The muted
 `test/test-shell-clock.sgl` checks wall pacing, the six-tick stall cap,
 focus pause and explicit pause across focus changes.
+
+`--musiclog` (or `?musiclog`) prints simulation intended landings and
+dated clock/cost samples. The clock timestamp is taken before drawing
+and rendering, so CPU time is not mistaken for clock drift. Intended
+landings are independent of the player's actual landing diagnostics.
+The gate renders its reference from the intended log.
+
+The three diagnostic arms are `--music-sabotage=depth` (omit queue depth
+from the audible reading), `immediate` (hand over planned marks at once)
+and `skew` (plant 1% in the shell clock and disable its nudge). `none`
+restores the normal path. Resync remains active, so each arm tests the
+actual system including its recovery behavior.

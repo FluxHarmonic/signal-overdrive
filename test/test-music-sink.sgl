@@ -71,4 +71,15 @@
       (music-frame! (conductor-new 'grid) #f)
       (near -0.035 (music-audible-seconds))
       (music-close!))
+    (assert-false (audio-initialized?)))
+
+  (test "the depth sabotage arm adds the full queued offset to the audible reading"
+    (let ((c (conductor-new 'lap1)))
+      (music-start! 'offline-test-context c)
+      (music-frame! c #f)
+      (let ((normal (music-audible-seconds)))
+        (music-sabotage! 'depth)
+        (near 0.25 (- (music-audible-seconds) normal)))
+      (music-sabotage! 'none)
+      (music-close!))
     (assert-false (audio-initialized?))))
