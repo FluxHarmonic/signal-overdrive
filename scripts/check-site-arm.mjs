@@ -9,6 +9,8 @@
 //   node scripts/check-site-arm.mjs BASE DIR     (BASE: http://127.0.0.1:PORT)
 //
 // Without a browser:
+//   icons      apple-touch-icon.png is 180x180 and fully opaque (iOS paints
+//              transparent pixels black), and the landing links it
 //   tree       the site's own files are staged: the page, the art, the
 //              Flux Harmonic mark, the fonts and their OFL.txt
 //   headers    the tree's _headers, read with substratic's own parser (the one
@@ -45,7 +47,10 @@
 //              stops the rotation, keyboard focus on a dot pauses it, one
 //              shows at a time, and under prefers-reduced-motion nothing
 //              changes by itself
-//   phone      at 390 CSS px (a phone, emulated), / and the 404 have no
+//   theme      ?theme=a (the default) and ?theme=b set the page's theme on /
+//              and the 404, the two differ, and every text role meets 4.5:1
+//              (3:1 for large text) against the background behind it
+//   phone      at 390 CSS px (a phone, emulated), / (both themes) and the 404 have no
 //              horizontal scroll, and the logo and PLAY 0.1 fit on screen
 //   404        a missing page shows the 404's number and a link home, and the
 //              same 404, styled, under the game's path
@@ -71,6 +76,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import zlib from "node:zlib";
 import { spawn, spawnSync } from "node:child_process";
 import { auditTree, plausibleStub, isPlausibleFailure, PRIVACY } from "./plausible-check.mjs";
 
@@ -101,6 +107,35 @@ let fail = 0;
 const ok = (leg, what) => console.log(`  ok   ${leg}: ${what}`);
 const bad = (leg, what) => { fail++; console.log(`  FAIL ${leg}: ${what}`); };
 const text = (p) => fs.readFileSync(path.join(DIR, p), "utf8");
+// A PNG's pixels: 8-bit RGB (2) or RGBA (6), not interlaced, no tRNS; anything
+// else is reported as unreadable rather than guessed at.
+function readPNG(file) {
+  const b = fs.readFileSync(file);
+  if (b.subarray(1, 4).toString("latin1") !== "PNG") return { error: "not a PNG" };
+  let o = 8, w = 0, h = 0, ch = 0; const idat = [];
+  while (o < b.length) {
+    const len = b.readUInt32BE(o), type = b.toString("latin1", o + 4, o + 8), d = b.subarray(o + 8, o + 8 + len);
+    if (type === "IHDR") {
+      w = d.readUInt32BE(0); h = d.readUInt32BE(4);
+      if (d[8] !== 8 || (d[9] !== 6 && d[9] !== 2) || d[12] !== 0) return { error: `depth ${d[8]}, colour type ${d[9]}, interlace ${d[12]}: not read here` };
+      ch = d[9] === 6 ? 4 : 3;
+    } else if (type === "tRNS") return { error: "a tRNS chunk: transparency not read here" };
+    else if (type === "IDAT") idat.push(d);
+    o += 12 + len;
+  }
+  const raw = zlib.inflateSync(Buffer.concat(idat)), stride = w * ch, px = Buffer.alloc(stride * h);
+  for (let y = 0; y < h; y++) {
+    const f = raw[y * (stride + 1)], src = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
+    for (let x = 0; x < stride; x++) {
+      const a = x >= ch ? px[y * stride + x - ch] : 0, up = y > 0 ? px[(y - 1) * stride + x] : 0, c = x >= ch && y > 0 ? px[(y - 1) * stride + x - ch] : 0;
+      let v = src[x];
+      if (f === 1) v += a; else if (f === 2) v += up; else if (f === 3) v += (a + up) >> 1;
+      else if (f === 4) { const q = a + up - c, pa = Math.abs(q - a), pb = Math.abs(q - up), pc = Math.abs(q - c); v += pa <= pb && pa <= pc ? a : pb <= pc ? up : c; }
+      px[y * stride + x] = v & 255;
+    }
+  }
+  return { w, h, ch, px };
+}
 
 // ---- tree ------------------------------------------------------------------------------
 {
@@ -110,6 +145,27 @@ const text = (p) => fs.readFileSync(path.join(DIR, p), "utf8");
                 `${SLUG}/index.html`];
   const missing = want.filter((f) => !files.includes(f));
   missing.length ? bad("tree", `missing: ${missing.join(", ")}`) : ok("tree", `the site's ${want.length} named files are staged`);
+}
+
+// ---- icons: the home-screen icon is opaque ------------------------------------------------
+// iOS fills transparent pixels of an apple-touch-icon with black (a ring
+// round the art); every pixel must have alpha 255
+{
+  const detail = [];
+  const p = "apple-touch-icon.png";
+  if (!files.includes(p)) detail.push(`${p} is not in the tree`);
+  else {
+    const img = readPNG(path.join(DIR, p));
+    if (img.error) detail.push(`${p}: ${img.error}`);
+    else {
+      if (img.w !== 180 || img.h !== 180) detail.push(`${p} is ${img.w}x${img.h} (want 180x180)`);
+      let clear = 0;
+      if (img.ch === 4) for (let i = 3; i < img.px.length; i += 4) if (img.px[i] !== 255) clear++;
+      if (clear) detail.push(`${p} has ${clear} pixels that are not fully opaque`);
+    }
+  }
+  if (!/<link rel="apple-touch-icon" href="\/apple-touch-icon\.png">/.test(text("index.html"))) detail.push("index.html does not link it");
+  detail.length ? bad("icons", detail.join("; ")) : ok("icons", `${p} is 180x180 with all 32400 pixels opaque, and the landing links it`);
 }
 
 // ---- headers: only the game is isolated ------------------------------------------------
@@ -431,7 +487,7 @@ try {
   {
     const detail = [], got = [];
     await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-    for (const p of ["/", MISSING]) {
+    for (const p of ["/", "/?theme=b", MISSING]) {
       await visit(p);
       await sleep(300);
       const m = await evalJS(`(() => { const d = document.documentElement;
@@ -451,6 +507,38 @@ try {
     detail.length ? bad("phone", detail.join("; ")) : ok("phone", `no horizontal scroll at 390 px: ${got.join(", ")} (content/viewport px); the logo and PLAY 0.1 on screen`);
   }
   note("/ (landing, play, carousel, phone)", L0[0], L0[1]);
+
+  // ---- theme: A and B, each readable -------------------------------------------------------
+  // every text role against the background actually behind it: 4.5:1, or 3:1
+  // for large text (24 px, or 18.66 px bold); the two themes really differ
+  {
+    const detail = [], got = [];
+    const measure = `(() => {
+      const rgb = (s) => { const m = s.match(/[\\d.]+/g).map(Number); return { c: m.slice(0, 3), a: m.length > 3 ? m[3] : 1 }; };
+      const lum = (c) => { const [r, g, b] = c.map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+      const bgOf = (e) => { for (let x = e; x; x = x.parentElement) { const b = rgb(getComputedStyle(x).backgroundColor); if (b.a > 0) return b.c; } return rgb(getComputedStyle(document.documentElement).backgroundColor).c; };
+      const out = [];
+      for (const sel of [".tagline", ".pitch p", ".pitch a", ".carousel .caption", ".play button", ".play .badge", ".play .how", "h2", ".music p", ".early", ".made p", "footer p", "footer a", "h1.name", ".lost p", ".lost a"]) {
+        const e = document.querySelector(sel); if (!e) continue;
+        const cs = getComputedStyle(e), px = parseFloat(cs.fontSize), bold = Number(cs.fontWeight) >= 700;
+        const fg = rgb(cs.color).c, bg = bgOf(e), L1 = lum(fg), L2 = lum(bg);
+        out.push({ sel, ratio: (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05), need: px >= 24 || (bold && px >= 18.66) ? 3 : 4.5, color: cs.color });
+      }
+      return { theme: document.documentElement.dataset.theme || null, h2: (document.querySelector("h2, h1.name") ? getComputedStyle(document.querySelector("h2, h1.name")).color : null), out };
+    })()`;
+    const seen = {};
+    for (const [p, want] of [["/", "a"], ["/?theme=a", "a"], ["/?theme=b", "b"], [`${MISSING}?theme=b`, "b"], [MISSING, "a"]]) {
+      await visit(p);
+      const m = await evalJS(measure);
+      if (m.theme !== want) detail.push(`${p}: data-theme is ${m.theme} (want ${want})`);
+      for (const r of m.out) if (!(r.ratio >= r.need)) detail.push(`${p} ${r.sel}: ${r.ratio.toFixed(2)}:1 (want ${r.need})`);
+      if (p === "/?theme=a" || p === "/?theme=b") seen[want] = m.h2;
+      got.push(`${p} ${m.out.length} roles, lowest ${Math.min(...m.out.map((r) => r.ratio)).toFixed(1)}:1`);
+    }
+    if (!seen.a || seen.a === seen.b) detail.push(`the headings are ${seen.a} in A and ${seen.b} in B: the themes do not differ`);
+    detail.length ? bad("theme", detail.slice(0, 6).join("; "))
+      : ok("theme", `A by default and with ?theme=a, B with ?theme=b (headings ${seen.a} and ${seen.b}); every text role readable: ${got.join("; ")}`);
+  }
 
   // ---- 404 ---------------------------------------------------------------------------------
   {

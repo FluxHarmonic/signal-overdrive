@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Signal Overdrive</title>
   <meta name="description" content="Signal Overdrive is a Mode 7 racer in the spirit of F-Zero, set in Crash The Stack's world. Carry a song across the city to a pirate uplink, and keep it clean.">
-  <meta name="theme-color" content="#0d0a1a">
+  <meta name="theme-color" content="#0a0a0c">
+  <script>document.documentElement.dataset.theme = new URLSearchParams(location.search).get("theme") === "b" ? "b" : "a";</script>
   <meta property="og:title" content="Signal Overdrive">
   <meta property="og:description" content="The city's wire belongs to Gibson. The air doesn't. A Mode 7 racer in Crash The Stack's world.">
   <meta property="og:type" content="website">
@@ -71,7 +72,7 @@
 
     <div class="play">
       <button type="button" disabled aria-describedby="play-when">PLAY 0.1</button>
-      <span class="how" id="play-when">Coming soon. Free, in your browser.</span>
+      <span class="how" id="play-when"><span class="badge">Coming soon</span>Free, in your browser.</span>
     </div>
 
     <section class="music">

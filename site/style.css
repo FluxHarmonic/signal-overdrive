@@ -1,26 +1,35 @@
 /* signaloverdrive.net: one page and a 404.
-   The colors are the game's own (Crash The Stack's palette roles): the
-   violet-black of the night city, the title's magenta, the cyan of your
-   live signal (Zero's machine, the integrity meter), the yellow of the
-   start line, and C-TEXT for reading. The face is JetBrains Mono (OFL 1.1,
-   fonts/OFL.txt), the subset the other Flux Harmonic game sites serve, so
-   the sites read as siblings. */
+   The colors are the CORRUPT logo's, which are the game's (its embers
+   palette): magenta #ff59d9, orange #ff9f1a, the greys #dbe0e6 and #8a8fa0,
+   and cyan #4df2d9 only as the hairline of the logo's channel split, on a
+   neutral near-black. Two themes, picked with ?theme=a (the default) or
+   ?theme=b by the script at the top of each page: A leads with magenta
+   (links, PLAY, focus, headings) and keeps orange for heat (the coming-soon
+   badge, hover and active, the section markers); B swaps the two. Body text
+   is 6:1 or better on the ground in both. The face is JetBrains Mono (OFL
+   1.1, fonts/OFL.txt), the subset the other Flux Harmonic game sites serve,
+   so the sites read as siblings. */
 @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("/fonts/JetBrainsMono-Regular.woff2") format("woff2"); }
 @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 700; font-display: swap; src: url("/fonts/JetBrainsMono-Bold.woff2") format("woff2"); }
 @font-face { font-family: "JetBrains Mono"; font-style: italic; font-weight: 400; font-display: swap; src: url("/fonts/JetBrainsMono-Italic.woff2") format("woff2"); }
 
 :root {
-  --dark: #0d0a1a;      /* C-BG: the night */
-  --dark-2: #17122e;
-  --line: #2e1c4d;      /* rules and borders */
-  --ink: #cce6ff;       /* C-TEXT */
-  --ink-dim: #8a93b8;   /* body text on the dark */
-  --cyan: #4df2d9;      /* your live signal */
-  --magenta: #ff59d9;   /* the title */
-  --yellow: #ffcc33;    /* the start line */
+  --dark: #0a0a0c;      /* the ground: neutral near-black */
+  --dark-2: #141418;    /* panels */
+  --line: #2a2a31;      /* rules and borders */
+  --ink: #dbe0e6;       /* body text, 15:1 */
+  --ink-dim: #8a8fa0;   /* quieter text, 6:1 */
+  --magenta: #ff59d9;
+  --orange: #ff9f1a;
+  --cyan: #4df2d9;
+  --accent: var(--magenta);   /* theme A: magenta leads */
+  --heat: var(--orange);      /* and orange is the heat */
+  --echo: var(--cyan);        /* the logo's channel split, as a hairline */
   --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
   color-scheme: dark;
 }
+/* theme B: orange leads, magenta is the heat */
+html[data-theme="b"] { --accent: var(--orange); --heat: var(--magenta); }
 
 * { box-sizing: border-box; }
 html { background: var(--dark); }
@@ -33,8 +42,8 @@ body {
   line-height: 1.7;
   -webkit-text-size-adjust: 100%;
 }
-a { color: var(--cyan); }
-a:hover { color: var(--magenta); }
+a { color: var(--accent); }
+a:hover { color: var(--heat); }
 
 main, footer { max-width: 992px; margin: 0 auto; padding: 0 16px; }
 
@@ -77,10 +86,10 @@ h1.logo img {
 .carousel .dots { display: none; justify-content: center; gap: 0.2rem; margin-top: 0.3rem; }
 .carousel.live .dots { display: flex; }
 .carousel .dots button { width: 28px; height: 28px; padding: 0; border: 0; background: none; cursor: pointer; }
-.carousel .dots button::before { content: ""; display: block; width: 8px; height: 8px; margin: auto; background: #7380a6; }   /* C-TEXT-DIM: 5:1 on the dark */
-.carousel .dots button[aria-current="true"]::before { background: var(--cyan); }
-.carousel .dots button:hover::before { background: var(--magenta); }
-.carousel .dots button:focus-visible { outline: 2px solid var(--cyan); outline-offset: -4px; }
+.carousel .dots button::before { content: ""; display: block; width: 8px; height: 8px; margin: auto; background: var(--ink-dim); }   /* 6:1 on the ground */
+.carousel .dots button[aria-current="true"]::before { background: var(--accent); }
+.carousel .dots button:hover::before { background: var(--heat); }
+.carousel .dots button:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; }
 @media (prefers-reduced-motion: reduce) { .carousel .frames .shot { transition: none; } }
 
 .pitch, .music, .made, .early { max-width: 40em; margin-left: auto; margin-right: auto; }
@@ -101,26 +110,42 @@ h1.logo img {
   border: 0;
   text-decoration: none;
 }
-.play a { color: var(--dark); background: var(--cyan); }
+.play a { color: var(--dark); background: var(--accent); }
 .play a:hover, .play a:focus-visible, .play a:active { color: var(--dark); }
-.play a:hover { box-shadow: 0 0 0 3px var(--dark), 0 0 0 5px var(--magenta); }
-.play a:active { background: var(--magenta); }
+.play a:hover { box-shadow: 0 0 0 3px var(--dark), 0 0 0 5px var(--heat); }
+.play a:active { background: var(--heat); }
 .play a:focus-visible { outline: 2px solid var(--ink); outline-offset: 4px; }
+/* not out yet: the accent's outline, dashed, on a panel, not a filled button */
 .play button[disabled] {
-  color: var(--ink-dim);
+  color: var(--accent);
   background: var(--dark-2);
-  box-shadow: inset 0 0 0 2px var(--line);
+  box-shadow: inset 0 0 0 2px var(--dark-2);
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
   cursor: not-allowed;
 }
 .play .how { display: block; margin-top: 0.8rem; font-size: 0.9rem; font-style: italic; color: var(--ink-dim); }
+.play .badge {
+  display: inline-block;
+  margin-right: 0.6em;
+  padding: 0 0.5em;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dark);
+  background: var(--heat);
+}
 
 h2 {
   font-size: 0.95rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--cyan);
+  color: var(--accent);
   margin: 0 0 0.6rem;
 }
+/* the section marker: a small block of heat */
+h2::before { content: ""; display: inline-block; width: 0.5em; height: 0.5em; margin-right: 0.6em; background: var(--heat); }
 .music { margin-bottom: 3rem; }
 .early { margin-bottom: 3rem; color: var(--ink-dim); }
 .made { margin-bottom: 4rem; color: var(--ink-dim); }
@@ -138,7 +163,7 @@ footer .mark { display: inline-block; margin-bottom: 1.5rem; }
 footer .mark img { display: block; width: 190px; height: auto; }
 footer p { margin: 0 0 0.6em; }
 
-/* 404: the number in the title's magenta, the cyan signal split off it */
+/* 404: the number in the accent, with the logo's cyan split as a hairline */
 .lost { min-height: 100vh; display: flex; flex-direction: column; justify-content: center; text-align: center; }
 h1.name {
   position: relative;
@@ -149,7 +174,7 @@ h1.name {
   font-size: clamp(3rem, 12vw, 5rem);
   line-height: 1;
   letter-spacing: 0.08em;
-  color: var(--magenta);
-  text-shadow: -0.06em 0 0 var(--cyan);
+  color: var(--accent);
+  text-shadow: -0.06em 0 0 var(--echo);
 }
 .lost p { color: var(--ink-dim); }
