@@ -14,6 +14,7 @@ if (!["normal", "depth", "immediate", "skew"].includes(ARM)) throw new Error("in
 const GL_THREADS = process.env.CONDUCTOR_GL_THREADS || "1";
 if (!["1", "2"].includes(GL_THREADS)) throw new Error("at most two software-rendering threads");
 const HEADLESS = process.env.CONDUCTOR_HEADLESS === "1";
+const GC_PROFILE = process.env.CONDUCTOR_GC_PROFILE === "1";
 const BIN = path.resolve(process.env.CONDUCTOR_BINARY || path.join(ROOT, "build/release/bin/signal-overdrive"));
 if (!fs.existsSync(BIN)) throw new Error("no release binary");
 fs.mkdirSync(RUN, { recursive: true });
@@ -36,6 +37,7 @@ try {
     PIPEWIRE_NODE: "worker-null", XDG_DATA_HOME: path.join(RUN, "xdg"),
     LIBGL_ALWAYS_SOFTWARE: "1", LP_NUM_THREADS: GL_THREADS, GALLIUM_DRIVER: "llvmpipe" };
   delete env.WAYLAND_DISPLAY;
+  if (GC_PROFILE) env.SIGIL_GC_STATS_FILE = path.join(RUN, "game-gc.jsonl");
   const store = path.join(env.XDG_DATA_HOME, "signal-overdrive");
   fs.mkdirSync(store, { recursive: true });
   fs.writeFileSync(path.join(store, "scale.sgl"), "2\n");
@@ -88,7 +90,7 @@ try {
     execFileSync(xdotool, ["windowfocus", "--sync", windowID], { env, timeout: 5000 });
   }
   fs.writeFileSync(path.join(RUN, "meta.json"), JSON.stringify({ arm: ARM, binary: BIN, display: env.DISPLAY,
-    game_pid: verifiedPID, null_sink: nullSink[0], cpu, headless_race: HEADLESS,
+    game_pid: verifiedPID, null_sink: nullSink[0], cpu, headless_race: HEADLESS, gc_profile: GC_PROFILE,
     software_rendering_threads: HEADLESS ? 0 : GL_THREADS,
     load_start: os.loadavg(), commit: execFileSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8" }).trim() }, null, 2));
   let complete = false;
@@ -107,7 +109,9 @@ try {
   const frames = Math.ceil((trace.clocks.at(-1).song + 2) * 48000);
   const renderLog = fs.openSync(path.join(RUN, "reference.log"), "w");
   reference = launch(path.join(ROOT, "scripts/dev"), [BIN, "--music-reference", path.join(RUN, "intended.sgv"), path.join(RUN, "reference.pcm"), String(frames)],
-    { env: { ...env, SIGIL_AUDIO_BACKEND: "null" }, stdio: ["ignore", renderLog, renderLog] });
+    { env: { ...env, SIGIL_AUDIO_BACKEND: "null",
+      ...(GC_PROFILE ? { SIGIL_GC_STATS_FILE: path.join(RUN, "reference-gc.jsonl") } : {}) },
+      stdio: ["ignore", renderLog, renderLog] });
   fs.closeSync(renderLog);
   const code = await new Promise((resolve, reject) => { reference.once("exit", resolve); reference.once("error", reject); });
   if (code !== 0) throw new Error(`offline reference failed (${code})`);
