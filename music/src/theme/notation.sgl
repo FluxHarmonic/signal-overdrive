@@ -27,7 +27,9 @@
   (export midi pitch->name
           note bend slide events-shift
           ev-ch ev-start ev-len ev-midi
-          events->tune-text BAR)
+          events->tune-text BAR
+          ;; the steps of events->tune-text, for a tune with its own seams
+          events->cells uniq-cells pattern-text row-of)
   (begin
     (define BAR 16)
 

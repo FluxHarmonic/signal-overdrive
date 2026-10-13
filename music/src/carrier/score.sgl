@@ -22,7 +22,7 @@
 
 (define-library (carrier score)
   (import (sigil core) (sigil string) (sigil list) (motif tune))
-  (export audition-tune audition-bars lap1-bars lap2-bars
+  (export audition-tune audition-bars lap1-bars lap2-bars LAP1-CHORDS LAP2-CHORDS
           instruments-text bus-text CALL ANSWER)
   (begin
     ;; ------------------------------------------------------------

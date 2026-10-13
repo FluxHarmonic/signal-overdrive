@@ -8,6 +8,7 @@
 ;;;   build/dev/bin/carrier tune OUT.cts   write the composed tune
 ;;;   build/dev/bin/carrier render ...     offline renders (see (carrier main))
 ;;;   build/dev/bin/carrier theme ...      the main theme's tools (see (theme main))
+;;;   build/dev/bin/carrier race ...       Carrier's race arrangement (see (race main))
 
 (package
   name: "carrier-music"

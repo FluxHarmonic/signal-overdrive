@@ -1,0 +1,26 @@
+;;; Carrier's cue sheet, written by `carrier race cues`. Loops are
+;;; half-open, section-relative bars; #f plays through. chords: one per
+;;; bar; a bar that changes chord halfway lists both.
+((id . carrier)
+ (engine-top-hz . 220.0)
+ (engine-boost-hz . 293.664767917)
+ (sections . (
+   (calm (loop . (0 . 8)) (next . #f)
+    (chords (D . minor) (D . minor) (G . major) (G . major) (Bb . major) (Bb . major) (C . major) (A . minor)))
+   (grid (loop . #f) (next . lap1)
+    (chords (D . minor) (D . minor) (D . minor) (A . major)))
+   (lap1 (loop . (8 . 16)) (next . #f)
+    (chords (D . minor) (D . minor) (G . major) (C . major) (D . minor) (D . minor) (F . major) (A . minor) (D . minor) (D . minor) (G . major) (C . major) (D . minor) (D . minor) (F . major) (A . minor)))
+   (lap2 (loop . (0 . 8)) (next . #f)
+    (chords (F . major) (G . major) (A . minor) (A . minor) (F . major) (G . major) (D . minor) (C . major)))
+   (hold (loop . (4 . 5)) (next . #f)
+    (chords (Bb . major) (C . major) (D . minor) (Bb . major) (A . major)))
+   (fill (loop . #f) (next . traced)
+    (chords (A . major) (A . major)))
+   (traced (loop . (8 . 16)) (next . #f)
+    (chords (D . minor) (G . major) (A . minor) (Eb . major) (D . minor) (G . major) (A . minor) (Eb . major) (D . minor) (G . major) (A . minor) (Eb . major) (D . minor) (G . major) ((F . major) (A . major)) (Eb . major)))
+   (uplink (loop . #f) (next . results)
+    (chords (D . minor) (G . major) ((F . major) (A . major)) (D . minor) (D . minor) (G . major) ((F . major) (A . major)) (D . minor)))
+   (results (loop . (0 . 8)) (next . #f)
+    (chords (D . minor) (D . minor) (Bb . major) (C . major) (D . minor) (D . minor) (G . major) (A . minor)))
+  )))

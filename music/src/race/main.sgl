@@ -1,0 +1,181 @@
+;;; (race main) - Carrier's race arrangement: its tools
+;;;
+;;;   carrier race tune OUT.cts          write the race tune; refuses to
+;;;                                      overwrite a tracker edit
+;;;   carrier race cues OUT.sgl          write the cue sheet
+;;;   carrier race render IN.cts OUT.wav [dry] MARK:BARS ...
+;;;                                      a race path played through: each
+;;;                                      section for BARS bars, its loop
+;;;                                      applied as the game's conductor
+;;;                                      applies it (grid:4 lap1:16 ...)
+;;;   carrier race stems IN.cts DIR MARK:BARS ...
+;;;                                      the same path, each channel soloed:
+;;;                                      peak and RMS, and DIR/stem-chN.wav
+;;;
+;;; Renders go through the live player with the game's channel inserts at
+;;; rest (the drum and arp crush at drive 0, the identity; the bass and
+;;; pad low-passed at 16 kHz; the pad and lead choruses dry), so they
+;;; sound as the game plays a clean race. They play the path as one order
+;;; list rather than by mark jumps; every section starts by releasing
+;;; whatever it doesn't play, so the two sound the same. The game's own
+;;; reference renderer is the check on that.
+
+(define-library (race main)
+  (import (sigil core) (sigil io) (sigil string) (sigil list) (sigil fs) (sigil crypto) (sigil math)
+          (motif tune) (motif tune player) (motif graph)
+          (carrier render) (carrier analysis)
+          (race score))
+  (export race-main game-inserts)
+  (begin
+    (define (say . xs) (for-each display xs) (newline))
+    (define SR 48000)
+
+    (define (fixed x d)
+      (let* ((k (expt 10.0 d)) (r (/ (round (* x k)) k)))
+        (number->string r)))
+    (define (dbfs x) (fixed (* 20 (/ (log (max x 1e-9)) (log 10.0))) 2))
+
+    ;; The game's channel inserts as built (at rest: a clean race), copied
+    ;; from src/signal/music/inserts.sgl; the game's own reference renderer
+    ;; (--music-reference) is the check that they still agree
+    (define (drum-insert signal)
+      (g:crush signal (g:param 'drive 0.0 0.0 8.0) (g:param 'bits 24.0 1.0 24.0)
+               (g:param 'rate-div 1.0 1.0 16.0)))
+    (define (bass-insert signal)
+      (g:butlp signal (g:param 'cutoff 16000.0 20.0 20000.0)))
+    (define (pad-insert signal)
+      (g:chorus (g:butlp signal (g:param 'cutoff 16000.0 20.0 20000.0))
+                (g:param 'rate 0.5 0.0 8.0) (g:param 'depth 0.0 0.0 20.0) (g:param 'mix 0.0 0.0 1.0)))
+    (define (lead-insert signal)
+      (g:mul (g:chorus signal (g:param 'rate 0.5 0.0 8.0) (g:param 'depth 0.0 0.0 20.0)
+                       (g:param 'mix 0.0 0.0 1.0))
+             (g:param 'gain 1.0 0.0 1.0)))
+    (define (game-inserts)
+      (list (cons 1 drum-insert) (cons 2 drum-insert) (cons 3 drum-insert)
+            (cons 4 bass-insert) (cons 5 pad-insert) (cons 6 lead-insert)
+            (cons 7 drum-insert)))
+
+    ;; ------------------------------------------------------------
+    ;; tune, cues
+    ;; ------------------------------------------------------------
+    ;; As `carrier theme tune`: OUT.sha256 holds the hash of what was
+    ;; written, and an OUT that no longer matches it (a tracker edit) is
+    ;; not overwritten unless it already equals the new output.
+    (define (cmd-tune out)
+      (let* ((t (read-tune-string (race-text)))
+             (text (tune->string t))
+             (new-hash (sha256 text))
+             (side (string-append out ".sha256"))
+             (cur (and (file-exists? out) (sha256 (read-file-string out))))
+             (last (and (file-exists? side) (string-trim (read-file-string side)))))
+        (cond
+          ((and cur (not (equal? cur new-hash)) (not (equal? cur last)))
+           (say "race: REFUSING to overwrite " out ": "
+                (if last
+                    "it changed since it was generated (a tracker edit?)."
+                    (string-append "there is no " side " to show it is generated output."))
+                " Fold the edit into src/race/score.sgl or move the file aside, then regenerate.")
+           1)
+          (else
+           (write-file-string out text)
+           (write-file-string side (string-append new-hash "\n"))
+           (say "race: wrote " out " (" (number->string (length (tune-order t))) " bars, "
+                (number->string (length (tune-marks t))) " marks)"
+                (if (equal? cur new-hash) ", unchanged" ""))
+           0))))
+
+    (define (cmd-cues out)
+      (let ((text (race-cues-text)))
+        ;; it must read back as data
+        (read (open-input-string text))
+        (write-file-string out text)
+        (say "race: wrote " out)
+        0))
+
+    ;; ------------------------------------------------------------
+    ;; A race path: ((mark . bars) ...) -> the order list it plays
+    ;; ------------------------------------------------------------
+    (define (parse-step s)
+      (let* ((i (let find ((k 0)) (cond ((>= k (string-length s)) #f)
+                                        ((char=? (string-ref s k) #\:) k)
+                                        (else (find (+ k 1))))))
+             (mark (and i (string->symbol (substring s 0 i))))
+             (n (and i (string->number (substring s (+ i 1) (string-length s))))))
+        (unless (and mark (assq mark RACE-SECTIONS) n (exact-integer? n) (> n 0))
+          (error "race: a path step is MARK:BARS with a section's mark" s))
+        (cons mark n)))
+
+    ;; the conductor's section-relative bar: past the loop's end, wrap
+    ;; into the loop; a section without one plays through once
+    (define (path-order steps)
+      (apply append
+             (map (lambda (step)
+                    (let* ((sec (assq (car step) RACE-SECTIONS))
+                           (bars (cadr sec)) (lp (caddr sec))
+                           (start (section-start (car step))))
+                      (let loop ((i 0) (acc '()))
+                        (if (>= i (cdr step)) (reverse acc)
+                            (let ((bar (if (and lp (>= i (cdr lp)))
+                                           (+ (car lp) (modulo (- i (car lp)) (- (cdr lp) (car lp))))
+                                           i)))
+                              (when (>= bar bars)
+                                (error "race: the section has no loop and fewer bars" step))
+                              (loop (+ i 1) (cons (+ start bar) acc)))))))
+                  steps)))
+
+    (define (path-tune t steps)
+      (tune t order: (path-order steps) marks: '()))
+
+    (define BAR-SECONDS (/ (* 32 2.5 3) 140.0))
+
+    (define (render-path t steps solo . dry)
+      (let* ((pt (path-tune t steps))
+             (p (open-tune-player pt SR inserts: (if (pair? dry) (quote ()) (game-inserts))))
+             (frames (exact (round (* SR (+ 2.0 (* BAR-SECONDS (length (tune-order pt)))))))))
+        (when solo (player-solo! p solo))
+        (let ((r (render-player p SR '() frames)))
+          (player-close! p)
+          r)))
+
+    (define (levels bv frames)
+      (let ((l (bv->channel bv frames 0)) (r (bv->channel bv frames 1)))
+        (values (max (peak l 0 frames) (peak r 0 frames))
+                (rms (bv->mid bv frames) 0 frames))))
+
+    (define (cmd-render in out steps dry?)
+      (let* ((t (read-tune-file in))
+             (r (if dry? (render-path t steps #f #t) (render-path t steps #f)))
+             (bv (car r)) (frames (cdr r)))
+        (write-wav16 out bv frames SR 1.0)
+        (call-with-values (lambda () (levels bv frames))
+          (lambda (pk lv)
+            (say "race: rendered " in " -> " out ": " (fixed (/ frames (* 1.0 SR)) 2) " s, "
+                 (number->string (length (path-order steps))) " bars, sample peak " (dbfs pk)
+                 " dBFS, mid RMS " (dbfs lv) " dBFS")))
+        0))
+
+    (define (cmd-stems in dir steps)
+      (let ((t (read-tune-file in)))
+        (for-each
+         (lambda (ch)
+           (let* ((r (render-path t steps ch)) (frames (cdr r)))
+             (call-with-values (lambda () (levels (car r) frames))
+               (lambda (pk lv) (say "ch" (number->string ch) "  peak " (dbfs pk) "  rms " (dbfs lv))))
+             (write-wav16 (string-append dir "/stem-ch" (number->string ch) ".wav") (car r) frames SR 1.0)))
+         '(1 2 3 4 5 6 7 8))
+        0))
+
+    (define (race-main args)
+      (cond
+        ((and (= (length args) 2) (equal? (car args) "tune")) (cmd-tune (cadr args)))
+        ((and (= (length args) 2) (equal? (car args) "cues")) (cmd-cues (cadr args)))
+        ((and (>= (length args) 4) (equal? (car args) "render"))
+         (let ((dry? (equal? (cadddr args) "dry")))
+           (cmd-render (cadr args) (caddr args) (map parse-step (if dry? (cdr (cdddr args)) (cdddr args))) dry?)))
+        ((and (>= (length args) 4) (equal? (car args) "stems"))
+         (cmd-stems (cadr args) (caddr args) (map parse-step (cdddr args))))
+        (else
+         (say "usage: carrier race tune OUT.cts | carrier race cues OUT.sgl"
+              " | carrier race render IN.cts OUT.wav MARK:BARS ..."
+              " | carrier race stems IN.cts DIR MARK:BARS ...")
+         1)))))

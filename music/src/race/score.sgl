@@ -1,0 +1,643 @@
+;;; (race score) - Carrier's race arrangement: the song the game plays
+;;;
+;;; Carrier arranged into the race's sections, on the game's song contract:
+;;; 140 BPM, speed 3, eight channels, meter (8 4), one pattern per bar,
+;;; the nine marks below, and no tracker transport (Bxx, Dxx, Fxx): the
+;;; game's conductor loops each section and jumps between them at bar
+;;; lines. Positions and lengths are in sixteenths (a bar is 16).
+;;;
+;;;   mark     bars  loops     plays                     here
+;;;   calm      8    all 8     the title and menus       pad, the call once, far off
+;;;   grid      4    -         race start, then lap1     the carrier tone, the count-in
+;;;   lap1     16    9 to 16   GO                        the approved audition's verse
+;;;   lap2      8    all 8     lap 1's line              the audition's chorus, the arp
+;;;   hold      5    bar 5     lap 2's halfway point     breakdown on a D pedal, the
+;;;                                                      call at half speed, the arp
+;;;                                                      climbing; bar 5 is the riser
+;;;   fill      2    -         two bars before the line  snare roll, the bass climbing to D
+;;;   traced   16    9 to 16   the final lap             the drop: Gibson's ICE in, the
+;;;                                                      harmony borrows E-flat
+;;;   uplink    8    -         the finish, then results  the melody whole, resolved to D
+;;;   results   8    all 8     the finish panel          the groove without the lead
+;;;
+;;; The melody is heard whole only at the uplink. The call (two bars) is
+;;; heard all race; its answer (one bar) is withheld in lap1 and played in
+;;; lap2 without the D that would complete it. In traced the answer rises an
+;;; octave, and on the bar where the D belongs Gibson plays his own answer
+;;; in its rhythm, D rising to E-flat. In the uplink his lock-on is cut off
+;;; mid-phrase as the D lands.
+;;;
+;;; Seams: every section's first row, and the first row of its loop, gives
+;;; every channel an onset or a release, so a section sounds the same
+;;; entered by a jump from any bar, by a loop, or in order. No note may
+;;; sound across one of those rows; race-text raises if one does.
+;;;
+;;;   (race-text) -> the tune (.cts text)
+;;;   (race-cues-text) -> the cue sheet the game's score compiler reads
+;;;   RACE-SECTIONS: (mark bars loop next), loop (from . to) or #f
+
+(define-library (race score)
+  (import (sigil core) (sigil string) (sigil list)
+          (theme notation)
+          (only (carrier score) lap1-bars lap2-bars LAP1-CHORDS LAP2-CHORDS instruments-text
+                CALL ANSWER))
+  (export race-text race-cues-text RACE-SECTIONS RACE-BARS section-start seam-rows)
+  (begin
+    ;; ------------------------------------------------------------
+    ;; Sections
+    ;; ------------------------------------------------------------
+    (define RACE-SECTIONS
+      '((calm 8 (0 . 8) #f) (grid 4 #f lap1) (lap1 16 (8 . 16) #f) (lap2 8 (0 . 8) #f)
+        (hold 5 (4 . 5) #f) (fill 2 #f traced) (traced 16 (8 . 16) #f)
+        (uplink 8 #f results) (results 8 (0 . 8) #f)))
+    (define RACE-BARS (apply + (map cadr RACE-SECTIONS)))
+
+    (define (section-start mark)
+      (let loop ((ss RACE-SECTIONS) (bar 0))
+        (cond ((null? ss) (error "race: no section" mark))
+              ((eq? (car (car ss)) mark) bar)
+              (else (loop (cdr ss) (+ bar (cadr (car ss))))))))
+
+    ;; rows where every channel must start or stop: each section's first
+    ;; row, and its loop's first row
+    (define (seam-rows)
+      (apply append
+             (map (lambda (s)
+                    (let ((start (section-start (car s))) (lp (caddr s)))
+                      (cons (* 32 start)
+                            (if (and lp (> (car lp) 0)) (list (* 32 (+ start (car lp)))) '()))))
+                  RACE-SECTIONS)))
+
+    ;; ------------------------------------------------------------
+    ;; Instruments: Carrier's nine verbatim, then the race's own
+    ;; ------------------------------------------------------------
+    (define I-KICK 1) (define I-SNARE 2) (define I-TICK 3) (define I-TICK-OPEN 4)
+    (define I-BASS 5) (define I-MINOR 6) (define I-MAJOR 7) (define I-LEAD 8) (define I-ARP 9)
+    (define I-ICE 10) (define I-CRASH 11)
+    ;; 12, 13: the pads, minor and major. A channel plays at most eight
+    ;; voices (instruments and their layers), and the stabs' two
+    ;; instruments take six of channel 5's, so there are two pads.
+    (define (pad-inst c) (if (minor? c) 12 13))
+
+    (define (carrier-instruments)
+      (let* ((s (instruments-text)) (n (string-length s)))
+        (unless (string=? (substring s (- n 3) n) "))\n")
+          (error "race: Carrier's instrument list changed shape"))
+        (string-append (substring s 0 (- n 2)) "\n")))
+
+    (define (num x) (number->string x))
+
+    ;; Carrier's bus, with the compressor's makeup at -0.5 dB where the
+    ;; audition's is +1 (the main theme's): the race's loudest bars, in
+    ;; traced and the uplink, then peak near -2 dBFS, leaving the game's
+    ;; cues room on top. The balance is the audition's; only the level moves.
+    (define (race-bus-text)
+      "  (bus reverb: zitarev size: 0.8 damp: 0.55 mix: 0.3 comp: on threshold: -12 ratio: 3 attack: 8 release: 110 makeup: -0.5)\n")
+
+    ;; Triads, every operator a carrier at a chord interval (fm4 algorithm
+    ;; 7), with an octave on op4 that feeds back on itself a little, a
+    ;; touch of saw on top. Pan and send match the stabs': a channel takes
+    ;; them from its first instrument.
+    (define (pad-patch third)
+      (string-append
+       "fm4-pad alg: 7 fb: 0.25 index: 1 vel-depth: 0.2"
+       " op1: (1 1 0.25 0.8 0.85 0.6) op2: (" third " 0.7 0.3 0.8 0.85 0.6)"
+       " op3: (1.4983071 0.7 0.3 0.8 0.85 0.6) op4: (2 0.2 0.3 0.8 0.7 0.6)"
+       " amp-attack: 0.3 amp-decay: 0.5 amp-sustain: 0.85 amp-release: 0.7"
+       " unison: 3 spread: 12 chorus-rate: 0.35 chorus-depth: 3 chorus-mix: 0.4"))
+
+    (define (pad-line id name third)
+      (string-append "    (instrument id: " (num id) " name: \"" name "\" patch: ("
+                     (pad-patch third) ") volume: 24 gain: 2 send: 0.16 pan: -0.3)\n"))
+
+    (define (bank-text)
+      (string-append
+       (carrier-instruments)
+       ;; 10: Gibson's ICE. A cold FM bell: the carrier at 1:1 with an
+       ;; inharmonic 3.17:1 modulator, and a second carrier a tritone up
+       ;; (1.414:1) that a 5.43:1 operator pings for 30 ms. Short and dry
+       ;; of sustain, so it chirps rather than rings.
+       "    (instrument id: 10 name: \"ice\" patch: (fm4-bell alg: 4 fb: 0 index: 1.6 vel-depth: 0.5"
+       " op1: (1 1 0.001 0.28 0 0.1) op2: (3.17 0.6 0.001 0.08 0 0.05) op3: (1.4142136 0.35 0.001 0.16 0 0.08)"
+       " op4: (5.43 0.4 0.001 0.03 0 0.03) amp-attack: 0.001 amp-decay: 0.3 amp-sustain: 0 amp-release: 0.1)"
+       " volume: 48 gain: 1 send: 0.3 pan: -0.4)\n"
+       ;; 11: a crash for the snare's channel (the theme's): crushed noise
+       ;; with a metallic ring, at the snare's send and pan
+       "    (instrument id: 11 name: \"crash\" patch: (chip-noise attack: 0.001 crush-bits: 12 cutoff: 11000 decay: 1.2 hp: 3500 osc-amp: 0.6 release: 0.4 sustain: 0) volume: 44 gain: 0.55 send: 0.06 pan: 0"
+       " layers: ((chip-hat crush-bits: 10 decay: 0.6 hp: 5000 metal: 0.8 noise: 0.2 octave: 0 volume: 0.35)))\n"
+       (pad-line 12 "pad-minor" "1.1892071") (pad-line 13 "pad-major" "1.259921")
+       "  )\n"))
+
+    ;; ------------------------------------------------------------
+    ;; Helpers
+    ;; ------------------------------------------------------------
+    (define (range n) (let loop ((i (- n 1)) (acc '())) (if (< i 0) acc (loop (- i 1) (cons i acc)))))
+    (define (cat f xs) (apply append (map f xs)))
+    (define (at-bar b) (* 16 b))
+
+    ;; chords are (letter . m) or (letter . M)
+    (define (minor? c) (eq? (cdr c) 'm))
+    (define (bass-root letter) (let ((m (midi letter 2))) (if (> m (midi 'G 2)) (- m 12) m)))
+    ;; a pad's root, F3 to E4, so the triad stays under the lead
+    (define (pad-root letter) (let ((m (midi letter 4))) (if (>= m (midi 'F 4)) (- m 12) m)))
+
+    ;; Carrier's events are #(ch start len midi inst vol); notation's add fx
+    (define (from-carrier e)
+      (note (vector-ref e 0) (vector-ref e 1) (vector-ref e 2) (vector-ref e 3)
+            (vector-ref e 4) (vector-ref e 5)))
+
+    ;; Carrier's bass bar: 16ths on root r, octave jumps on the call's
+    ;; 3+3+2 accents, the last two 16ths leading to next-r. A semitone move
+    ;; (E-flat to D) leads in through the octave and the fifth instead.
+    ;; approach: an explicit last 16th.
+    (define (bass-bar at r next-r loud . approach)
+      (let* ((same (= r next-r))
+             (semi (= 1 (abs (- next-r r))))
+             (n14 (if (or same semi) (+ r 12) r))
+             (n15 (cond ((pair? approach) (car approach))
+                        (same (+ r 10))
+                        (semi (+ r 7))
+                        ((> next-r r) (- next-r 2))
+                        (else (+ next-r 2))))
+             (pitches (list r r r (+ r 12) r r (+ r 12) r r r r (+ r 12) r r n14 n15)))
+        (cat (lambda (i)
+               (note 4 (+ at i) 1 (list-ref pitches i) I-BASS
+                     (cond ((memv i '(0 8)) (+ loud 6))
+                           ((memv i '(3 6 11 14)) (+ loud 3))
+                           (else loud))))
+             (range 16))))
+
+    ;; the bass on the call's accents only (calm)
+    (define (bass-accents at r vol)
+      (cat (lambda (p) (note 4 (+ at (car p)) 1.5 (cdr p) I-BASS vol))
+           (list (cons 0 r) (cons 3 (+ r 12)) (cons 6 r) (cons 8 r) (cons 11 (+ r 12)) (cons 14 r))))
+
+    (define ACCENTS '(0 3 6 8 11 14))
+    (define TICK-PITCH (midi 'C 8))
+    ;; 16th clicks, the call's 3+3+2 accented; skip: 16ths left out
+    (define (ticks at accent soft . skip)
+      (cat (lambda (i)
+             (if (and (pair? skip) (memv i (car skip))) '()
+                 (note 3 (+ at i) 0.5 TICK-PITCH I-TICK (if (memv i ACCENTS) accent soft))))
+           (range 16)))
+    (define (ticks-accents at vol)
+      (cat (lambda (i) (note 3 (+ at i) 0.5 TICK-PITCH I-TICK vol)) ACCENTS))
+    (define (open-tick at pos vol) (note 3 (+ at pos) 1 TICK-PITCH I-TICK-OPEN vol))
+
+    (define (hits ch inst m at entries)
+      (cat (lambda (e) (note ch (+ at (car e)) 1 m inst (cadr e))) entries))
+    (define (kick at entries) (hits 1 I-KICK (midi 'D 2) at entries))
+    (define (snare at entries) (hits 2 I-SNARE (midi 'D 3) at entries))
+    ;; the crash rings out its release when the next snare takes the channel
+    (define (crash at vol) (note 2 at 12 (midi 'D 3) I-CRASH vol))
+
+    ;; Carrier's drum phrases (positions in the bar, volume)
+    (define KICK-A '((0 46) (6 40) (10 44)))
+    (define KICK-B '((0 46) (3 36) (8 44) (11 40)))
+    (define KICK-PUSH '((0 46) (6 40) (10 44) (13 30) (14 42)))
+    (define BACKBEAT '((4 44) (12 46)))
+    (define SNARE-FILL-SHORT '((4 44) (12 40) (13 32) (14 38) (15 44)))
+
+    (define (stab at pos len c vol)
+      (note 5 (+ at pos) len (midi (car c) 4) (if (minor? c) I-MINOR I-MAJOR) vol))
+    (define (pad at len c vol)
+      (note 5 at len (pad-root (car c)) (pad-inst c) vol))
+
+    (define (chord-tones c base)
+      (list base (+ base (if (minor? c) 3 4)) (+ base 7)))
+
+    ;; Carrier's arp: root, third, fifth, octave, up, four times a bar
+    (define (arp-bar at c vol)
+      (let* ((r (midi (car c) 4)) (tones (append (chord-tones c r) (list (+ r 12)))))
+        (cat (lambda (i) (note 7 (+ at i) 0.75 (list-ref tones (modulo i 4)) I-ARP
+                               (if (= 0 (modulo i 4)) (+ vol 4) vol)))
+             (range 16))))
+    ;; the same tones in eighths (the breakdown); up: semitones to shift
+    (define (arp-eighths at c vol . up)
+      (let* ((r (+ (midi (car c) 4) (if (pair? up) (car up) 0)))
+             (tones (append (chord-tones c r) (list (+ r 12)))))
+        (cat (lambda (i) (note 7 (+ at (* 2 i)) 1.5 (list-ref tones (modulo i 4)) I-ARP
+                               (if (= 0 (modulo i 4)) (+ vol 3) vol)))
+             (range 8))))
+    ;; 16ths climbing two octaves over the bar, a beat a step: r 3 5 8,
+    ;; 3 5 8 3', 5 8 3' 5', 8 3' 5' 8'; louder as it climbs. limit: the
+    ;; 16ths played (16 for the whole bar).
+    (define (arp-sweep at c vol0 vol1 limit)
+      (let* ((r (midi (car c) 4))
+             (tones (append (chord-tones c r) (chord-tones c (+ r 12)) (list (+ r 24)))))
+        (cat (lambda (i)
+               (let ((beat (quotient i 4)) (k (modulo i 4)))
+                 (note 7 (+ at i) 0.75 (list-ref tones (+ beat k)) I-ARP
+                       (+ vol0 (quotient (* (- vol1 vol0) i) 15)))))
+             (range limit))))
+
+    ;; the lead: Carrier's motif lines are (pos len letter octave vol)
+    (define (phrase at notes up dvol)
+      (cat (lambda (n) (note 6 (+ at (car n)) (cadr n) (+ up (midi (caddr n) (cadddr n)))
+                             I-LEAD (+ dvol (list-ref n 4))))
+           notes))
+    (define (augment notes k)
+      (map (lambda (n) (cons (* k (car n)) (cons (* k (cadr n)) (cddr n)))) notes))
+    ;; shorten any note that would sound past `end` (16ths from the phrase's start)
+    (define (clip-phrase notes end)
+      (map (lambda (n) (if (> (+ (car n) (cadr n)) end)
+                           (cons (car n) (cons (- end (car n)) (cddr n)))
+                           n))
+           notes))
+
+    ;; Gibson's ICE
+    (define (ice at pos len m vol) (note 8 (+ at pos) len m I-ICE vol))
+    ;; a chirp: from a major third above, sliding down to m in a row
+    (define (chirp at pos m vol) (bend 8 (+ at pos) 1 (+ m 4) m I-ICE vol 32))
+    ;; his answer, in the answer's rhythm: E-flat, A, D rising to E-flat
+    (define STEAL '((0 3 Eb 6 30) (3 3 A 5 26) (6 2 D 6 28) (8 6 Eb 6 32)))
+    (define (steal at)
+      (cat (lambda (n) (ice at (car n) (cadr n) (midi (caddr n) (cadddr n)) (list-ref n 4))) STEAL))
+    (define EB6 (midi 'Eb 6)) (define D6 (midi 'D 6))
+
+    ;; ------------------------------------------------------------
+    ;; calm: the title and menus. Dm G Bb C Am under the call, once, far off
+    ;; ------------------------------------------------------------
+    (define CALM-CHORDS '((D . m) (D . m) (G . M) (G . M) (Bb . M) (Bb . M) (C . M) (A . m)))
+
+    (define (calm-part s)
+      (let ((at (lambda (b) (at-bar (+ s b)))))
+        (append
+         (pad (at 0) 32 '(D . m) 30) (pad (at 2) 32 '(G . M) 28) (pad (at 4) 32 '(Bb . M) 28)
+         (pad (at 6) 16 '(C . M) 28) (pad (at 7) 16 '(A . m) 28)
+         (cat (lambda (b) (bass-accents (at b) (bass-root (car (list-ref CALM-CHORDS b))) 28)) (range 8))
+         (cat (lambda (b) (ticks (at b) 14 6)) (range 8))
+         (cat (lambda (b) (kick (at b) '((0 30)))) '(0 2 4 6))
+         (phrase (at 0) CALL 0 -14))))
+
+    ;; ------------------------------------------------------------
+    ;; grid: the carrier tone (the lead holds D, nothing on it yet), the
+    ;; bass and ticks building, the count-in on beats 2, 3 and 4 of the
+    ;; last bar over A, and GO on lap1's downbeat
+    ;; ------------------------------------------------------------
+    (define (grid-part s)
+      (let ((at (lambda (b) (at-bar (+ s b))))
+            (D2 (midi 'D 2)) (A1 (midi 'A 1)))
+        (append
+         (note 6 (at 0) 32 (midi 'D 5) I-LEAD 30)
+         (pad (at 0) 48 '(D . m) 26)
+         (bass-bar (at 0) D2 D2 30) (bass-bar (at 1) D2 D2 33) (bass-bar (at 2) D2 A1 36)
+         (bass-bar (at 3) A1 D2 38 (midi 'Cs 2))
+         (ticks (at 0) 18 8) (ticks (at 1) 20 9) (ticks (at 2) 22 10) (ticks (at 3) 26 12)
+         (kick (at 2) '((0 38) (4 34) (8 38) (12 36)))
+         (kick (at 3) '((0 42) (4 44) (8 46) (12 48)))
+         (snare (at 3) '((4 36) (8 40) (12 44)))
+         (stab (at 3) 4 2 '(A . M) 26) (stab (at 3) 8 2 '(A . M) 28) (stab (at 3) 12 2 '(A . M) 30))))
+
+    ;; ------------------------------------------------------------
+    ;; lap1, lap2: the approved audition, note for note, and a crash on GO
+    ;; ------------------------------------------------------------
+    (define (lap1-part s)
+      (append (map-carrier (lap1-bars (at-bar s)) (at-bar (+ s 16)))
+              (crash (at-bar s) 40)))
+    (define (lap2-part s) (map-carrier (lap2-bars (at-bar s)) (at-bar (+ s 8))))
+    ;; A note may not outlast its section here: the last 32nd of lap1's
+    ;; snare fill (one 16th long) ends a 32nd sooner, at the seam.
+    (define (map-carrier es end)
+      (cat (lambda (e)
+             (let ((over (- (+ (vector-ref e 1) (vector-ref e 2)) end)))
+               (from-carrier (if (> over 0)
+                                 (vector (vector-ref e 0) (vector-ref e 1) (- (vector-ref e 2) over)
+                                         (vector-ref e 3) (vector-ref e 4) (vector-ref e 5))
+                                 e))))
+           es))
+
+    ;; ------------------------------------------------------------
+    ;; hold: the breakdown. A D pedal under Bb C Dm Bb; a bar's breath, then
+    ;; the call at half speed (a bar after any answer lap2 was playing, as
+    ;; in lap2 itself, so its D never completes that answer); the arp in
+    ;; eighths climbing from octave 3 to 5, the kit back;
+    ;; then the riser, one bar of A7 that loops until the fill is aimed
+    ;; ------------------------------------------------------------
+    (define (hold-part s)
+      (let ((at (lambda (b) (at-bar (+ s b))))
+            (D2 (midi 'D 2)) (A1 (midi 'A 1)))
+        (append
+         (pad (at 0) 16 '(Bb . M) 30) (pad (at 1) 16 '(C . M) 30)
+         (pad (at 2) 16 '(D . m) 30) (pad (at 3) 16 '(Bb . M) 30)
+         (bass-bar (at 0) D2 D2 30) (bass-bar (at 1) D2 D2 32) (bass-bar (at 2) D2 D2 34)
+         (bass-bar (at 3) D2 A1 36 (midi 'Bb 1))
+         (phrase (at 1) (clip-phrase (augment CALL 2) 48) 0 -8)
+         (ticks-accents (at 0) 16) (ticks-accents (at 1) 18) (ticks (at 2) 20 8) (ticks (at 3) 24 11)
+         (kick (at 2) '((0 38) (8 34))) (kick (at 3) '((0 38) (4 34) (8 38) (12 36)))
+         (snare (at 3) '((12 30)))
+         (arp-eighths (at 0) '(Bb . M) 16 -12) (arp-eighths (at 1) '(C . M) 18)
+         (arp-eighths (at 2) '(D . m) 20) (arp-eighths (at 3) '(Bb . M) 22 12)
+         (riser (at 4)))))
+
+    (define (riser at)
+      (let ((A1 (midi 'A 1)))
+        (append (pad at 16 '(A . M) 30)
+                (bass-bar at A1 A1 40)
+                (ticks at 28 14)
+                (kick at '((0 44) (4 40) (8 44) (12 42)))
+                (snare at '((0 22) (2 24) (4 27) (6 29) (8 32) (10 34) (12 37) (13 39) (14 42) (15 45)))
+                (arp-sweep at '(A . M) 22 30 16))))
+
+    ;; ------------------------------------------------------------
+    ;; fill: two bars into the drop. 16th snare, then 32nds; the bass
+    ;; climbs A Bb C C# to D under the drums alone; the last two 16ths are
+    ;; silent but for Gibson's first chirp, on the first of them
+    ;; ------------------------------------------------------------
+    (define (fill-part s)
+      (let ((at0 (at-bar s)) (at1 (at-bar (+ s 1))) (A1 (midi 'A 1)))
+        (append
+         (pad at0 16 '(A . M) 32)
+         (bass-bar at0 A1 A1 42)
+         (cat (lambda (i) (note 4 (+ at1 i) 1
+                                (list-ref (list A1 (midi 'Bb 1) (midi 'C 2) (midi 'Cs 2)) (quotient i 4))
+                                I-BASS (+ 40 (quotient i 2))))
+              (range 14))
+         (ticks at0 30 15) (ticks at1 30 15 '(14 15))
+         (kick at0 '((0 46) (4 42) (8 46) (12 44)))
+         (kick at1 '((0 46) (4 44) (8 46) (10 40) (12 46) (13 42)))
+         (snare at0 (map (lambda (i) (list i (+ 26 i))) (range 16)))
+         (cat (lambda (k) (note 2 (+ at1 (* 0.5 k)) 0.5 (midi 'D 3) I-SNARE (+ 32 (quotient (* 20 k) 27))))
+              (range 28))
+         (arp-sweep at0 '(A . M) 26 32 16) (arp-sweep at1 '(A . M) 28 34 14)
+         (chirp at1 14 EB6 26))))
+
+    ;; ------------------------------------------------------------
+    ;; traced: the drop. Dm G Am E-flat, three times, then Dm G F-A E-flat:
+    ;; the call, its answer an octave up, and on the bar where the D
+    ;; belongs, E-flat and Gibson's answer
+    ;; ------------------------------------------------------------
+    ;; The cadence bar under the answer: F major for its first half (A F G
+    ;; over F), A major for the second (the held E over A, its C sharp
+    ;; leading to D), so the answer's F never sounds against a C sharp.
+    ;; Its chord in the tables is F, the first half's; approach is the
+    ;; bass's last 16th. There is no stab on the next chord at 16th 14, as
+    ;; elsewhere: it would sound against the held E.
+    (define (half es at first?)
+      (filter (lambda (e) (if first? (< (- (ev-start e) at) 8) (>= (- (ev-start e) at) 8))) es))
+    (define (cadence-bar at next approach)
+      (let ((F (bass-root 'F)) (A (bass-root 'A)))
+        (append (half (bass-bar at F A 42) at #t)
+                (half (bass-bar at A (bass-root (car next)) 42 approach) at #f)
+                (stab at 0 4 '(F . M) 30) (stab at 8 2 '(A . M) 28)
+                (half (arp-bar at '(F . M) 28) at #t)
+                (half (arp-bar at '(A . M) 28) at #f))))
+
+    ;; bar 14 is the cadence bar (F, then A), whose A pulls to E-flat:
+    ;; the bass climbs D, E-flat with Gibson
+    (define (traced-chord b)
+      (list-ref (if (>= b 12)
+                    '((D . m) (G . M) (F . M) (Eb . M))
+                    '((D . m) (G . M) (A . m) (Eb . M)))
+                (modulo b 4)))
+
+    (define (traced-snare b crash?)
+      (let ((k (modulo b 4)))
+        (cond ((= b 15) SNARE-FILL-SHORT)
+              (crash? '((12 46) (15 16)))
+              ((= k 3) (append BACKBEAT '((14 30) (15 36))))
+              ((odd? b) (append BACKBEAT '((7 14) (9 12))))
+              (else (append BACKBEAT '((15 16)))))))
+
+    (define (traced-ice at b)
+      (let ((k (modulo b 4)))
+        (cond ((= b 0)                     ; fading in: the tracer finds you
+               (cat (lambda (p) (ice at (car p) 1 EB6 (cdr p))) '((2 . 10) (6 . 14) (10 . 18) (14 . 22))))
+              ((= k 0) (ice at 14 1 EB6 18))
+              ((= k 1) (append (chirp at 11 EB6 22) (ice at 14 1 D6 20)))
+              ((and (= k 2) (>= b 8)) (append (ice at 9 1 EB6 16) (ice at 12 1 EB6 18)))
+              ((= k 3) (steal at))
+              (else '()))))
+
+    (define (traced-part s)
+      (cat (lambda (b)
+             (let* ((at (at-bar (+ s b)))
+                    (c (traced-chord b))
+                    (next (if (= b 15) '(D . m) (traced-chord (+ b 1))))
+                    (k (modulo b 4))
+                    (crash? (memv b '(0 8))))
+               (append
+                (if (= b 14)
+                    (cadence-bar at next (midi 'D 2))
+                    (append (bass-bar at (bass-root (car c)) (bass-root (car next)) 42)
+                            (stab at 0 4 c 30) (stab at 6 2 c 26)
+                            ;; not under the answer's held E
+                            (if (= k 2) '() (stab at 14 2 next 24))
+                            (arp-bar at c 28)))
+                ;; the second half (the loop) opens the offbeat eighths
+                (if (>= b 8)
+                    (append (ticks at 30 15 '(2 6 10 14))
+                            (open-tick at 2 16) (open-tick at 6 18) (open-tick at 10 16)
+                            (open-tick at 14 (if (= k 3) 26 18)))
+                    (append (ticks at 30 15 (if (= k 3) '(14) '()))
+                            (if (= k 3) (open-tick at 14 26) '())))
+                (kick at (cond ((= k 3) KICK-PUSH) ((odd? b) (append KICK-B '((15 22)))) (else KICK-A)))
+                (snare at (traced-snare b crash?))
+                (if crash? (crash at 42) '())
+                (cond ((= k 0) (phrase at CALL 0 0))
+                      ((= k 2) (phrase at ANSWER 12 -2))
+                      (else '()))
+                (traced-ice at b))))
+           (range 16)))
+
+    ;; ------------------------------------------------------------
+    ;; uplink: the melody whole. Call, answer, and the D, over Dm G F-A Dm;
+    ;; then all of it an octave up. Gibson locks on under the answer's E
+    ;; and is cut off as the D lands.
+    ;; ------------------------------------------------------------
+    ;; the third and seventh bars are cadence bars: F, then A; then the D
+    (define UPLINK-CHORDS '((D . m) (G . M) (F . M) (D . m) (D . m) (G . M) (F . M) (D . m)))
+
+    (define (uplink-part s)
+      (cat (lambda (b)
+             (let* ((at (at-bar (+ s b)))
+                    (c (list-ref UPLINK-CHORDS b))
+                    (next (list-ref UPLINK-CHORDS (modulo (+ b 1) 8)))
+                    (k (modulo b 4))
+                    (crash? (memv b '(3 7))))
+               (append
+                (if (= k 2)
+                    (cadence-bar at next (midi 'Cs 2))
+                    (append (bass-bar at (bass-root (car c)) (bass-root (car next)) 42)
+                            (stab at 0 4 c (if crash? 32 30)) (stab at 6 2 c 26) (stab at 14 2 next 24)
+                            (arp-bar at c (if (= b 7) 24 28))))
+                (if (= b 7) (ticks at 24 10) (ticks at 30 15))
+                (kick at (cond ((= b 7) '((0 46))) ((= k 2) KICK-PUSH) ((odd? b) KICK-B) (else KICK-A)))
+                (snare at (cond ((= b 7) '())
+                                (crash? '((12 46)))
+                                ((= k 2) (append BACKBEAT '((14 30) (15 36))))
+                                (else BACKBEAT)))
+                (if crash? (crash at 44) '())
+                (case b
+                  ((0) (phrase at CALL 0 0))
+                  ((2) (phrase at ANSWER 0 0))
+                  ((3) (note 6 at 14 (midi 'D 5) I-LEAD 48))
+                  ((4) (phrase at CALL 12 -2))
+                  ((6) (phrase at ANSWER 12 -2))
+                  ((7) (note 6 at 16 (midi 'D 6) I-LEAD 46))
+                  (else '()))
+                (case b
+                  ((0) (ice at 14 1 EB6 20))
+                  ((1) (append (chirp at 11 EB6 22) (ice at 14 1 D6 20)))
+                  ;; the lock-on: 32nds rising in level, stopped by the D
+                  ((2) (cat (lambda (j) (ice at (+ 8 (* 0.5 j)) 0.5 EB6 (+ 14 (quotient (* 3 j) 2)))) (range 16)))
+                  (else '())))))
+           (range 8)))
+
+    ;; ------------------------------------------------------------
+    ;; results: the finish panel. The groove without the lead
+    ;; ------------------------------------------------------------
+    (define RESULTS-CHORDS '((D . m) (D . m) (Bb . M) (C . M) (D . m) (D . m) (G . M) (A . m)))
+
+    (define (results-part s)
+      (let ((at (lambda (b) (at-bar (+ s b)))))
+        (append
+         (pad (at 0) 32 '(D . m) 28) (pad (at 2) 16 '(Bb . M) 28) (pad (at 3) 16 '(C . M) 28)
+         (pad (at 4) 32 '(D . m) 28) (pad (at 6) 16 '(G . M) 28) (pad (at 7) 16 '(A . m) 28)
+         (cat (lambda (b)
+                (let ((c (list-ref RESULTS-CHORDS b)) (next (list-ref RESULTS-CHORDS (modulo (+ b 1) 8))))
+                  (append (bass-bar (at b) (bass-root (car c)) (bass-root (car next)) 34)
+                          (ticks (at b) 22 9)
+                          (kick (at b) '((0 40) (10 36)))
+                          (snare (at b) '((12 30)))
+                          (arp-eighths (at b) c 16))))
+              (range 8)))))
+
+    ;; ------------------------------------------------------------
+    ;; The whole score
+    ;; ------------------------------------------------------------
+    (define (race-events)
+      (append (calm-part (section-start 'calm))
+              (grid-part (section-start 'grid))
+              (lap1-part (section-start 'lap1))
+              (lap2-part (section-start 'lap2))
+              (hold-part (section-start 'hold))
+              (fill-part (section-start 'fill))
+              (traced-part (section-start 'traced))
+              (uplink-part (section-start 'uplink))
+              (results-part (section-start 'results))))
+
+    ;; a slide's target (tone portamento, 3xx) continues its note's voice:
+    ;; it neither starts nor ends one
+    (define (slide-fx? fx) (and (> (string-length fx) 0) (char=? (string-ref fx 0) #\3)))
+
+    ;; A note may not sound across a seam row: from its onset to its end,
+    ;; or to the next onset on its channel if that comes first.
+    (define (check-seams! events)
+      (let* ((seams (seam-rows))
+             (notes (filter ev-midi events))
+             (onsets (let ((v (make-vector 9 '())))
+                       (for-each (lambda (e)
+                                   (unless (slide-fx? (vector-ref e 6))
+                                     (vector-set! v (ev-ch e) (cons (row-of (ev-start e)) (vector-ref v (ev-ch e))))))
+                                 notes)
+                       v)))
+        (for-each
+         (lambda (e)
+           (let* ((s (row-of (ev-start e)))
+                  (end (max (+ s 1) (exact (floor (* 2 (+ (ev-start e) (ev-len e)))))))
+                  (later (filter (lambda (r) (> r s)) (vector-ref onsets (ev-ch e))))
+                  (eff (if (null? later) end (min end (apply min later)))))
+             (for-each (lambda (r)
+                         (when (and (< s r) (< r eff))
+                           (error "race: a note sounds across a seam (channel, onset row, seam row)"
+                                  (list (ev-ch e) s r))))
+                       seams)))
+         notes)))
+
+    ;; every channel with no cell on a seam row gets a release there; a
+    ;; slide or an effect-only cell there is an error (it would leave the
+    ;; voice sounding)
+    (define (clear-seams cells)
+      (let loop ((rows (seam-rows)) (acc cells))
+        (if (null? rows) acc
+            (loop (cdr rows)
+                  (let ch-loop ((ch 1) (acc acc))
+                    (if (> ch 8) acc
+                        (ch-loop (+ ch 1)
+                                 (let ((there (find (lambda (c) (and (= (car c) (car rows)) (= (cadr c) ch))) acc)))
+                                   (cond ((not there) (cons (list (car rows) ch "===" 0 0 "000") acc))
+                                         ((or (equal? (caddr there) "...") (slide-fx? (list-ref there 5)))
+                                          (error "race: a slide or effect-only cell on a seam row" there))
+                                         (else acc))))))))))
+
+    (define (race-text)
+      (let* ((events (race-events))
+             (_ (check-seams! events))
+             (end (* 32 RACE-BARS))
+             (cells (uniq-cells (clear-seams (events->cells events))))
+             (_ (for-each (lambda (c)
+                            (when (or (< (car c) 0) (> (car c) end)
+                                      (and (= (car c) end) (not (equal? (caddr c) "==="))))
+                              (error "race: a cell outside the bars" c)))
+                          cells))
+             ;; releases on the row past the last bar: the results loop's
+             ;; first row already releases every channel
+             (cells (filter (lambda (c) (< (car c) end)) cells))
+             (in-bar (lambda (b) (filter (lambda (c) (and (>= (car c) (* 32 b)) (< (car c) (* 32 (+ b 1))))) cells)))
+             (shift (lambda (b cs) (map (lambda (c) (cons (- (car c) (* 32 b)) (cdr c))) cs))))
+        (string-append
+         "(tune version: 1 name: \"Carrier\" tempo: 140 speed: 3 channels: 8 meter: (8 4)\n"
+         (race-bus-text)
+         (bank-text)
+         "  (patterns\n"
+         (apply string-append (map (lambda (b) (pattern-text b 32 (shift b (in-bar b)))) (range RACE-BARS)))
+         "  )\n"
+         "  (order" (apply string-append (map (lambda (b) (string-append " " (num b))) (range RACE-BARS))) ")\n"
+         "  (marks"
+         (apply string-append (map (lambda (s) (string-append " " (symbol->string (car s)) ": " (num (section-start (car s)))))
+                                   RACE-SECTIONS))
+         "))\n")))
+
+    ;; ------------------------------------------------------------
+    ;; The cue sheet: the conductor's loops and automatic exits, the
+    ;; engine's two pitches (top speed is A3, the fifth; full boost D4,
+    ;; the tonic), and the chord of every bar, for stingers and the sky
+    ;; ------------------------------------------------------------
+
+    ;; a cadence bar lists both its chords, F then A
+    (define CADENCE '((F . M) (A . M)))
+    (define (with-cadences chords bars)
+      (let loop ((cs chords) (i 0) (acc '()))
+        (if (null? cs) (reverse acc)
+            (loop (cdr cs) (+ i 1) (cons (if (memv i bars) CADENCE (car cs)) acc)))))
+
+    (define (section-chords mark)
+      (case mark
+        ((calm) CALM-CHORDS)
+        ((grid) '((D . m) (D . m) (D . m) (A . M)))
+        ((lap1) LAP1-CHORDS)
+        ((lap2) LAP2-CHORDS)
+        ((hold) '((Bb . M) (C . M) (D . m) (Bb . M) (A . M)))
+        ((fill) '((A . M) (A . M)))
+        ((traced) (with-cadences (map traced-chord (range 16)) '(14)))
+        ((uplink) (with-cadences UPLINK-CHORDS '(2 6)))
+        ((results) RESULTS-CHORDS)
+        (else (error "race: no chords for" mark))))
+
+    ;; (D . minor), or for a cadence bar ((F . major) (A . major))
+    (define (chord-text c)
+      (if (pair? (car c))
+          (string-append "(" (chord-text (car c)) " " (chord-text (cadr c)) ")")
+          (string-append "(" (symbol->string (car c)) " . " (if (minor? c) "minor" "major") ")")))
+
+    (define (race-cues-text)
+      (string-append
+       ";;; Carrier's cue sheet, written by `carrier race cues`. Loops are\n"
+       ";;; half-open, section-relative bars; #f plays through. chords: one per\n;;; bar; a bar that changes chord halfway lists both.\n"
+       "((id . carrier)\n"
+       " (engine-top-hz . 220.0)\n"
+       " (engine-boost-hz . 293.664767917)\n"
+       " (sections . (\n"
+       (apply string-append
+              (map (lambda (s)
+                     (let ((lp (caddr s)) (next (cadddr s)))
+                       (string-append
+                        "   (" (symbol->string (car s))
+                        " (loop . " (if lp (string-append "(" (num (car lp)) " . " (num (cdr lp)) ")") "#f") ")"
+                        " (next . " (if next (symbol->string next) "#f") ")\n"
+                        "    (chords"
+                        (apply string-append (map (lambda (c) (string-append " " (chord-text c))) (section-chords (car s))))
+                        "))\n")))
+                   RACE-SECTIONS))
+       "  )))\n"))))
