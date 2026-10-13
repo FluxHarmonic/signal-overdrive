@@ -8,7 +8,7 @@
 (define-library (carrier main)
   (import (sigil core) (sigil io) (sigil string) (sigil math) (sigil process)
           (motif tune) (motif tune player)
-          (carrier score) (carrier render) (carrier analysis))
+          (carrier score) (carrier render) (carrier analysis) (carrier probe))
   (export main)
   (begin
     (define (say . xs) (for-each display xs) (newline))
@@ -66,12 +66,13 @@
         0))
 
     (define (main)
-      (let ((args (cdr (command-line))))
+      (exit (let ((args (cdr (command-line))))
         (cond
           ((and (= (length args) 2) (equal? (car args) "tune")) (cmd-tune (cadr args)))
           ((and (>= (length args) 3) (equal? (car args) "render"))
            (cmd-render (cadr args) (caddr args)
                        (if (= (length args) 4) (string->number (cadddr args)) 48000)))
+          ((equal? args (list "probe")) (run-probe))
           ((and (>= (length args) 2) (equal? (car args) "stems"))
            (cmd-stems (cadr args) 48000 (if (= (length args) 3) (caddr args) #f)))
-          (else (say "usage: carrier tune OUT.cts | carrier render IN.cts OUT.wav [SR]") 1))))))
+          (else (say "usage: carrier tune OUT.cts | carrier render IN.cts OUT.wav [SR] | carrier stems IN.cts [DIR] | carrier probe") 1)))))))

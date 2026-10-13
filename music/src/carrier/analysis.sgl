@@ -30,15 +30,25 @@
     (define (db p) (if (> p 0.0) (* 10.0 (/ (log p) (log 10.0))) -400.0))
     (define (cents f ref) (* 1200.0 (/ (log (/ f ref)) (log 2.0))))
 
-    (define (goertzel-power x from len f sr)
-      (let ((coeff (* 2.0 (cos (/ (* 2.0 PI f) sr))))
-            (wk (/ (* 2.0 PI) (- len 1))))
+    ;; the window applied once: w[n] x[from+n], Hann
+    (define (hann-copy x from len)
+      (let ((v (make-vector len 0.0)) (wk (/ (* 2.0 PI) (- len 1))))
+        (let loop ((n 0))
+          (when (< n len)
+            (vector-set! v n (* 0.5 (- 1.0 (cos (* wk n))) (vector-ref x (+ from n))))
+            (loop (+ n 1))))
+        v))
+
+    ;; Goertzel power of an already-windowed vector at f
+    (define (goertzel-raw v f sr)
+      (let ((coeff (* 2.0 (cos (/ (* 2.0 PI f) sr)))) (len (vector-length v)))
         (let loop ((n 0) (s1 0.0) (s2 0.0))
           (if (>= n len)
               (/ (- (+ (* s1 s1) (* s2 s2)) (* coeff s1 s2)) (* 1.0 len len))
-              (let* ((w (* 0.5 (- 1.0 (cos (* wk n)))))
-                     (s (+ (* w (vector-ref x (+ from n))) (- (* coeff s1) s2))))
-                (loop (+ n 1) s s1))))))
+              (loop (+ n 1) (+ (vector-ref v n) (- (* coeff s1) s2)) s1)))))
+
+    (define (goertzel-power x from len f sr)
+      (goertzel-raw (hann-copy x from len) f sr))
 
     ;; golden-section search for the maximum of g on [a, b]
     (define (golden-max g a b tol)
@@ -54,12 +64,13 @@
 
     (define (spectral-peaks x from len sr lo hi step floor-db)
       (let* ((n (+ 1 (exact (floor (/ (- hi lo) step)))))
-             (grid (make-vector n 0.0)))
+             (grid (make-vector n 0.0))
+             (wv (hann-copy x from len)))
         (let fill ((i 0))
           (when (< i n)
-            (vector-set! grid i (goertzel-power x from len (+ lo (* i step)) sr))
+            (vector-set! grid i (goertzel-raw wv (+ lo (* i step)) sr))
             (fill (+ i 1))))
-        (let* ((g (lambda (f) (goertzel-power x from len f sr)))
+        (let* ((g (lambda (f) (goertzel-raw wv f sr)))
                (maxima
                 (let scan ((i 1) (acc '()))
                   (if (>= i (- n 1))
