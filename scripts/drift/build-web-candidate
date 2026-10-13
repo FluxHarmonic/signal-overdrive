@@ -1,0 +1,34 @@
+#!/bin/sh
+# Bounded cached local web build; no browser, device or hosting.
+set -u
+cd "$(dirname "$0")/../.." || exit 2
+CONDUCTOR_RUN="$1"
+mkdir -p "$CONDUCTOR_RUN"
+rm -f "$CONDUCTOR_RUN/RESULT" "$CONDUCTOR_RUN/RESULT.tmp"
+git rev-parse HEAD > "$CONDUCTOR_RUN/COMMIT"
+export SIGIL_JOBS=1
+export XDG_CACHE_HOME=/tmp/signal-conductor-build-cache
+export ZIG_LOCAL_CACHE_DIR=/tmp/signal-conductor-zig-local
+export ZIG_GLOBAL_CACHE_DIR=/tmp/signal-conductor-zig-global
+ulimit -v 4194304
+CONDUCTOR_CPU="$(awk '/Cpus_allowed_list/ {split($2,a,","); split(a[1],b,"-"); print b[1]}' /proc/self/status)"
+timeout 1800 taskset -c "$CONDUCTOR_CPU" nice -n 15 scripts/dev \
+  /home/daviwil/.sigil/versions/0.22.11/sigil build --config web \
+  > "$CONDUCTOR_RUN/build.log" 2>&1
+CONDUCTOR_CODE="$?"
+if [ "$CONDUCTOR_CODE" -eq 0 ]; then
+  if [ ! -s build/web/signal-overdrive.wasm ] \
+      || [ ! -s build/web/index.html ] \
+      || [ "$(cat build/web/build.txt)" != "$(git rev-parse --short=12 HEAD)" ]; then
+    CONDUCTOR_CODE=1
+  fi
+fi
+if [ "$CONDUCTOR_CODE" -eq 0 ]; then
+  printf 'RESULT: PASS (web build and source stamp; browser gates outstanding)\n' \
+    > "$CONDUCTOR_RUN/RESULT.tmp"
+else
+  printf 'RESULT: FAIL (web build exit %s)\n' "$CONDUCTOR_CODE" > "$CONDUCTOR_RUN/RESULT.tmp"
+fi
+mv "$CONDUCTOR_RUN/RESULT.tmp" "$CONDUCTOR_RUN/RESULT"
+cat "$CONDUCTOR_RUN/RESULT"
+exit "$CONDUCTOR_CODE"

@@ -77,6 +77,18 @@ Poll RUNDIR/RESULT; it also records the source commit and logs.
 `scripts/drift/build-candidate RUNDIR smoke` checks an existing release
 without rebuilding it.
 
+After integrating effects, `sh scripts/drift/build-web-candidate RUNDIR`
+builds the web target with the same local CPU/nice/memory/time bounds.
+Its PASS confirms the bundle and source stamp; browser gates are separate.
+Run the existing `scripts/gate-p15 build/web` under the same local bounds
+and preserve its captures/log. `effects-steps.json` drives the existing
+`scripts/fx-check.mjs` against `start&autopilot&mute&track=loop&laps=9`:
+it compares effects off with all effects held at peak, records isolation,
+renderer, probe and frame intervals, and exercises all three fires.
+These checks use temporary loopback servers only. Public hosting still
+requires the task's HARD STOP approval. A busy-host FPS result alone
+does not establish the effects' P32 budget or the audio drift gate.
+
 After that candidate passes, run one arm at a time from the repository root:
 
 ```sh
