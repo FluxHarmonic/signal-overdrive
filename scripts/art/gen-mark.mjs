@@ -42,7 +42,9 @@ const LETTER = "#F0F0F0", RING = "#F2731A", GOLD = "#FFCC33";
 // the word's: the site's orange, an accent that reads on the road (against
 // the road under it at the zoom's end, 5.25:1 by WCAG's measure, where the
 // first choice, the grey #8A8FA0, gave 3.35:1), between the ring's two
-// colours so it belongs to the mark
+// colours so it belongs to the mark. In the race this amber means ICE
+// (P16); here it is a credit on the card, not a race signal: an accepted
+// exception.
 const WORD_COLOUR = "#FF9F1A";
 
 const want = fs.readFileSync(NOTE, "utf8").match(/^sha256: ([0-9a-f]{64})$/m)?.[1];
