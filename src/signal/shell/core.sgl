@@ -78,6 +78,10 @@
     (define *frame-jiffy* 0)
     (define *frame-ear* #f)
     (define *skew-arm* #f)
+    ;; The depth arm's defect is an audible clock 250 ms ahead. A resync
+    ;; projects with the real queue depth and would hide it, so that arm
+    ;; counts resync requests but never executes them. Arms only.
+    (define *depth-arm* #f)
 
     (define (core-paused?) (or *paused* (not *focused*)))
 
@@ -336,6 +340,7 @@
                (unless (memq arm '(none depth immediate skew))
                  (error "unknown music sabotage arm" arm))
                (set! *skew-arm* (eq? arm 'skew))
+               (set! *depth-arm* (eq? arm 'depth))
                (music-sabotage! arm)))
             ((string=? kv "cues=0") (audio-cues! #f))
             ((string=? kv "sfx=0") (audio-sfx! #f) (say "sfx off: engine silent, no one-shots"))
@@ -793,8 +798,11 @@
       (let* ((interval (if *skip-interval* 0.0 (* dt (if *skew-arm* 1.01 1.0))))
              (c (race-song *race*))
              ;; With the song playing, a long frame catches up to the
-             ;; ring's depth; without it, Substratic's six-tick cap.
-             (cap (if (music-running?) CATCH-UP-STEPS MAX-STEPS-PER-FRAME))
+             ;; catchup-ticks knob (the ring's depth by default); without
+             ;; it, Substratic's six-tick cap.
+             (cap (if (music-running?)
+                      (exact (round (tuning-ref *tuning* (quote catchup-ticks))))
+                      MAX-STEPS-PER-FRAME))
              ;; The ear is sampled at this frame's time. Compare it to
              ;; the simulation this interval would produce, respecting
              ;; the stall cap rather than hiding stalls.
@@ -808,7 +816,7 @@
                                  (music-running?) (core-paused?) (conductor-bar c)))
         (when (pacing-resync? *pacing*)
           (set! *resync-requests* (+ *resync-requests* 1))
-          (music-request-resync!))
+          (unless *depth-arm* (music-request-resync!)))
         (set! *clock* (clock-advance-capped *clock*
                                             (if (and *skew-arm* (not (core-paused?)))
                                                 interval

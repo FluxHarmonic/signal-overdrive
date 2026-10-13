@@ -49,7 +49,11 @@
         (rivals       race     0.0    5.0    1.0   5.0     "RIVALS")
         (rival-pace   race     0.7    1.2    0.01  0.97    "RIVAL PACE")
         (boost-lap    race     1.0    9.0    1.0   2.0     "BOOST FROM LAP")
-        (bump         race     0.0    1.0    0.05  0.6     "BUMP")))
+        (bump         race     0.0    1.0    0.05  0.6     "BUMP")
+        ;; With the song playing, ticks a single long frame may catch up
+        ;; (15 = the music ring's 250 ms); past it the rest drops and the
+        ;; audio resyncs. Without music, Substratic's six apply.
+        (catchup-ticks race    6.0    30.0   1.0   15.0    "CATCH-UP TICKS (MUSIC)")))
 
     ;; The 0.1 effects (signal fx state): each an intensity, 0 off, 1 the
     ;; default. fx-solo shows one alone (1 dip, 2 pools, 3 chase, 4 sky,

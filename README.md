@@ -174,6 +174,7 @@ The knobs, from `signal-overdrive --knobs` (units are world texels, seconds and 
 | `rival-pace` RIVAL PACE | race | 0.97 | 0.7 to 1.2 | 0.01 |
 | `boost-lap` BOOST FROM LAP | race | 2 | 1 to 9 | 1 |
 | `bump` BUMP | race | 0.6 | 0 to 1 | 0.05 |
+| `catchup-ticks` CATCH-UP TICKS (MUSIC) | race | 15 | 6 to 30 | 1 |
 | `fov` FOV | camera | 1.15 | 0.6 to 2 | 0.05 |
 | `cam-height` CAM HEIGHT | camera | 40 | 6 to 90 | 1 |
 | `cam-dist` CAM DIST | camera | 92 | 20 to 240 | 2 |
