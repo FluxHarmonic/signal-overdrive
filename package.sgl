@@ -129,6 +129,12 @@
                                   flags: (with-sigil-c-flags '("-std=c99"))) ctx)
               ctx))
         (create-static-library name: "signal-overdrive")
+        ;; Default tests need the build-time compiler on the harness's
+        ;; module path. Keep it out of release/web runtime artifacts.
+        (lambda (ctx)
+          (if (eq? (config-name (context-config ctx)) 'dev)
+              ((compile-sigil-modules sources: "scripts/music/src/**/*.sgl") ctx)
+              ctx))
         (compile-sigil-modules sources: "src/**/*.sgl")
         (link-assets)
         (lambda (ctx)

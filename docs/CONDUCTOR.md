@@ -108,6 +108,10 @@ compiler matching the game lock, with its cache in `/tmp` and nice 15.
 
 `scripts/test-conductor` checks the clock, loops, decisions and pacing.
 `scripts/test-score` checks compiled triggers and multi-bar patterns.
+The dev build also compiles the build-time compiler into its module
+library directory, so ordinary `sigil test` discovery loads the same
+score checks through the native dependency harness. Release/web skip
+that extra test-support module.
 The captured-audio drift gate remains separate work; these source tests
 do not establish audio synchronization.
 
@@ -127,6 +131,10 @@ plan joins late audio on the next bar, including any intervening section
 landing, with silence before that bar. Pause discards the queue; resume
 uses a fresh stream epoch at the frozen simulation tick. Restart also
 discards the old queue, including a restart at the same tick.
+An explicit shell boot uses `music-reset!` to close and forget the old
+adapter context. Ordinary close retains context for pause/resume; a
+re-init must bind the current engine context through audio startup and
+cannot reopen a previous session's stream behind a muted shell.
 Initial PCM is prepared in 256-frame pulls before a stream is opened,
 then published in one accepted push. A fresh tick-zero stream discards
 its initialization interval and fixed-clock remainder, so setup time is

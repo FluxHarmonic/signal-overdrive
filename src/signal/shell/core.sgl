@@ -283,7 +283,7 @@
       (set! *focused* #t)
       (set! *skip-interval* #f)
       (set! *resync-requests* 0)
-      (music-close!)
+      (music-reset!)
       (set! *music-generation* (music-generation))
       (audio-pause! #f)
       (set-store-app! GAME-NAME)

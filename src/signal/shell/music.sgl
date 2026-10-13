@@ -13,7 +13,7 @@
           (signal music transport)
           (signal music playback)
           (signal music inserts))
-  (export music-start! music-frame! music-close! music-running?
+  (export music-start! music-frame! music-close! music-reset! music-running?
           music-audible-seconds music-depth! music-latency! music-readout
           music-request-resync! music-log music-sabotage! music-generation)
   (begin
@@ -98,6 +98,12 @@
         (set! *playback* #f))
       (set! *resync-pending* #f)
       (set! *epoch-changes* '()))
+
+    ;; A new shell session must bind its own current context. Closing
+    ;; alone retains context for ordinary pause/resume within a session.
+    (define (music-reset!)
+      (music-close!)
+      (set! *ctx* #f))
 
     (define (music-start! ctx c)
       (set! *ctx* ctx)
