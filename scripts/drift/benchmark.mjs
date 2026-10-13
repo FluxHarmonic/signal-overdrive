@@ -17,8 +17,14 @@ try {
   const output = path.join(RUN, "reference.pcm");
   fd = fs.openSync(path.join(RUN, "reference.log"), "w");
   const start = performance.now();
+  const timing = process.env.CONDUCTOR_TIME;
+  const renderArgs = [binary, "--music-reference", PLAN, output, String(FRAMES)];
+  const args = timing
+    ? [timing, "-f", '{"user_seconds":%U,"system_seconds":%S,"elapsed_seconds":%e}',
+      "-o", path.join(RUN, "cpu.json"), ...renderArgs]
+    : renderArgs;
   const child = pool.launch(path.join(ROOT, "scripts/dev"),
-    [binary, "--music-reference", PLAN, output, String(FRAMES)],
+    args,
     { env: { ...process.env, SIGIL_AUDIO_BACKEND: "null", SIGIL_APP_PLATFORM: "x11",
       DISPLAY: "", WAYLAND_DISPLAY: "" }, stdio: ["ignore", fd, fd] });
   const code = await new Promise((resolve, reject) => {
@@ -29,6 +35,7 @@ try {
   const elapsed = performance.now() - start;
   const result = { frames: FRAMES, sample_rate: 48000, elapsed_ms: elapsed,
     rendered_seconds: FRAMES / 48000, wall_ms_per_song_second: elapsed / (FRAMES / 48000),
+    cpu_time: timing ? JSON.parse(fs.readFileSync(path.join(RUN, "cpu.json"), "utf8")) : null,
     cpu: pool.cpu, includes: "Guix startup, tune/player setup, shared inserts, PCM writes; excludes graphics/device" };
   fs.writeFileSync(path.join(RUN, "analysis.json"), JSON.stringify(result, null, 2) + "\n");
   fs.writeFileSync(path.join(RUN, "RESULT"), "RESULT: PASS — offline throughput measured; not a live cost gate\n");

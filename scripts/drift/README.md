@@ -16,6 +16,8 @@ preserve a backtrace in `game.log`. A crash still fails the check.
 `node scripts/drift/benchmark.mjs RUNDIR PLAN FRAMES` measures offline
 rendering throughput with the same inserts and a two-minute limit. It
 includes startup and PCM writes; it is a diagnostic, not live frame cost.
+`CONDUCTOR_TIME=/cached/path/to/GNU/time` additionally records child user
+and system CPU time, separating rendering work from scheduler delays.
 
 The analyzer correlates 3 kHz amplitude envelopes, with 1.5-second windows
 at each beat across the full race. It dates each reference window from the

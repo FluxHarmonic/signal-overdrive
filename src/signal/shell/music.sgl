@@ -103,13 +103,19 @@
         (unless *tune* (set! *tune* (read-tune-string SCORE-TUNE-TEXT)))
         (set! *rate* (audio-context-sample-rate ctx))
         (let ((plan (transport-start c *rate*)))
-          (set! *stream* (open-audio-stream channels: 2 rate: *rate*
-                                          buffer-frames: (max 8192 (* 2 (depth-frames)))))
-          (when *stream*
+          ;; Construct all voice/insert graphs before exposing an empty
+          ;; ring to the device callback. This also applies on restart.
+          (set! *playback* (playback-open *tune* *rate*
+                                        (transport-start-conductor plan) MUSIC-INSERTS
+                                        mode: *handoff-mode*))
+          (set! *stream*
             (guard (e (#t (music-close!) (raise e)))
-              (set! *playback* (playback-open *tune* *rate*
-                                            (transport-start-conductor plan) MUSIC-INSERTS
-                                            mode: *handoff-mode*)))
+              (open-audio-stream channels: 2 rate: *rate*
+                                 buffer-frames: (max 8192 (* 2 (depth-frames))))))
+          (unless *stream*
+            (playback-close! *playback*)
+            (set! *playback* #f))
+          (when *stream*
             (set! *epoch* (transport-start-epoch plan))
             (set! *last-resync-bar* -1)
             (set! *start-conductor* (transport-start-conductor plan))

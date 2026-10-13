@@ -86,6 +86,9 @@
                           TRACKS)
                      (texture "sky.png") (texture "machines.png")
                      (list (cons 'embers (texture "lut-embers.png")) (cons 'crash (texture "lut-crash.png"))))
+        ;; Device/streams start after window and texture initialization,
+        ;; so the first queued music cannot drain during graphics setup.
+        (core-audio-start!)
         (let ((t0 (current-second)))
           (let frame ((n 0))
             (let ((dt (wait-frame)))
@@ -133,8 +136,8 @@
           (when (and d (pair? (cdr d)) t (pair? (cdr t)))
             (set! *shot-dir* (cadr d))
             (set! *shots* (map string->number (split-commas (cadr t))))))
-        ;; the sound (after the arguments: --mute keeps the device closed)
-        (core-audio-start!)
+        ;; The loop starts sound after graphics setup. --mute, parsed
+        ;; above, still keeps the device closed.
         (let* ((qa (member "--quit-after" args))
                (quit-after (and qa (pair? (cdr qa)) (string->number (cadr qa))))
                (scaler (make-window-scaler VIEW-W VIEW-H min-scale: 2 max-scale: 6
