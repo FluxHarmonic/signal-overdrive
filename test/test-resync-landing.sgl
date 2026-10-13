@@ -1,0 +1,97 @@
+;;; A resync must put the audio where its epoch says: after the jump, the
+;;; rendered music lines up with a player opened fresh at the target.
+;;; Real Motif pulls, no playback device.
+(import (sigil test)
+        (sigil list)
+        (sigil math)
+        (motif tune)
+        (signal music score)
+        (signal music conductor)
+        (signal music transport)
+        (signal music playback)
+        (signal music inserts))
+
+(define RATE 44100)
+(define BLOCK 441)                      ; 10 ms
+(define tune (read-tune-string SCORE-TUNE-TEXT))
+(define chunk (make-bytevector (* 8 256) 0))
+
+(define (advance-to c tick)
+  (if (>= (conductor-tick c) tick) c (advance-to (conductor-step c) tick)))
+
+(define (reach-next-bar b c)
+  (let loop ()
+    (let ((distance (playback-bar-distance b)))
+      (unless (and distance (= distance 0) (> (playback-rendered b) 0))
+        (playback-pull! b c chunk 0 (if (and distance (> distance 0)) (min distance 256) 256))
+        (loop)))))
+
+;; n frames rendered into one bytevector, in 256-frame pulls
+(define (render b c n)
+  (let ((out (make-bytevector (* 8 n) 0)))
+    (let loop ((at 0))
+      (when (< at n)
+        (let ((k (min 256 (- n at))))
+          (playback-pull! b c out (* 8 at) k)
+          (loop (+ at k)))))
+    out))
+
+;; RMS of each 10 ms block of the left channel
+(define (blocks pcm n)
+  (let ((count (quotient n BLOCK)))
+    (let loop ((i 0) (acc '()))
+      (if (= i count)
+          (list->vector (reverse acc))
+          (let sum ((j 0) (s 0.0))
+            (if (< j BLOCK)
+                (let ((x (bytevector-ieee-single-ref pcm (* 8 (+ (* i BLOCK) j)) 'little)))
+                  (sum (+ j 1) (+ s (* x x))))
+                (loop (+ i 1) (cons (sqrt (/ s BLOCK)) acc))))))))
+
+;; Pearson correlation of a shifted by k blocks against b, over the middle
+;; (the first and last limit blocks left out so every shift fits)
+(define (pearson a b k limit)
+  (let* ((n (vector-length a)) (lo limit) (hi (- n limit)) (m (- hi lo)))
+    (let loop ((i lo) (sa 0.0) (sb 0.0) (sab 0.0) (saa 0.0) (sbb 0.0))
+      (if (< i hi)
+          (let ((x (vector-ref a (+ i k))) (y (vector-ref b i)))
+            (loop (+ i 1) (+ sa x) (+ sb y) (+ sab (* x y)) (+ saa (* x x)) (+ sbb (* y y))))
+          (let ((cov (- sab (/ (* sa sb) m)))
+                (va (- saa (/ (* sa sa) m)))
+                (vb (- sbb (/ (* sb sb) m))))
+            (/ cov (sqrt (* va vb))))))))
+
+;; Resync at the next bar line to the conductor at tick, projected ahead.
+(define (offset-after-resync section tick ahead)
+  (let* ((c (conductor-new section))
+         (b (playback-open tune RATE c MUSIC-INSERTS)))
+    (reach-next-bar b c)
+    (let* ((target (transport-render-target (advance-to c tick) ahead))
+           (frame (playback-resync! b target))
+           (n (* RATE 2))
+           (jumped (blocks (render b target n) n))
+           (fresh (let ((f (playback-open tune RATE target MUSIC-INSERTS)))
+                    (let ((pcm (render f target n))) (playback-close! f) (blocks pcm n)))))
+      (playback-close! b)
+      ;; at the jump, one beat (43 blocks) early and one beat late
+      (list (pearson jumped fresh 0 50) (pearson jumped fresh -43 50) (pearson jumped fresh 43 50)))))
+
+;; Lined up with the fresh player, and better than a beat either way.
+(define (lands? scores)
+  (and (>= (car scores) 0.99)
+       (> (car scores) (cadr scores))
+       (> (car scores) (caddr scores))))
+
+(test-group "resync: the audio lands where the epoch says"
+  ;; Resyncs project to the instant the next rendered sample is heard
+  ;; (queue depth plus latency), as the shell does.
+  (test "a forward resync in lap1 matches a fresh player at the target"
+    (assert-true (lands? (offset-after-resync (quote lap1) 90 0.285))))
+  (test "a forward resync in the grid matches a fresh player at the target"
+    ;; the skew arm's case: the simulation 70 ms ahead, so the jump goes
+    ;; three rows past the bar line
+    (assert-true (lands? (offset-after-resync (quote grid) 126 0.35))))
+  (test "a resync in lap2 matches a fresh player at the target"
+    ;; a jump of a few rows, as a real resync makes (a long one keeps the
+    ;; reverb bus tail and correlates lower, though still best at 0)
+    (assert-true (lands? (offset-after-resync (quote lap2) 200 0.3)))))
