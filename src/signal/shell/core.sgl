@@ -65,6 +65,10 @@
     (define (core-focus! focused?)
       (unless (eq? focused? *focused*)
         (set! *focused* focused?)
+        (unless focused?
+          (keys-clear! *keys*)
+          (set! *touch* (list 0.0 0.0 0.0 #f #f))
+          (set! *touch-boost-pending* #f))
         ;; The first returning frame includes the hidden interval. It
         ;; must not owe catch-up ticks after the race was paused.
         (set! *skip-interval* #t)

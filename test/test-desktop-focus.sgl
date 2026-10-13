@@ -1,0 +1,10 @@
+;;; Native API check without a window or sound device. Actual focus
+;;; transitions will also be exercised in the headless game check.
+(import (sigil test)
+        (sigil desktop focus)
+        (sigil audio))
+
+(test-group "desktop focus: inert before a window exists"
+  (test "no current desktop window means no input focus"
+    (assert-false (window-focused?))
+    (assert-false (audio-initialized?))))

@@ -1,0 +1,5 @@
+;;; Reusable desktop query, separate from the game's pause policy.
+;;; This worktree supplies the native addition missing from the pinned
+;;; desktop library. It can move upstream without changing callers.
+(define-library (sigil desktop focus)
+  (export window-focused?))

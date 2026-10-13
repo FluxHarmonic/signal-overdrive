@@ -92,12 +92,15 @@ uses a fresh stream epoch at the frozen simulation tick. Restart also
 discards the old queue, including a restart at the same tick.
 
 `test/test-music-sink.sgl` exercises the actual native ring with the
-sink's drain shim, asserting that no audio device initialized. This
+sink's drain shim, asserting that no audio device initialized. The
 core uses the adapter alongside the engine/cue stream. F5 pauses both
 audio paths and simulation ticks. Web blur/visibility changes also pause,
 and the first returning frame discards its hidden interval. The page
-reports WebAudio output+base latency every 500 ms. Native window-focus
-integration and bar-boundary resync execution are still outstanding;
+reports WebAudio output+base latency every 500 ms. The native shell polls
+`(sigil desktop focus)` after each event poll and clears held keys while
+unfocused. Its small C addition queries GLFW's current application window;
+it creates no window or audio device and can move into the shared desktop
+library independently. Actual bar-boundary resync remains outstanding;
 the readout currently reports resync requests, not completed actions.
 
 `core-advance!` is the same input/pacing/tick path used by each graphical

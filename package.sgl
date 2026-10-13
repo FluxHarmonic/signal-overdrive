@@ -99,6 +99,14 @@
     (from-git url: sigil-repo package: "sigil-test" version: ">=0.22.11, <0.22.12")
     (from-git url: sigil-repo package: "sigil-test-runner" version: ">=0.22.11, <0.22.12"))
 
+  ;; Small reusable API addition absent from the pinned desktop host.
+  ;; The wasm implementation is inert; its shell receives DOM focus.
+  libraries: (list
+    (library
+      name: 'signal-overdrive
+      c-sources: '("src/c/desktop-focus.c")
+      native-init: "sigil__init_signal_extensions"))
+
   tasks: (list
     (task
       name: 'build
@@ -111,6 +119,8 @@
             (unless (= status 0)
               (error "music score compilation failed" status)))
           ctx)
+        (compile-c-sources sources: '("src/c/desktop-focus.c")
+                           flags: (with-sigil-c-flags '("-std=c99")))
         ;; the web config links sigil-audio's native-init with no C of its own
         ;; on wasm: a stub supplies the symbol (src/c/wasm-audio-stub.c, Phantom's)
         (lambda (ctx)
@@ -118,10 +128,7 @@
               ((compile-c-sources sources: (list "src/c/wasm-audio-stub.c")
                                   flags: (with-sigil-c-flags '("-std=c99"))) ctx)
               ctx))
-        (lambda (ctx)
-          (if (memq (target-os ctx) '(wasm wasi))
-              ((create-static-library name: "signal-overdrive") ctx)
-              ctx))
+        (create-static-library name: "signal-overdrive")
         (compile-sigil-modules sources: "src/**/*.sgl")
         (link-assets)
         (lambda (ctx)
