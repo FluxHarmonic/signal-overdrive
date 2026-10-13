@@ -338,6 +338,7 @@
                (set! *skew-arm* (eq? arm 'skew))
                (music-sabotage! arm)))
             ((string=? kv "cues=0") (audio-cues! #f))
+            ((string=? kv "sfx=0") (audio-sfx! #f) (say "sfx off: engine silent, no one-shots"))
             ((and (> (string-length kv) 14) (string=? (substring kv 0 14) "audio-latency="))
              (let ((v (string->number (substring kv 14 (string-length kv)))))
                (when v (music-latency! (/ v 1000.0)))))

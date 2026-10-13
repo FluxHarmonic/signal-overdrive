@@ -6,6 +6,8 @@
 ;;;                                 headless check runs muted)
 ;;;   (audio-depth! ms)             the engine stream's queue (?audiodepth=MS)
 ;;;   (audio-cues! on?)             one-shots as cues (default) or in the stream (?cues=0)
+;;;   (audio-sfx! on?)              #f: engine silent and no one-shots, the synth
+;;;                                 still rendering (sfx=0, a music-only capture)
 ;;;   (audio-start!)                open the context and the stream, load the
 ;;;                                 cues; on the web call it from a user
 ;;;                                 gesture (autoplay policy), again on later
@@ -48,7 +50,7 @@
           (signal sound)
           (signal tunein))
 
-  (export audio-mute! audio-depth! audio-cues! audio-start! audio-frame! audio-started? audio-readout
+  (export audio-mute! audio-depth! audio-cues! audio-sfx! audio-start! audio-frame! audio-started? audio-readout
           audio-context audio-pause! audio-tune! audio-tune-in! audio-stop-tune-in!)
 
   (begin
@@ -69,6 +71,12 @@
     (define (audio-mute!) (set! *muted* #t))
     (define (audio-depth! ms) (set! *depth-ms* (max 10 (min 2000 ms))))
     (define (audio-cues! on?) (set! *cues-on* on?))
+    ;; A diagnostic, not a setting: the drift check's music-only capture.
+    ;; The synth keeps its per-frame work so the timing is unchanged.
+    (define *sfx-on* #t)
+    (define (audio-sfx! on?)
+      (set! *sfx-on* on?)
+      (synth-engine-gain! *synth* (if on? 1.0 0.0)))
     (define (audio-started?) (and *stream* #t))
     (define (audio-context) *ctx*)
     (define (depth-frames) (exact (floor (/ (* *depth-ms* RATE) 1000))))
@@ -148,7 +156,7 @@
     (define (audio-frame! speed throttle boost events)
       (fade-step!)
       (synth-set! *synth* speed throttle boost)
-      (unless *paused*
+      (when (and *sfx-on* (not *paused*))
        (for-each (lambda (e)
                   (cond ((and (pair? e) (eq? (car e) 'wall)) (one-shot! 'wall (cdr e)))
                         ((memq e '(boost pad ice corrupt)) (one-shot! e 0))
