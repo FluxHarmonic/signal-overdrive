@@ -14,6 +14,25 @@ at least a bar ahead. Fill begins two bars before the predicted final-lap
 line and remains committed if the player crashes afterward. Race phases
 continue to follow the player's actual crossings.
 
+The stable read interface for beat-linked world effects is:
+
+| Read | Meaning |
+| --- | --- |
+| `(race-song race)` | Immutable conductor after the current simulation tick. |
+| `(conductor-tick c)` | Absolute song tick at 60 ticks/second; freezes on pause. |
+| `(conductor-section c)` | Current mark symbol, including `grid` and `results`. |
+| `(conductor-bar c)` | Absolute bar since song reset, starting at zero. |
+| `(conductor-row c)` | Row within the current bar, 0 through 31. |
+| `(conductor-beat c)` | Beat within the current bar, 0 through 3. |
+| `(conductor-position c)` | Tune `(order . row)`, with section-relative loops applied. |
+| `(conductor-onset-mask c)` | One-tick TRIGGER pulse; channel 1 is bit 0, channel 8 bit 7. |
+
+Read onset pulses in each simulation tick, after advancing the race. A
+frame can contain several ticks; reading only the final conductor can
+miss an earlier pulse. World effects should not read the audio player,
+sink depth, intended jump log or wall time to determine musical position.
+Drawing interpolation remains a later step.
+
 `scripts/compile-score` runs Motif's `compile-tune` before the package's
 runtime modules compile. It generates `src/signal/music/score.sgl`.
 Runtime modules read this data and never compile a tune during a race.
@@ -117,6 +136,10 @@ later planned landings and delayed audible epochs without a device.
 frame, exposed without drawing for headless checks. The muted
 `test/test-shell-clock.sgl` checks wall pacing, the six-tick stall cap,
 focus pause and explicit pause across focus changes.
+`--music-headless` uses that path plus the shared audio/input/trace frame
+tail, with real monotonic intervals and bounded sleeps. It runs an actual
+autopilot race without drawing or a window to isolate graphics contention.
+Captured runs record the selected mode; graphical results remain separate.
 
 `--musiclog` (or `?musiclog`) prints simulation intended landings and
 dated clock/cost samples. The clock timestamp is taken before drawing
