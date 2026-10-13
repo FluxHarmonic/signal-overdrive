@@ -62,10 +62,12 @@
        " layers: ((" SIGNAL-PATCH " octave: 0 volume: 0.3)))\n"
        "    (instrument id: 11 name: \"minor-pad\" patch: (" (pad-patch "1.1892071") ") volume: 24 gain: " (number->string pad-gain) " send: 0.25 pan: -0.15)\n"
        "    (instrument id: 12 name: \"major-pad\" patch: (" (pad-patch "1.259921") ") volume: 24 gain: " (number->string pad-gain) " send: 0.25 pan: -0.15)\n"
-       "    (instrument id: 13 name: \"crash\" patch: (chip-noise attack: 0.001 crush-bits: 12 cutoff: 11000 decay: 1.2 hp: 3500 osc-amp: 0.6 release: 0.4 sustain: 0) volume: 26 gain: 0.6 send: 0.25 pan: 0.1"
+       "    (instrument id: 13 name: \"crash\" patch: (chip-noise attack: 0.001 crush-bits: 12 cutoff: 11000 decay: 1.2 hp: 3500 osc-amp: 0.6 release: 0.4 sustain: 0) volume: 26 gain: 0.8 send: 0.25 pan: 0.1"
        " layers: ((chip-hat crush-bits: 10 decay: 0.6 hp: 5000 metal: 0.8 noise: 0.2 octave: 0 volume: 0.35)))\n"
        "  )\n"))
 
-    ;; Carrier's bus
+    ;; Carrier's bus, with the compressor's makeup at 0.85 (-1.4 dB): the
+    ;; theme is denser than Carrier, and this keeps its peaks near -2 dBFS
+    ;; so the game's cues have room on top (measured on round 1's renders)
     (define (bus-text)
-      "  (bus reverb: zitarev size: 0.8 damp: 0.55 mix: 0.3 comp: on threshold: -12 ratio: 3 attack: 8 release: 110 makeup: 1)\n")))
+      "  (bus reverb: zitarev size: 0.8 damp: 0.55 mix: 0.3 comp: on threshold: -12 ratio: 3 attack: 8 release: 110 makeup: 0.85)\n")))

@@ -8,7 +8,7 @@
 ;;;   (note ch at len midi inst vol)        a plain note
 ;;;   (bend ch at len from to inst vol spd) picks `from` for one row, then
 ;;;                                         slides up (or down) to `to`
-;;;   (slide ch at len to spd)              slides the sounding note to `to`
+;;;   (slide ch at len from to spd vol)     slides the sounding note (`from`) to `to`
 ;;;                                         without a new attack (legato)
 ;;;
 ;;; A slide is tracker effect 3xx (tone portamento, xx/16 semitone per
@@ -68,14 +68,15 @@
       (exact (ceiling (/ (* 16 (abs semis)) (* 2 spd)))))
 
     ;; the target note with 3xx, and effect-only cells on the rows after it
-    ;; until the pitch has arrived (all inside the note)
-    (define (slide-events ch at len from to spd)
+    ;; until the pitch has arrived (all inside the note). vol 0 keeps the
+    ;; sounding note's volume.
+    (define (slide-events ch at len from to spd vol)
       (let* ((fx (string-append "3" (hex2 spd)))
              (rows (slide-rows (- to from) spd))
              (max-rows (exact (floor (* 2 len)))))
         (when (> rows max-rows)
           (error "slide: the note ends before the slide arrives" (list ch at len from to spd)))
-        (cons (ev ch at len to 0 0 fx)
+        (cons (ev ch at len to 0 vol fx)
               (let loop ((k 1) (acc '()))
                 (if (>= k rows) (reverse acc)
                     (loop (+ k 1) (cons (ev ch (+ at (* 0.5 k)) 0 #f 0 0 fx) acc)))))))
@@ -83,11 +84,14 @@
     ;; pick `from` for one row (a 32nd), then slide to `to`
     (define (bend ch at len from to inst vol spd)
       (cons (ev ch at 0.5 from inst vol "000")
-            (slide-events ch (+ at 0.5) (- len 0.5) from to spd)))
+            (slide-events ch (+ at 0.5) (- len 0.5) from to spd 0)))
 
-    ;; slide the note sounding on ch (pitch `from`) to `to`, no new attack
-    (define (slide ch at len from to spd)
-      (slide-events ch at len from to spd))
+    ;; slide the note sounding on ch to `to`, no new attack; the volume
+    ;; column sets `vol` as the slide starts. `from` must be the sounding
+    ;; note's pitch: it sets how many rows carry the slide, and nothing
+    ;; checks it against the score.
+    (define (slide ch at len from to spd vol)
+      (slide-events ch at len from to spd vol))
 
     (define (events-shift events by)
       (map (lambda (e) (ev (ev-ch e) (+ (ev-start e) by) (ev-len e) (ev-midi e)
@@ -100,12 +104,28 @@
     ;; ------------------------------------------------------------
     (define (row-of x) (exact (round (* 2 x))))
     ;; a note's end rounds down, so a note shorter than its grid step
-    ;; releases before the next onset instead of running on
-    (define (end-row-of x) (exact (floor (* 2 x))))
+    ;; releases before the next onset instead of running on; but never onto
+    ;; its own start row (a note shorter than a 32nd still gets one row)
+    (define (end-row-of start x) (max (+ (row-of start) 1) (exact (floor (* 2 x)))))
 
+    ;; A channel is monophonic: a note ends at its own end or at the next
+    ;; onset on its channel, whichever is first. Its release is written only
+    ;; when it comes first; otherwise the next note takes over the voice. (A
+    ;; release placed after the next onset would cut that note instead.)
     (define (events->cells events)
       (let* ((notes (filter ev-midi events))
-             (onsets (map (lambda (e) (cons (ev-ch e) (row-of (ev-start e)))) notes))
+             (onsets-of (let ((by-ch (make-vector 9 '())))
+                          (for-each (lambda (e) (vector-set! by-ch (ev-ch e)
+                                                             (cons (row-of (ev-start e)) (vector-ref by-ch (ev-ch e)))))
+                                    notes)
+                          (let loop ((ch 0))
+                            (when (< ch 9)
+                              (vector-set! by-ch ch (list-sort < (vector-ref by-ch ch)))
+                              (loop (+ ch 1))))
+                          (lambda (ch) (vector-ref by-ch ch))))
+             (next-onset (lambda (ch row)
+                           (let loop ((os (onsets-of ch)))
+                             (cond ((null? os) #f) ((> (car os) row) (car os)) (else (loop (cdr os)))))))
              (note-cells (map (lambda (e) (list (row-of (ev-start e)) (ev-ch e) (pitch->name (ev-midi e))
                                                 (ev-inst e) (ev-vol e) (ev-fx e)))
                               notes))
@@ -113,32 +133,27 @@
                             (filter (lambda (e) (not (ev-midi e))) events)))
              (offs (filter (lambda (x) x)
                            (map (lambda (e)
-                                  (let ((end (end-row-of (+ (ev-start e) (ev-len e)))))
-                                    (and (not (member (cons (ev-ch e) end) onsets))
+                                  (let ((end (end-row-of (ev-start e) (+ (ev-start e) (ev-len e))))
+                                        (nxt (next-onset (ev-ch e) (row-of (ev-start e)))))
+                                    (and (or (not nxt) (< end nxt))
                                          (list end (ev-ch e) "===" 0 0 "000"))))
                                 notes))))
         (append note-cells fx-cells offs)))
 
     (define (cell-key c) (list (car c) (cadr c)))
     (define (off? c) (equal? (caddr c) "==="))
-    (define (fx-only? c) (equal? (caddr c) "..."))
 
-    ;; one cell per (row, channel). A note or an effect-only cell beats a
-    ;; note-off there (a slide's last effect row can share the row its note
-    ;; would release on only if the note is longer, which slide-events
-    ;; checks); two note-offs are one; anything else is a composing error.
+    ;; One cell per (row, channel), or a composing error: two notes in one
+    ;; slot, or a release or effect landing on another cell (events->cells
+    ;; never writes a release onto an onset, and a slide's effect cells stay
+    ;; inside its note, so a collision here means the score overlaps itself).
     (define (uniq-cells cells)
-      (let* ((solid (filter (lambda (c) (not (off? c))) cells))
-             (offs (filter off? cells)))
-        (let check ((cs solid) (seen '()))
-          (unless (null? cs)
-            (when (member (cell-key (car cs)) seen)
-              (error "score: two cells in one slot (row, channel)" (cell-key (car cs))))
-            (check (cdr cs) (cons (cell-key (car cs)) seen))))
-        (let loop ((os offs) (seen (map cell-key solid)) (acc (reverse solid)))
-          (cond ((null? os) (reverse acc))
-                ((member (cell-key (car os)) seen) (loop (cdr os) seen acc))
-                (else (loop (cdr os) (cons (cell-key (car os)) seen) (cons (car os) acc)))))))
+      (let check ((cs cells) (seen '()))
+        (unless (null? cs)
+          (when (member (cell-key (car cs)) seen)
+            (error "score: two cells in one slot (row, channel)" (cell-key (car cs))))
+          (check (cdr cs) (cons (cell-key (car cs)) seen))))
+      cells)
 
     (define (cell->string c)
       (string-append "(" (number->string (cadr c)) " \"" (caddr c) "\" "

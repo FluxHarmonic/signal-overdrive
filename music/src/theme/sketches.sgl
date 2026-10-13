@@ -89,7 +89,7 @@
                        (let ((from (midi (list-ref e 6) (list-ref e 7))) (spd (list-ref e 8)))
                          (case (list-ref e 5)
                            ((bend) (bend ch pos len from m inst vol spd))
-                           ((slide) (slide ch pos len from m spd))
+                           ((slide) (slide ch pos len from m spd vol))
                            (else (error "line: unknown articulation" e))))
                        (note ch pos len m inst vol))))
                entries))
@@ -160,7 +160,7 @@
           ;; the landing
           ((= b 18)
            (append (kick at '((0 44))) (snare at '((0 36))) (crash at 32)
-                   (note 4 at 8 (bass-root 'D) I-BASS 48)
+                   (note 4 at 8 (bass-root 'D) I-BASS 42)
                    (pad at '(D . m) 16 36)
                    (line 6 I-OVERDRIVE at '((0 12 D 5 46)))))
           ;; the hook
@@ -184,7 +184,7 @@
               (pad at chord 16 34)
               (line 6 I-OVERDRIVE at (list-ref HOOK hb))
               (if second? (arp-bar at chord 22) '())
-              (if (>= b 14) (line-plain 8 I-SIGNAL at (list-ref HOOK hb) -12 26) '())))))))
+              (if (>= b 14) (line-plain 8 I-SIGNAL at (list-ref HOOK hb) -12 16) '())))))))
 
     (define (redline-events) (cat-map redline-bar (range 0 19)))
 
@@ -282,7 +282,7 @@
                        '())))
           ((= b 20)
            (append (kick at '((0 44))) (snare at '((0 36))) (crash at 32)
-                   (note 4 at 8 (bass-root 'D) I-BASS 48)
+                   (note 4 at 8 (bass-root 'D) I-BASS 42)
                    (pad at '(D . m) 16 32)
                    (ostinato at 'air 42 32 'first-group-only)
                    (line 6 I-OVERDRIVE at '((0 8 D 6 46)))))
@@ -381,7 +381,7 @@
         (cond
           ((= b 16)
            (append (kick at '((0 44))) (snare at '((0 36))) (crash at 32)
-                   (note 4 at 8 r I-BASS 48)
+                   (note 4 at 8 r I-BASS 42)
                    (pad at chord 16 34)))
           ((< b 8)
            (append

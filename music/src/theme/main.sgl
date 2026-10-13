@@ -48,7 +48,8 @@
       (let* ((sym (string->symbol name)))
         (if (not (memq sym SKETCHES))
             (begin (say "theme: no sketch " name "; there are " SKETCHES) 1)
-            (let* ((t (validate-tune (read-tune-string (sketch-text sym))))
+            ;; read-tune-string raises on any of motif's tune-errors
+            (let* ((t (read-tune-string (sketch-text sym)))
                    (text (tune->string t)))
               (write-file-string out text)
               (say "theme: wrote " out " (" (number->string (length (tune-order t))) " bars at "
@@ -87,12 +88,19 @@
          (if (null? chs) '(1 2 3 4 5 6 7 8) chs))
         0))
 
+    (define (channel-arg? s)
+      (let ((n (string->number s))) (and n (exact-integer? n) (<= 1 n 8))))
+    (define (every ok? xs) (or (null? xs) (and (ok? (car xs)) (every ok? (cdr xs)))))
+
     (define (theme-main args)
       (cond
+        ((null? args) (theme-main '("help")))
         ((and (= (length args) 3) (equal? (car args) "sketch")) (cmd-sketch (cadr args) (caddr args)))
-        ((and (>= (length args) 3) (equal? (car args) "render"))
-         (cmd-render (cadr args) (caddr args) (and (= (length args) 4) (equal? (cadddr args) "dry"))))
-        ((and (>= (length args) 2) (equal? (car args) "stems"))
+        ((and (equal? (car args) "render")
+              (or (= (length args) 3) (and (= (length args) 4) (equal? (cadddr args) "dry"))))
+         (cmd-render (cadr args) (caddr args) (= (length args) 4)))
+        ((and (equal? (car args) "stems") (>= (length args) 2)
+              (every channel-arg? (if (> (length args) 3) (cdddr args) '())))
          (cmd-stems (cadr args) (if (>= (length args) 3) (caddr args) #f)
                     (if (> (length args) 3) (map string->number (cdddr args)) '())))
         (else
