@@ -10,6 +10,8 @@ limit. Cached Xvfb and xdotool are required; the driver does not fetch them.
 muted. It copies the binary, opens a private Xvfb, unmaps/remaps only its
 own window and checks frozen/resumed ticks from dated clock samples.
 It has a one-minute limit and writes RESULT plus binary-hash metadata.
+Set `CONDUCTOR_GDB=1` to run the same muted check under a cached GDB and
+preserve a backtrace in `game.log`. A crash still fails the check.
 
 The analyzer correlates 3 kHz amplitude envelopes, with 1.5-second windows
 at each beat across the full race. It dates each reference window from the

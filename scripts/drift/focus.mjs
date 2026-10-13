@@ -23,8 +23,14 @@ try {
   fs.mkdirSync(path.join(env.XDG_DATA_HOME, "signal-overdrive"), { recursive: true });
   fs.writeFileSync(path.join(env.XDG_DATA_HOME, "signal-overdrive", "scale.sgl"), "2\n");
   logFD = fs.openSync(path.join(RUN, "game.log"), "w");
-  const game = pool.launch(path.join(ROOT, "scripts/dev"), [snapshot, "--mute", "--start", "--autopilot",
-    "--track=loop", "--musiclog", "--quit-after", "14"], { env, stdio: ["ignore", "pipe", "pipe"] });
+  const gameArgs = [snapshot, "--mute", "--start", "--autopilot",
+    "--track=loop", "--musiclog", "--quit-after", "14"];
+  const launchArgs = process.env.CONDUCTOR_GDB === "1"
+    ? [cachedTool("gdb", "gdb"), "--batch", "--return-child-result", "-ex", "run",
+      "-ex", "thread apply all bt", "--args", ...gameArgs]
+    : gameArgs;
+  const game = pool.launch(path.join(ROOT, "scripts/dev"), launchArgs,
+    { env, stdio: ["ignore", "pipe", "pipe"] });
   const closed = new Promise((resolve, reject) => { game.once("close", resolve); game.once("error", reject); });
   const output = bytes => { fs.writeSync(logFD, bytes); text += bytes; };
   game.stdout.on("data", output); game.stderr.on("data", output);
