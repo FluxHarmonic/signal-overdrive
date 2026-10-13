@@ -42,7 +42,8 @@
 
   (export core-boot! core-frame! core-keys core-sticks core-pad core-param! core-touch!
           core-tap! core-race core-tuning core-describe core-probe core-knobs-markdown GAME-NAME
-          core-audio-start! core-focus! core-paused? core-advance! core-headless-frame! core-gesture!)
+          core-audio-start! core-focus! core-paused? core-advance! core-headless-frame! core-gesture!
+          core-startup-mark!)
 
   (begin
     (define GAME-NAME "signal-overdrive")
@@ -400,15 +401,32 @@
     (define *boost-latch* #f)
     (define *last-throttle* 0.0)
     (define *frame-events* '())   ; the player's events over this frame's ticks, for the sound
+    ;; Startup timing under musiclog: how long each step took and the
+    ;; music's sounding underruns by its end, so a startup stall that
+    ;; drains the ring names its step.
+    (define *startup-mark* #f)
+    (define (core-startup-mark! label)
+      (when *music-trace*
+        (let ((now (current-jiffy)))
+          (say "startup " label " +"
+               (number->string (if *startup-mark*
+                                   (exact (round (/ (* 1000.0 (- now *startup-mark*)) (jiffies-per-second))))
+                                   0))
+               " ms music-underruns " (number->string (list-ref (music-readout) 3)))
+          (set! *startup-mark* now))))
+
     ;; Open the sound (again, to resume a context the browser suspended).
     (define (core-audio-start!)
       (audio-tune! (tuning-ref *tuning* 'tone-lo) (tuning-ref *tuning* 'tone-hi)
                    (intro-lock *tuning*) (intro-length *tuning*))
       (audio-start!)
+      (core-startup-mark! "engine-and-cues")
       (when (and *race* (not (core-paused?)))
         (song-gate!)
         (music-start! (audio-context) (race-song *race*))
-        (music-frame! (race-song *race*) #f)))
+        (core-startup-mark! "music-start")
+        (music-frame! (race-song *race*) #f)
+        (core-startup-mark! "music-frame")))
     ;; The song's release, named before each music frame: at the card's
     ;; lock, in song seconds (a constant while the card runs: the song and
     ;; the card count the same ticks and freeze together), at once when
