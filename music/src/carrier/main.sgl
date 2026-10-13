@@ -1,0 +1,103 @@
+;;; (carrier main) - The music tools' entry point
+;;;
+;;;   carrier tune OUT.cts                 write the 32-bar audition tune (canonical)
+;;;   carrier render IN.cts OUT.wav [SR]   render a tune through the live player
+;;;                                        (no inserts), default 48000 Hz
+;;;   carrier stats IN.wav-less: see render's printed peak and RMS
+
+(define-library (carrier main)
+  (import (sigil core) (sigil io) (sigil string) (sigil math) (sigil process) (sigil fs) (sigil crypto)
+          (motif tune) (motif tune player)
+          (carrier score) (carrier render) (carrier analysis) (carrier probe) (carrier damage))
+  (export main)
+  (begin
+    (define (say . xs) (for-each display xs) (newline))
+
+    (define (fixed x d)
+      (let* ((k (expt 10.0 d)) (r (/ (round (* x k)) k)))
+        (number->string r)))
+
+    ;; Writes the generated tune, and OUT.sha256 beside it: the hash of what
+    ;; was written. It refuses to overwrite OUT if OUT no longer matches
+    ;; that hash (it was edited in the tracker since), unless OUT already
+    ;; equals the new output. Fold a tracker edit into score.sgl, or move
+    ;; the edited file aside, then regenerate. Crash's song builder guards
+    ;; its generated scores the same way; there is no force flag.
+    (define (cmd-tune out)
+      (let* ((t (audition-tune))
+             (text (tune->string t))
+             (new-hash (sha256 text))
+             (side (string-append out ".sha256"))
+             (cur (and (file-exists? out) (sha256 (read-file-string out))))
+             (last (and (file-exists? side) (string-trim (read-file-string side)))))
+        (cond
+          ((and cur (not (equal? cur new-hash)) (not (equal? cur last)))
+           (say "carrier: REFUSING to overwrite " out ": "
+                (if last
+                    "it changed since it was generated (a tracker edit?)."
+                    (string-append "there is no " side " to show it is generated output."))
+                " Fold the edit into src/carrier/score.sgl or move the file aside, then regenerate.")
+           1)
+          (else
+           (write-file-string out text)
+           (write-file-string side (string-append new-hash "\n"))
+           (say "carrier: wrote " out " (" (number->string (length (tune-order t))) " bars)"
+                (if (equal? cur new-hash) ", unchanged" ""))
+           0))))
+
+    (define (cmd-render in out sr)
+      (let* ((t (read-tune-file in))
+             (p (open-tune-player t sr))
+             (max-frames (* sr 120))
+             (r (render-player p sr '() max-frames))
+             (bv (car r)) (frames (cdr r))
+             (mid (bv->mid bv frames))
+             (pk (peak mid 0 frames))
+             (lv (rms mid 0 frames)))
+        (player-close! p)
+        (write-wav16 out bv frames sr 1.0)
+        (say "carrier: rendered " in " -> " out ": " (fixed (/ frames (* 1.0 sr)) 2) " s at " (number->string sr)
+             " Hz, mid peak " (fixed (* 20 (/ (log (max pk 1e-9)) (log 10.0))) 2) " dBFS, mid RMS "
+             (fixed (* 20 (/ (log (max lv 1e-9)) (log 10.0))) 2) " dBFS")
+        0))
+
+    (define (dbfs x) (fixed (* 20 (/ (log (max x 1e-9)) (log 10.0))) 1))
+
+    ;; each channel soloed through the same player path: its peak and RMS
+    ;; over the whole render and over [from-bar, to-bar), and a WAV per
+    ;; channel when dir is given
+    (define (cmd-stems in sr dir)
+      (let ((t (read-tune-file in)))
+        (let loop ((ch 1))
+          (when (<= ch 8)
+            (let* ((p (open-tune-player t sr))
+                   (_ (player-solo! p ch))
+                   (r (render-player p sr '() (* sr 120)))
+                   (frames (cdr r))
+                   (mid (bv->mid (car r) frames))
+                   (bar (exact (round (* sr (/ (* 32 3 2.5) 140.0)))))
+                   (lap1 (* 16 bar)))
+              (player-close! p)
+              (say "ch" (number->string ch)
+                   "  peak " (dbfs (peak mid 0 frames))
+                   "  rms lap1 " (dbfs (rms mid 0 (min frames lap1)))
+                   "  rms lap2 " (dbfs (rms mid lap1 (max 1 (min (* 16 bar) (- frames lap1))))))
+              (when dir
+                (write-wav16 (string-append dir "/stem-ch" (number->string ch) ".wav") (car r) frames sr 1.0)))
+            (loop (+ ch 1))))
+        0))
+
+    (define (main)
+      (exit (let ((args (cdr (command-line))))
+        (cond
+          ((and (= (length args) 2) (equal? (car args) "tune")) (cmd-tune (cadr args)))
+          ((and (>= (length args) 3) (equal? (car args) "render"))
+           (cmd-render (cadr args) (caddr args)
+                       (if (= (length args) 4) (string->number (cadddr args)) 48000)))
+          ((equal? args (list "probe")) (run-probe))
+          ((equal? args (list "sfx-check")) (check-sfx))
+          ((equal? args (list "damage-check")) (check-damage-wiring) (check-clean-transparency) (for-each check-clean-transparency (list 1 2 3 4 5 6 7)) 0)
+          ((and (= (length args) 2) (equal? (car args) "damage")) (render-damage-audition (cadr args)))
+          ((and (>= (length args) 2) (equal? (car args) "stems"))
+           (cmd-stems (cadr args) 48000 (if (= (length args) 3) (caddr args) #f)))
+          (else (say "usage: carrier tune OUT.cts | carrier render IN.cts OUT.wav [SR] | carrier stems IN.cts [DIR] | carrier probe") 1)))))))

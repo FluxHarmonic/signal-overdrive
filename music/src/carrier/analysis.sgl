@@ -1,0 +1,170 @@
+;;; (carrier analysis) - Measurements on rendered audio, for the insert probe
+;;;
+;;; Everything works on a vector of flonums (one channel, or the mid of a
+;;; stereo render) and a window [from, from+len).
+;;;
+;;;   (goertzel-power x from len f sr)    Hann-windowed power at f Hz
+;;;   (spectral-peaks x from len sr lo hi step floor-db)
+;;;        local maxima of that power over [lo, hi] on a grid of `step` Hz,
+;;;        each refined by golden-section search to 0.001 Hz; only peaks
+;;;        within floor-db of the strongest are kept (Hann sidelobes are
+;;;        31 dB down, so a 12 dB floor keeps real lines only).
+;;;        -> list of (freq . db) strongest first
+;;;   (sine-fit x from len sr f0 span)    least-squares fit of a sine (with
+;;;        DC) whose frequency is searched within f0 +- span: -> #(freq amp rms)
+;;;        where rms is the residual's RMS
+;;;   (effective-bits x from len sr f0)   1 + log2(amp / (rms * sqrt 12)):
+;;;        the bit depth whose quantisation error (step 2^-(bits-1) for a
+;;;        full-scale sine, motif's crush) explains the residual
+;;;   (hold-pattern x from len n eps)     how well the window holds each value
+;;;        for n samples: -> #(phase in-hold-max boundary-share)
+;;;   (rms x from len) (peak x from len) (distinct-count x from len)
+
+(define-library (carrier analysis)
+  (import (sigil core) (sigil math) (sigil list))
+  (export goertzel-power spectral-peaks sine-fit effective-bits hold-pattern
+          rms peak distinct-count db cents)
+  (begin
+    (define PI 3.141592653589793)
+
+    (define (db p) (if (> p 0.0) (* 10.0 (/ (log p) (log 10.0))) -400.0))
+    (define (cents f ref) (* 1200.0 (/ (log (/ f ref)) (log 2.0))))
+
+    ;; the window applied once: w[n] x[from+n], Hann
+    (define (hann-copy x from len)
+      (let ((v (make-vector len 0.0)) (wk (/ (* 2.0 PI) (- len 1))))
+        (let loop ((n 0))
+          (when (< n len)
+            (vector-set! v n (* 0.5 (- 1.0 (cos (* wk n))) (vector-ref x (+ from n))))
+            (loop (+ n 1))))
+        v))
+
+    ;; Goertzel power of an already-windowed vector at f
+    (define (goertzel-raw v f sr)
+      (let ((coeff (* 2.0 (cos (/ (* 2.0 PI f) sr)))) (len (vector-length v)))
+        (let loop ((n 0) (s1 0.0) (s2 0.0))
+          (if (>= n len)
+              (/ (- (+ (* s1 s1) (* s2 s2)) (* coeff s1 s2)) (* 1.0 len len))
+              (loop (+ n 1) (+ (vector-ref v n) (- (* coeff s1) s2)) s1)))))
+
+    (define (goertzel-power x from len f sr)
+      (goertzel-raw (hann-copy x from len) f sr))
+
+    ;; golden-section search for the maximum of g on [a, b]
+    (define (golden-max g a b tol)
+      (let ((r 0.6180339887498949))
+        (let loop ((a a) (b b))
+          (if (< (- b a) tol)
+              (let ((m (* 0.5 (+ a b)))) (cons m (g m)))
+              (let ((c (- b (* r (- b a))))
+                    (d (+ a (* r (- b a)))))
+                (if (> (g c) (g d))
+                    (loop a d)
+                    (loop c b)))))))
+
+    (define (spectral-peaks x from len sr lo hi step floor-db)
+      (let* ((n (+ 1 (exact (floor (/ (- hi lo) step)))))
+             (grid (make-vector n 0.0))
+             (wv (hann-copy x from len)))
+        (let fill ((i 0))
+          (when (< i n)
+            (vector-set! grid i (goertzel-raw wv (+ lo (* i step)) sr))
+            (fill (+ i 1))))
+        (let* ((g (lambda (f) (goertzel-raw wv f sr)))
+               (maxima
+                (let scan ((i 1) (acc '()))
+                  (if (>= i (- n 1))
+                      acc
+                      (let ((v (vector-ref grid i)))
+                        (scan (+ i 1)
+                              (if (and (> v (vector-ref grid (- i 1)))
+                                       (>= v (vector-ref grid (+ i 1))))
+                                  (let ((f (+ lo (* i step))))
+                                    (cons (golden-max g (- f step) (+ f step) 0.001) acc))
+                                  acc))))))
+               (top (fold-left (lambda (m e) (max m (cdr e))) 0.0 maxima))
+               (kept (filter (lambda (e) (> (db (cdr e)) (- (db top) floor-db))) maxima)))
+          (map (lambda (e) (cons (car e) (db (cdr e))))
+               (list-sort (lambda (a b) (> (cdr a) (cdr b))) kept)))))
+
+    ;; 3x3 least squares for x ~ a cos + b sin + c at f; -> #(amp rms)
+    (define (fit-at x from len sr f)
+      (let ((w (/ (* 2.0 PI f) sr)))
+        (let loop ((n 0) (cc 0.0) (ss 0.0) (cs 0.0) (c1 0.0) (s1 0.0) (one 0.0)
+                   (xc 0.0) (xs 0.0) (x1 0.0))
+          (if (< n len)
+              (let* ((c (cos (* w n))) (s (sin (* w n))) (v (vector-ref x (+ from n))))
+                (loop (+ n 1) (+ cc (* c c)) (+ ss (* s s)) (+ cs (* c s)) (+ c1 c) (+ s1 s)
+                      (+ one 1.0) (+ xc (* v c)) (+ xs (* v s)) (+ x1 v)))
+              ;; solve [[cc cs c1] [cs ss s1] [c1 s1 one]] [a b k] = [xc xs x1]
+              (let* ((det (lambda (a b c d e f g h i)
+                            (- (+ (* a e i) (* b f g) (* c d h)) (+ (* c e g) (* b d i) (* a f h)))))
+                     (D (det cc cs c1 cs ss s1 c1 s1 one))
+                     (a (/ (det xc cs c1 xs ss s1 x1 s1 one) D))
+                     (b (/ (det cc xc c1 cs xs s1 c1 x1 one) D))
+                     (k (/ (det cc cs xc cs ss xs c1 s1 x1) D)))
+                (let res ((n 0) (acc 0.0))
+                  (if (< n len)
+                      (let* ((c (cos (* w n))) (s (sin (* w n)))
+                             (e (- (vector-ref x (+ from n)) (+ (* a c) (* b s) k))))
+                        (res (+ n 1) (+ acc (* e e))))
+                      (vector (sqrt (+ (* a a) (* b b))) (sqrt (/ acc len))))))))))
+
+    (define (sine-fit x from len sr f0 span)
+      (let* ((g (lambda (f) (- (vector-ref (fit-at x from len sr f) 1))))
+             (best (golden-max g (- f0 span) (+ f0 span) 1e-6))
+             (r (fit-at x from len sr (car best))))
+        (vector (car best) (vector-ref r 0) (vector-ref r 1))))
+
+    (define (effective-bits x from len sr f0)
+      (let* ((r (sine-fit x from len sr f0 0.05))
+             (amp (vector-ref r 1)) (res (vector-ref r 2)))
+        (if (<= res 0.0)
+            99.0
+            (+ 1.0 (/ (log (/ amp (* res (sqrt 12.0)))) (log 2.0))))))
+
+    ;; For each phase k in 0..n-1, count |diff| > eps at positions == k mod n
+    ;; (the hold boundaries if k is right). The phase with the most is the
+    ;; boundary phase; in-hold-max is the largest |diff| anywhere else, and
+    ;; boundary-share the fraction of boundaries above eps.
+    (define (hold-pattern x from len n eps)
+      (let ((counts (make-vector n 0)) (totals (make-vector n 0)))
+        (let loop ((i 1))
+          (when (< i len)
+            (let ((k (modulo (+ from i) n))
+                  (d (abs (- (vector-ref x (+ from i)) (vector-ref x (+ from i -1))))))
+              (vector-set! totals k (+ 1 (vector-ref totals k)))
+              (when (> d eps) (vector-set! counts k (+ 1 (vector-ref counts k)))))
+            (loop (+ i 1))))
+        (let* ((phase (let pick ((k 1) (best 0))
+                        (cond ((>= k n) best)
+                              ((> (vector-ref counts k) (vector-ref counts best)) (pick (+ k 1) k))
+                              (else (pick (+ k 1) best)))))
+               (in-hold (let loop ((i 1) (m 0.0))
+                          (if (>= i len)
+                              m
+                              (loop (+ i 1)
+                                    (if (= (modulo (+ from i) n) phase)
+                                        m
+                                        (max m (abs (- (vector-ref x (+ from i)) (vector-ref x (+ from i -1)))))))))))
+          (vector phase in-hold
+                  (/ (* 1.0 (vector-ref counts phase)) (max 1 (vector-ref totals phase)))))))
+
+    (define (rms x from len)
+      (let loop ((i 0) (acc 0.0))
+        (if (>= i len) (sqrt (/ acc (max 1 len)))
+            (loop (+ i 1) (+ acc (* (vector-ref x (+ from i)) (vector-ref x (+ from i))))))))
+
+    (define (peak x from len)
+      (let loop ((i 0) (m 0.0))
+        (if (>= i len) m (loop (+ i 1) (max m (abs (vector-ref x (+ from i))))))))
+
+    (define (distinct-count x from len)
+      (let ((v (make-vector len 0.0)))
+        (let fill ((i 0)) (when (< i len) (vector-set! v i (vector-ref x (+ from i))) (fill (+ i 1))))
+        (let ((s (list-sort < (vector->list v))))
+          (if (null? s) 0
+              (let loop ((xs (cdr s)) (prev (car s)) (n 1))
+                (cond ((null? xs) n)
+                      ((= (car xs) prev) (loop (cdr xs) prev n))
+                      (else (loop (cdr xs) (car xs) (+ n 1)))))))))))

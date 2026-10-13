@@ -1,0 +1,138 @@
+;;; (carrier sfx) - Stand-in cues for the damage audition, mixed at output
+;;; time into a rendered f32 stereo buffer (the game's cues mix the same
+;;; way, from a bank rendered at boot). David, 2026-10-13: impacts must be
+;;; felt: "the car scraping the wall sounded like a single hi hat".
+;;;
+;;;   (scrape! bv frames s dur level)  sustained grinding for the contact's
+;;;        length: band-passed noise with an irregular grind, metal partials,
+;;;        a low rumble for weight, and pops; 120 ms release after contact
+;;;   (thump! bv frames s level)       a hard hit: a falling sine 140 -> 42 Hz,
+;;;        a short dull burst, and a metal clang that rings 0.35 s
+;;;   (whoosh! bv frames s dur level)  the boost: noise through a band-pass
+;;;        sweeping up 350 -> 2600 Hz, with a rising tone under it
+;;;   (lock! bv frames s level)        the repair: a short bright chime, D6 A6
+;;;   (dip! bv frames s ms level)      the stream dipped to `level`, 2 ms edges
+
+(define-library (carrier sfx)
+  (import (sigil core) (sigil math))
+  (export scrape! thump! whoosh! lock! dip! static!)
+  (begin
+    (define SR 48000)
+    (define PI 3.141592653589793)
+    (define (frame s) (exact (round (* s SR))))
+
+    (define seed 24680)
+    (define (rand)   ; -1..1, deterministic
+      (set! seed (modulo (+ (* seed 1103515245) 12345) 2147483648))
+      (- (* 2.0 (/ seed 2147483648.0)) 1.0))
+
+    ;; a band-pass biquad (RBJ, constant 0 dB peak gain); (bp x) -> y, and
+    ;; (bp 'tune f q) retunes it in place
+    (define (make-bandpass f q)
+      (let ((b0 0.0) (b2 0.0) (a1 0.0) (a2 0.0) (x1 0.0) (x2 0.0) (y1 0.0) (y2 0.0))
+        (define (tune! f q)
+          (let* ((w (/ (* 2.0 PI f) SR)) (alpha (/ (sin w) (* 2.0 q))) (a0 (+ 1.0 alpha)))
+            (set! b0 (/ alpha a0)) (set! b2 (/ (- alpha) a0))
+            (set! a1 (/ (* -2.0 (cos w)) a0)) (set! a2 (/ (- 1.0 alpha) a0))))
+        (tune! f q)
+        (lambda (x . more)
+          (if (eq? x 'tune)
+              (begin (tune! (car more) (cadr more)) 0.0)
+              (let ((y (- (+ (* b0 x) (* b2 x2)) (* a1 y1) (* a2 y2))))
+                (set! x2 x1) (set! x1 x) (set! y2 y1) (set! y1 y)
+                y)))))
+
+    (define (make-onepole f)
+      (let ((y 0.0) (a (- 1.0 (exp (/ (* -2.0 PI f) SR)))))
+        (lambda (x) (set! y (+ y (* a (- x y)))) y)))
+
+    (define (add! bv frames start n f)
+      (let loop ((k 0))
+        (when (and (< k n) (< (+ start k) frames))
+          (let* ((i (+ start k)) (v (f k)))
+            (bytevector-ieee-single-set! bv (* 8 i) (+ v (bytevector-ieee-single-ref bv (* 8 i) 'little)) 'little)
+            (bytevector-ieee-single-set! bv (+ 4 (* 8 i)) (+ v (bytevector-ieee-single-ref bv (+ 4 (* 8 i)) 'little)) 'little))
+          (loop (+ k 1)))))
+
+    (define (dip! bv frames s ms level)
+      (let ((st (frame s)) (n (frame (/ ms 1000.0))) (e (frame 0.002)))
+        (let loop ((k 0))
+          (when (and (< k n) (< (+ st k) frames))
+            (let* ((i (+ st k))
+                   (g (cond ((< k e) (- 1.0 (* (- 1.0 level) (/ k (* 1.0 e)))))
+                            ((> k (- n e)) (- 1.0 (* (- 1.0 level) (/ (- n k) (* 1.0 e)))))
+                            (else level))))
+              (bytevector-ieee-single-set! bv (* 8 i) (* g (bytevector-ieee-single-ref bv (* 8 i) 'little)) 'little)
+              (bytevector-ieee-single-set! bv (+ 4 (* 8 i)) (* g (bytevector-ieee-single-ref bv (+ 4 (* 8 i)) 'little)) 'little))
+            (loop (+ k 1))))))
+
+    ;; a smoothed random walk at `rate` Hz: the grind's irregular pressure
+    (define (make-grind rate)
+      (let ((target 0.0) (lp (make-onepole (* 2.0 rate))) (hold (exact (round (/ SR rate)))) (k 0))
+        (lambda ()
+          (when (= 0 (modulo k hold)) (set! target (rand)))
+          (set! k (+ k 1))
+          (lp target))))
+
+    (define (scrape! bv frames s dur level)
+      (let ((bp1 (make-bandpass 900.0 1.2)) (bp2 (make-bandpass 2800.0 2.0))
+            (rumble (make-onepole 160.0)) (grind (make-grind 38.0)) (grind2 (make-grind 9.0))
+            (pop 0.0)
+            (partials '((410.0 . 0.10) (1130.0 . 0.07) (1790.0 . 0.06) (2970.0 . 0.04))))
+        (add! bv frames (frame s) (frame (+ dur 0.12))
+              (lambda (k)
+                (let* ((t (/ k (* 1.0 SR)))
+                       (env (* (min 1.0 (/ t 0.005))
+                               (if (> t dur) (exp (/ (- dur t) 0.04)) 1.0)))
+                       (g (+ 0.55 (* 0.45 (grind)) (* 0.25 (grind2))))
+                       (n (rand))
+                       (noise (+ (bp1 n) (* 0.7 (bp2 n))))
+                       (metal (apply + (map (lambda (p) (* (cdr p) (sin (* 2.0 PI (car p) t)))) partials)))
+                       (low (+ (* 2.2 (rumble (rand))) (* 0.35 (sin (* 2.0 PI 52.0 t))))))
+                  (set! pop (if (< (abs (rand)) 0.0012) (rand) (* pop 0.93)))
+                  (* level env (+ (* g (+ (* 1.1 noise) metal)) (* (+ 0.6 (* 0.4 g)) low) (* 0.6 pop))))))))
+
+    (define (thump! bv frames s level)
+      (let ((lp (make-onepole 1500.0)) (ph 0.0))
+        (add! bv frames (frame s) (frame 0.6)
+              (lambda (k)
+                (let* ((t (/ k (* 1.0 SR)))
+                       (f (+ 42.0 (* 98.0 (exp (/ t -0.04)))))
+                       (_ (set! ph (+ ph (/ (* 2.0 PI f) SR))))
+                       (body (* (sin ph) (min 1.0 (/ t 0.002)) (exp (/ t -0.22))))
+                       (burst (* (lp (rand)) (exp (/ t -0.025))))
+                       (clang (* (exp (/ t -0.35))
+                                 (+ (* 0.12 (sin (* 2.0 PI 230.0 t))) (* 0.09 (sin (* 2.0 PI 587.0 t)))
+                                    (* 0.07 (sin (* 2.0 PI 1093.0 t))) (* 0.05 (sin (* 2.0 PI 1720.0 t)))))))
+                  (* level (+ body (* 1.4 burst) clang)))))))
+
+    (define (whoosh! bv frames s dur level)
+      (let ((bp (make-bandpass 350.0 1.5)) (ph 0.0))
+        (add! bv frames (frame s) (frame (+ dur 0.5))
+              (lambda (k)
+                (let* ((t (/ k (* 1.0 SR)))
+                       (rise (min 1.0 (/ t 0.7)))
+                       (fc (* 350.0 (expt (/ 2600.0 350.0) rise)))
+                       (env (cond ((< t 0.25) (/ t 0.25)) ((< t dur) 1.0) (else (exp (/ (- dur t) 0.15)))))
+                       (tone-f (+ 180.0 (* 340.0 rise)))
+                       (_ (set! ph (+ ph (/ (* 2.0 PI tone-f) SR)))))
+                  (when (= 0 (modulo k 64)) (bp 'tune fc 1.5))
+                  (* level env (+ (* 1.6 (bp (rand))) (* 0.18 (sin ph)) (* 0.08 (sin (* 2.0 ph))))))))))
+
+    ;; signal static under a damaged broadcast: hiss (band-passed noise
+    ;; around 4 kHz) and crackle pops at `pops` per second, over [s, s+dur)
+    (define (static! bv frames s dur pops hiss level)
+      (let ((bp (make-bandpass 4000.0 0.7)) (pop 0.0) (p (/ pops (* 1.0 SR))))
+        (add! bv frames (frame s) (frame dur)
+              (lambda (k)
+                (set! pop (if (< (* 0.5 (+ 1.0 (rand))) p) (rand) (* pop 0.9)))
+                (* level (+ (* hiss (bp (rand))) pop))))))
+
+    (define (lock! bv frames s level)
+      (add! bv frames (frame s) (frame 0.4)
+            (lambda (k)
+              (let* ((t (/ k (* 1.0 SR)))
+                     (env (* (min 1.0 (/ t 0.002)) (exp (/ t -0.11)))))
+                (* level env (+ (sin (* 2.0 PI 1174.66 t))
+                                (* 0.6 (sin (* 2.0 PI 1760.0 t)))
+                                (* 0.15 (sin (* 2.0 PI 3523.98 t)))))))))))

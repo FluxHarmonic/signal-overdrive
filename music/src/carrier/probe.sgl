@@ -1,0 +1,272 @@
+;;; (carrier probe) - The insert probe (§10, M0): do the damage inserts'
+;;; live parameters do what the damage table assumes?
+;;;
+;;; Each probe renders a test signal through one of (carrier inserts)'s
+;;; real builders, on a one-channel tune through motif's live player at
+;;; 48 kHz, and changes a parameter with `player-set-insert-param!` at a
+;;; frame T0 in the middle of the render. It measures windows before and
+;;; after T0. Every probe also runs as a CONTROL whose expected verdict is
+;;; RED: with the set skipped, and (for the chorus) with depth 0, which
+;;; must show one peak. The gate is GREEN only when every probe arm is
+;;; GREEN and every control arm is RED.
+;;;
+;;; Why not the distinct-value count §10 names: motif's master chain (a DC
+;;; blocker, a 30 Hz Butterworth high-pass, the limiter) runs after every
+;;; insert on the only output a player has, so a crushed sine's few values
+;;; come out of the player as nearly as many values as samples. The probe
+;;; prints that count to show it, then measures what survives a linear
+;;; filter: the quantisation error's RMS against a fitted sine (effective
+;;; bits), and, for rate-div, where the sample-to-sample jumps fall.
+;;;
+;;; Last line: INSERT-PROBE GREEN | RED | SETUP-FAILED
+
+(define-library (carrier probe)
+  (import (sigil core) (sigil math) (sigil list) (sigil string)
+          (motif graph) (motif tune) (motif tune player)
+          (carrier inserts) (carrier render) (carrier analysis))
+  (export run-probe)
+  (begin
+    (define SR 48000)
+    (define (say . xs) (for-each display xs) (newline))
+    (define (fx x d) (let ((k (expt 10.0 d))) (number->string (/ (round (* x k)) k))))
+    (define (sec s) (exact (round (* s SR))))
+
+    ;; one channel, no notes, the bus compressor off (so nothing nonlinear
+    ;; sits between the insert and the output but the limiter, which the
+    ;; levels stay under), looping so the player never ends
+    (define PROBE-TUNE
+      "(tune version: 1 name: \"insert-probe\" tempo: 140 speed: 3 channels: 1 meter: (8 4)
+  (bus reverb: zitarev size: 0.5 damp: 0.5 mix: 0 comp: off)
+  (instruments
+    (instrument id: 1 name: \"unused\" patch: (chip-sub) volume: 1))
+  (patterns
+    (pattern id: 0 rows: 32))
+  (order 0))")
+
+    (define setup-failures 0)
+    (define (setup-fail! what) (set! setup-failures (+ setup-failures 1)) (say "  SETUP-FAILED  " what))
+
+    ;; render `seconds` of builder's insert on channel 1, with sets: a list of
+    ;; (seconds name value); returns the mid as a vector
+    (define (run builder expect-params sets seconds)
+      (let ((p (open-tune-player (read-tune-string PROBE-TUNE) SR loop: #t
+                                 inserts: (list (cons 1 builder)))))
+        (let ((have (player-insert-params p 1)))
+          (unless (fold-left (lambda (ok n) (and ok (memq n have) #t)) #t expect-params)
+            (setup-fail! (string-append "insert params lack one of " (apply string-append (map (lambda (s) (string-append (symbol->string s) " ")) expect-params))))))
+        (let* ((sched (map (lambda (s)
+                             (cons (sec (car s))
+                                   (lambda ()
+                                     (unless (player-set-insert-param! p 1 (cadr s) (caddr s))
+                                       (setup-fail! (string-append "set " (symbol->string (cadr s)) " refused"))))))
+                           sets))
+               (r (render-player p SR sched (sec seconds))))
+          (player-close! p)
+          (bv->mid (car r) (cdr r)))))
+
+    ;; a probe arm: name, the measurement's verdict (#t green), and whether
+    ;; this arm is a control (expected red)
+    (define results '())
+    (define (arm! name green? control? detail)
+      (set! results (cons (list name green? control?) results))
+      (say "  " (if green? "GREEN" "RED  ") "  " (if control? "[control] " "") name "  -- " detail))
+
+    ;; ------------------------------------------------------------
+    ;; Chorus (the lead's insert): two peaks at 440 (1 +- 4 d r), within
+    ;; 1 cent. The built rate is 0.5 Hz, so the LFO phase is 0 at every
+    ;; 2 s; T0 = 4 s. After T0 the taps hold their pitch for each half
+    ;; cycle 1/(2r); the windows sit inside the first two half cycles,
+    ;; inset 10% from each turn.
+    ;; ------------------------------------------------------------
+    (define (sine-source f a) (lambda () (g:sine f a)))
+
+    (define (chorus-arm label d-ms r set? mix)
+      (let* ((T0 4.0) (H (/ 1.0 (* 2.0 r)))
+             (sets (if set? (list (list T0 'rate r) (list T0 'depth d-ms) (list T0 'mix mix)) '()))
+             (x (run (lead-insert (sine-source 440.0 0.5)) '(rate depth mix gain cutoff bits makeup) sets (+ T0 (* 2 H) 0.2)))
+             (shift (* 4.0 (/ d-ms 1000.0) r))
+             (lo (* 440.0 (- 1.0 shift))) (hi (* 440.0 (+ 1.0 shift)))
+             (step (max 0.05 (/ 0.2 (* 0.8 H))))
+             (win (lambda (k) ; k-th half cycle after T0
+                    (let ((a (sec (+ T0 (* H (+ k 0.1))))) (b (sec (+ T0 (* H (+ k 0.9))))))
+                      (spectral-peaks x a (- b a) SR (- lo 3.0) (+ hi 3.0) step 12.0))))
+             (judge (lambda (peaks)
+                      (and (= 2 (length peaks))
+                           (let ((fs (list-sort < (map car peaks))))
+                             (and (< (abs (cents (car fs) lo)) 1.0)
+                                  (< (abs (cents (cadr fs) hi)) 1.0))))))
+             (show (lambda (peaks)
+                     (apply string-append
+                            (map (lambda (pk) (string-append (fx (car pk) 3) " Hz (" (fx (cdr pk) 1) " dB) "))
+                                 peaks))))
+             (p0 (win 0)) (p1 (win 1))
+             (pre (spectral-peaks x (sec 2.2) (sec 1.6) SR (- lo 3.0) (+ hi 3.0) 0.1 12.0)))
+        (list label lo hi p0 p1 pre (and (judge p0) (judge p1))
+              (string-append "expected " (fx lo 3) " and " (fx hi 3) " Hz; half-cycle 1: " (show p0)
+                             "; half-cycle 2: " (show p1) "; before T0: " (show pre)))))
+
+    (define (probe-chorus)
+      (say "chorus (lead insert: rate, depth, mix), 440 Hz sine")
+      (for-each
+       (lambda (cfg)
+         (let* ((d (car cfg)) (r (cadr cfg))
+                (label (string-append "depth " (fx d 1) " ms, rate " (fx r 2) " Hz"))
+                (a (chorus-arm label d r #t 1.0)))
+           (arm! (string-append "chorus " label ": two peaks within 1 cent") (list-ref a 6) #f (list-ref a 7))
+           (let ((s (chorus-arm label d r #f 1.0)))
+             (arm! (string-append "chorus " label ", set skipped") (list-ref s 6) #t (list-ref s 7)))))
+       '((8.0 0.1) (3.0 0.5)))
+      ;; §10's negative control: depth 0 shows ONE peak, at 440 within 1 cent
+      (let* ((z (chorus-arm "depth 0, rate 0.5 Hz" 0.0 0.5 #t 1.0))
+             (p0 (list-ref z 3))
+             (one? (and (= 1 (length p0)) (< (abs (cents (car (car p0)) 440.0)) 1.0))))
+        (arm! "chorus depth 0: two peaks" (list-ref z 6) #t (list-ref z 7))
+        (arm! "chorus depth 0: exactly one peak, at 440 Hz" one? #f (list-ref z 7))))
+
+    ;; ------------------------------------------------------------
+    ;; Crush bits (the drum insert): a full-scale sine; bits set at T0 = 1 s.
+    ;; ------------------------------------------------------------
+    (define (probe-bits)
+      (say "crush bits (drum insert), full-scale 440 Hz sine")
+      (for-each
+       (lambda (b)
+         (for-each
+          (lambda (set?)
+            (let* ((T0 1.0)
+                   (x (run (drum-insert (sine-source 440.0 1.0)) '(bits rate-div drive gain)
+                           (if set? (list (list T0 'bits (inexact b))) '()) 1.8))
+                   (pre-a (sec 0.3)) (post-a (sec (+ T0 0.1))) (n (sec 0.6))
+                   (pre (effective-bits x pre-a n SR 440.0))
+                   (post (effective-bits x post-a n SR 440.0))
+                   (ok (and (>= pre 15.0) (< (abs (- post b)) 0.5))))
+              (arm! (string-append "bits " (number->string b) (if set? "" ", set skipped"))
+                    ok (not set?)
+                    (string-append "effective bits before " (fx pre 2) ", after " (fx post 2)
+                                   "; output peak " (fx (peak x post-a n) 3)
+                                   "; distinct values after: " (number->string (distinct-count x post-a (sec 0.1)))
+                                   " in " (number->string (sec 0.1)) " samples (the master chain's filters smear them)"))))
+          '(#t #f)))
+       '(12 9 6)))
+
+    ;; ------------------------------------------------------------
+    ;; Rate-div (the drum insert): a 2999.7 Hz sine at 0.5, so nearly every
+    ;; sample-to-sample step is large; after the set, large steps only every
+    ;; n samples. eps is 5% of the output's peak (a held value drifts by
+    ;; about 1% a sample through the master DC blocker).
+    ;; ------------------------------------------------------------
+    (define (probe-rate-div)
+      (say "crush rate-div (drum insert), 2999.7 Hz sine")
+      (for-each
+       (lambda (n)
+         (for-each
+          (lambda (set?)
+            (let* ((T0 1.0)
+                   (x (run (drum-insert (sine-source 2999.7 0.5)) '(bits rate-div)
+                           (if set? (list (list T0 'rate-div (inexact n))) '()) 1.6))
+                   (a (sec (+ T0 0.1))) (len (sec 0.4))
+                   (eps (* 0.05 (peak x a len)))
+                   (h (hold-pattern x a len n eps))
+                   (pre (hold-pattern x (sec 0.4) len n eps))
+                   (ok (and (< (vector-ref h 1) eps) (>= (vector-ref h 2) 0.8)
+                            (not (< (vector-ref pre 1) eps)))))
+              (arm! (string-append "rate-div " (number->string n) (if set? "" ", set skipped"))
+                    ok (not set?)
+                    (string-append "after: largest step inside a hold " (fx (/ (vector-ref h 1) eps) 3)
+                                   " eps, boundaries above eps " (fx (* 100 (vector-ref h 2)) 1)
+                                   "%; before: largest in-hold step " (fx (/ (vector-ref pre 1) eps) 2) " eps"))))
+          '(#t #f)))
+       '(2 4)))
+
+    ;; ------------------------------------------------------------
+    ;; Gain (dropouts) on the lead, and the bass's low-pass cutoff
+    ;; ------------------------------------------------------------
+    (define (probe-gain-and-cutoff)
+      (say "gain (lead insert) and cutoff (bass insert)")
+      (for-each
+       (lambda (set?)
+         (let* ((x (run (lead-insert (sine-source 880.0 0.5)) '(gain) (if set? '((1.0 gain 0.0)) '()) 1.5))
+                (pre (rms x (sec 0.4) (sec 0.5))) (post (rms x (sec 1.05) (sec 0.4)))
+                (drop (- (db (* pre pre)) (db (max (* post post) 1e-40)))))
+           (arm! (string-append "gain 0 is silence (>= 90 dB down from 50 ms after the set: the master filters ring for that long)" (if set? "" ", set skipped"))
+                 (>= drop 90.0) (not set?)
+                 (string-append (fx drop 1) " dB down; by 50 ms window after the set:"
+                                (apply string-append
+                                       (map (lambda (k)
+                                              (let ((w (rms x (+ (sec 1.0) (* k (sec 0.05))) (sec 0.05))))
+                                                (string-append " " (fx (- (db (* pre pre)) (db (max (* w w) 1e-40))) 1))))
+                                            '(0 1 2 3 4 5 6 7 8 9)))
+                                " dB down"))))
+       '(#t #f))
+      ;; the low-pass is two Butterworth stages sharing `cutoff`; each stage
+      ;; is soundpipe's bilinear butlp, |H|^2 = 1 / (1 + (tan(pi f/sr) /
+      ;; tan(pi fc/sr))^4), so a 4 kHz sine under a 2 kHz cutoff falls by
+      ;; 2 x 10 log10(1 + r^4) dB: 25.2. One stage alone would read 12.6.
+      (for-each
+       (lambda (set?)
+         (let* ((f 4000.0) (fc 2000.0)
+                (r (/ (tan (/ (* 3.141592653589793 f) SR)) (tan (/ (* 3.141592653589793 fc) SR))))
+                (want (* 2 10.0 (/ (log (+ 1.0 (* r r r r))) (log 10.0))))
+                (x (run (bass-insert (sine-source f 0.5)) '(cutoff gain) (if set? (list (list 1.0 'cutoff fc)) '()) 1.5))
+                (pre (rms x (sec 0.4) (sec 0.5))) (post (rms x (sec 1.1) (sec 0.3)))
+                (drop (- (db (* pre pre)) (db (max (* post post) 1e-40)))))
+           (arm! (string-append "cutoff 2 kHz takes 4 kHz down " (fx want 1) " dB (+-1)" (if set? "" ", set skipped"))
+                 (< (abs (- drop want)) 1.0) (not set?) (string-append (fx drop 2) " dB down"))))
+       '(#t #f)))
+
+    ;; ------------------------------------------------------------
+    ;; Timing: a set lands on the sample it names. The lead's gain goes to 0
+    ;; at an odd frame (not a pull boundary); the render is compared with one
+    ;; whose set is skipped, and the first differing sample must be that
+    ;; frame. The control judges a set made 256 frames late against the
+    ;; same frame, so it must go red.
+    ;; ------------------------------------------------------------
+    (define (probe-timing)
+      (say "timing (lead insert gain)")
+      (let* ((at (+ SR 137))
+             (render (lambda (frame-of-set)
+                       (let ((p (open-tune-player (read-tune-string PROBE-TUNE) SR loop: #t
+                                                  inserts: (list (cons 1 (lead-insert (sine-source 880.0 0.5)))))))
+                         (let ((r (render-player p SR
+                                                 (if frame-of-set
+                                                     (list (cons frame-of-set (lambda () (player-set-insert-param! p 1 'gain 0.0))))
+                                                     '())
+                                                 (+ at 4096))))
+                           (player-close! p)
+                           (bv->mid (car r) (cdr r))))))
+             (base (render #f))
+             (first-diff (lambda (x)
+                           (let loop ((k 0))
+                             (cond ((>= k (vector-length x)) #f)
+                                   ((> (abs (- (vector-ref x k) (vector-ref base k))) 1e-9) k)
+                                   (else (loop (+ k 1)))))))
+             (on-time (first-diff (render at)))
+             (late (first-diff (render (+ at 256)))))
+        (arm! "a set lands on the frame it names" (and on-time (= on-time at)) #f
+              (string-append "set at frame " (number->string at) ", first differing sample "
+                             (if on-time (number->string on-time) "none")))
+        (arm! "a set 256 frames late, judged against the same frame" (and late (= late at)) #t
+              (string-append "first differing sample " (if late (number->string late) "none")))))
+
+    (define (run-probe)
+      (say "insert probe: motif's live player at " (number->string SR) " Hz, sets by player-set-insert-param! mid-render")
+      (probe-chorus)
+      (probe-bits)
+      (probe-rate-div)
+      (probe-gain-and-cutoff)
+      (probe-timing)
+      (let* ((rs (reverse results))
+             (probes (filter (lambda (r) (not (caddr r))) rs))
+             (controls (filter caddr rs))
+             (bad-probes (filter (lambda (r) (not (cadr r))) probes))
+             (bad-controls (filter cadr controls)))
+        (say "")
+        (say "probe arms " (number->string (length probes)) " (green " (number->string (- (length probes) (length bad-probes)))
+             "), control arms " (number->string (length controls)) " (red " (number->string (- (length controls) (length bad-controls))) ")")
+        (for-each (lambda (r) (say "  probe not green: " (car r))) bad-probes)
+        (for-each (lambda (r) (say "  control not red: " (car r))) bad-controls)
+        (cond
+          ((or (> setup-failures 0) (null? probes) (null? controls))
+           (say "INSERT-PROBE SETUP-FAILED") 2)
+          ((and (null? bad-probes) (null? bad-controls))
+           (say "INSERT-PROBE GREEN") 0)
+          (else (say "INSERT-PROBE RED") 1))))))

@@ -1,0 +1,27 @@
+;;; carrier-music - Signal Overdrive's M0: the 0.1 song "Carrier", the
+;;; insert probe, and the offline renders of the audition and the damage
+;;; audition. Its own package so the game's manifest stays untouched while
+;;; the conductor is built beside it.
+;;;
+;;;   cd music && sigil deps install && sigil build
+;;;   build/dev/bin/carrier probe          the insert probe (a gate: last line GREEN/RED)
+;;;   build/dev/bin/carrier tune OUT.cts   write the composed tune
+;;;   build/dev/bin/carrier render ...     offline renders (see (carrier main))
+
+(package
+  name: "carrier-music"
+  version: "0.1.0"
+  sigil: "0.22.11"
+  description: "Signal Overdrive's 0.1 song, its insert probe and its offline renders"
+  license: "GPL-3.0-or-later"
+  authors: (list "David Wilson <david@daviwil.com>")
+  entry: '(carrier main)
+  bundle-name: "carrier"
+  configs: (list
+    (config name: 'dev output-dir: "build/dev" debug?: #t optimize: 0 bundle?: #t)
+    (config name: 'release output-dir: "build/release" debug?: #f optimize: 2 backend: 'native bundle?: #t))
+  dependencies: (list
+    (from-git url: "codeberg:sigil/motif" version: "^0.8.1"))
+  tasks: (list
+    (task name: 'build description: "Compile the music tools"
+      steps: (list (compile-sigil-modules sources: "src/**/*.sgl")))))

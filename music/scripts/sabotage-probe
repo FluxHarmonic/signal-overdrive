@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Product-layer sabotage of the insert probe: each plant miswires one
+# parameter inside (carrier inserts) while keeping the built (clean)
+# values, rebuilds release, runs the probe, and restores by hash.
+set -u
+cd /home/daviwil/Projects/Code/sigil/task-signal-m0/music
+OUT=/tmp/claude-1000/sabotage-$(date +%s); mkdir -p $OUT
+plant() { # name file awk-program expected-changed-lines
+  local name=$1 F=$2 prog=$3 want=$4
+  local ORIG; ORIG=$(sha256sum $F | cut -d" " -f1)
+  [ "$ORIG" = "$(git show HEAD:music/$F | sha256sum | cut -d" " -f1)" ] || { echo "REFUSING: $F differs from HEAD"; exit 2; }
+  awk "$prog" $F > $OUT/$name.sgl
+  local changed; changed=$(diff $F $OUT/$name.sgl | grep -c '^>')
+  [ "$changed" -eq "$want" ] || { echo "PLANT $name DID NOT LAND (changed $changed, want $want)"; return 1; }
+  cp $OUT/$name.sgl $F
+  [ "$(sha256sum $F | cut -d' ' -f1)" != "$ORIG" ] || { echo "PLANT $name: hash unchanged"; return 1; }
+  nice sigil build --config release > $OUT/$name.build 2>&1 || { echo "PLANT $name: build failed (SETUP-FAILED)"; git checkout -q HEAD -- $F; return 1; }
+  nice ./build/release/bin/carrier probe > $OUT/$name.log 2>&1; local rc=$?
+  echo "== $name: rc=$rc, $(tail -1 $OUT/$name.log)"
+  grep -E 'probe not green|control not red' $OUT/$name.log
+  git checkout -q HEAD -- $F
+  [ "$(sha256sum $F | cut -d' ' -f1)" = "$ORIG" ] || { echo "RESTORE FAILED for $name"; exit 3; }
+  echo "   restored $(date +%T), hash ok"
+}
+plant bits-into-rate-div src/carrier/inserts.sgl '{ if ($0 ~ /g:param .bits 16.0 1.0 16.0/) sub(/.bits 16.0 1.0 16.0/, "'"'"'rate-div 16.0 1.0 16.0"); else if ($0 ~ /g:param .rate-div 1.0 1.0 64.0/) sub(/.rate-div 1.0 1.0 64.0/, "'"'"'bits 1.0 1.0 64.0"); print }' 2
+plant chorus-rate-depth-swapped src/carrier/inserts.sgl '{ if ($0 ~ /g:param .rate 0.5 0.0 20.0/) sub(/.rate 0.5 0.0 20.0/, "'"'"'depth 0.5 0.0 20.0"); else if ($0 ~ /g:param .depth 0.0 0.0 20.0/) sub(/.depth 0.0 0.0 20.0/, "'"'"'rate 0.0 0.0 20.0"); print }' 2
+plant gain-disconnected src/carrier/inserts.sgl '{ if ($0 ~ /define \(gain-stage x\) \(g:mul x \(g:param .gain 1.0 0.0 1.0\)\)/) $0 = "    (define (gain-stage x) (g:add x (g:mul (g:param '"'"'gain 1.0 0.0 1.0) 0.0)))"; print }' 1
+plant lowpass-one-stage src/carrier/inserts.sgl '{ if ($0 ~ /\(g:butlp \(g:butlp x \(g:param .cutoff hi 20.0 hi\)\) \(g:param .cutoff hi 20.0 hi\)\)\)\)/) $0 = "        (g:butlp x (g:param '"'"'cutoff hi 20.0 hi))))"; print }' 1
+plant sets-at-block-start src/carrier/render.sgl '{ if ($0 ~ /\(limit \(if \(pair\? sched\) \(min \(car \(car sched\)\) max-frames\) max-frames\)\)/) sub(/\(limit \(if \(pair\? sched\) \(min \(car \(car sched\)\) max-frames\) max-frames\)\)/, "(limit max-frames)"); print }' 1
+nice sigil build --config release > $OUT/final.build 2>&1 && nice ./build/release/bin/carrier probe > $OUT/final.log 2>&1; echo "== restored tree: $(tail -1 $OUT/final.log)"
+echo "logs in $OUT"
