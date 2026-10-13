@@ -149,8 +149,6 @@
           (fade-out! bv frames (exact (round (* 2.5 SR))))
           (write-wav16 out bv frames SR 1.0)
           (report (if menu? "looping, menu (no drums, 4-8 at 1500 Hz)" "looping") in out frames bv)
-          (say "theme: loop sample " (number->string (or (player-loop-sample p) -1))
-               " (where the walk loops back to, in samples at the render's rate)")
           0)))
 
     ;; chs: the channels to solo (all eight when empty)

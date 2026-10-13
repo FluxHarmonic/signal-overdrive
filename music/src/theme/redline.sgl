@@ -25,8 +25,9 @@
 ;;;   28-35  B2       the bridge again at full time: the overdriven lead
 ;;;                   takes it with Carrier's lead an octave above, the arp
 ;;;                   returns, then two bars of A that rise into the hook
-;;;   36-43  A3       the hook at full strength: doubled throughout, the arp,
-;;;                   a 16th bass with Carrier's octave jumps, open ticks
+;;;   36-43  A3       the hook at full strength: the arp, a 16th bass with
+;;;                   Carrier's octave jumps, open ticks; Carrier's lead holds
+;;;                   the chords' thirds, then doubles the climb
 ;;;   (loop to bar 4)
 ;;;
 ;;; Channels (the race songs' layout, so every stem is separable):
@@ -90,6 +91,8 @@
     ;; B2's last two bars: up the A-major chord, bent into A, then the
     ;; hook's last bar (A B-flat A, C sharp) into the hook
     (define RISE '((0 4 Cs 5 42) (4 4 E 5 44) (8 8 A 5 46 bend G 5 8)))
+    ;; the thirds of Dm C Bb A, as the pad voices them
+    (define GUIDE-TONES (list (midi 'F 4) (midi 'E 4) (midi 'D 4) (midi 'Cs 4)))
 
     (define (add-vol entries dv)
       (map (lambda (e) (cons (car e) (cons (cadr e) (cons (caddr e) (cons (cadddr e) (cons (+ dv (list-ref e 4)) (list-tail e 5)))))))
@@ -122,12 +125,16 @@
       (cat-map (lambda (k) (note 3 (+ at 12 (* k 0.5)) 0.5 TICK-PITCH I-TICK (+ 14 (* 2 k)))) (span 0 8)))
 
     ;; the hook section's drums (A, A2, A3): four on the floor, the
-    ;; backbeat, a push and a fill into each D-minor bar
-    (define (hook-drums at hb ticks-soft open-every-bar?)
+    ;; backbeat, a push and a fill into each D-minor bar. A section's first
+    ;; bar has the crash on the snare's channel and no snare on beat 2: a
+    ;; snare there would take the channel's voice and cut the crash at
+    ;; 0.43 s (the crash's gate is 0.86 s).
+    (define (hook-drums at hb ticks-soft open-every-bar? crash-bar?)
       (let ((into-d? (memv hb '(3 7))))
         (append
          (kick at (if into-d? (append FOUR '((14 32))) FOUR))
-         (snare at (cond ((= hb 7) '((4 44) (12 40) (13 30) (14 36) (15 42)))
+         (snare at (cond (crash-bar? '((12 46)))
+                         ((= hb 7) '((4 44) (12 40) (13 30) (14 36) (15 42)))
                          ((= hb 3) '((4 44) (12 46) (14 18) (15 24)))
                          ((odd? hb) '((4 44) (12 46) (15 14)))
                          (else '((4 44) (12 46)))))
@@ -149,7 +156,9 @@
           ((intro)
            (append
             (pad at chord 16 34)
-            (line-plain 8 I-SIGNAL at (list-ref HOOK k) 0 42)
+            ;; under the overdriven lead's level, so the handover at bar 4 is
+            ;; an arrival (at 42 Carrier's lead measured 5 dB RMS above it)
+            (line-plain 8 I-SIGNAL at (list-ref HOOK k) 0 24)
             (case k
               ((0) (append (kick at '((0 46))) (crash at 44)
                            (note 4 at 8 (bass-root 'D) I-BASS 44)
@@ -167,7 +176,7 @@
           ((a a2)
            (let ((second? (eq? (car s) 'a2)))
              (append
-              (hook-drums at hb (if second? 14 12) #f)
+              (hook-drums at hb (if second? 14 12) #f (= k 0))
               (if (= k 0) (crash at 44) '())
               (redline-bass at chord (memv hb '(3 7)) 40)
               (pad at chord 16 34)
@@ -185,13 +194,13 @@
             (half-time-bass at (bass-root (car chord)) 38 #f)
             (pad at chord 16 30)
             (if (< k 4)
-                (line 8 I-SIGNAL at (list-ref BRIDGE-CALL k))
+                (line 8 I-SIGNAL at (add-vol (list-ref BRIDGE-CALL k) -18))
                 (line 6 I-OVERDRIVE at (list-ref BRIDGE-ANSWER (- k 4))))))
           ((b2)
            (append
             (cond ((< k 4)
                    (append (kick at (cond ((= k 3) KICK-PUSH) ((odd? k) KICK-B) (else KICK-A)))
-                           (snare at '((4 44) (12 46)))
+                           (snare at (if (= k 0) '((12 46)) '((4 44) (12 46))))
                            (ticks at (span 0 16) CARRIER-ACCENTS 28 14)))
                   ((< k 6)
                    (append (kick at FOUR) (snare at '((4 44) (12 46)))
@@ -210,26 +219,33 @@
             (arp-bar at chord 24)
             (cond ((< k 4)
                    (append (line 6 I-OVERDRIVE at (add-vol (list-ref BRIDGE-CALL k) 2))
-                           (line-plain 8 I-SIGNAL at (list-ref BRIDGE-CALL k) 12 20)))
+                           (line-plain 8 I-SIGNAL at (list-ref BRIDGE-CALL k) 12 14)))
                   ((< k 6) (line 6 I-OVERDRIVE at (list-ref BRIDGE-ANSWER (- k 4))))
                   ((= k 6) (line 6 I-OVERDRIVE at RISE))
                   (else (line 6 I-OVERDRIVE at (list-ref HOOK 7))))))
           ((a3)
            (append
-            (hook-drums at hb 16 #t)
+            (hook-drums at hb 16 #t (= k 0))
             (if (= k 0) (crash at 44) '())
             (drive-bass at chord (memv hb '(3 7)) 40)
             (pad at chord 16 36)
             (line 6 I-OVERDRIVE at (list-ref HOOK hb))
             (arp-bar at chord 26)
-            (line-plain 8 I-SIGNAL at (list-ref HOOK hb) -12 16)))
+            ;; Carrier's lead: the chords' thirds held under the first half
+            ;; (F E D C sharp, the pad's inner voice: an octave-down doubling
+            ;; there put the hook's passing tones a semitone from the pad),
+            ;; then the octave-down doubling of the climb, as in A2
+            (if (< hb 4)
+                (note 8 at 16 (list-ref GUIDE-TONES hb) I-SIGNAL 18)
+                (line-plain 8 I-SIGNAL at (list-ref HOOK hb) -12 16))))
           (else (error "theme: unknown section" s)))))
 
     (define (theme-events) (cat-map theme-bar (span 0 NBARS)))
 
-    ;; marks: `intro` (bar 0) and `calm` (bar 4, the loop body; motif
-    ;; requires a calm mark). Their regions are the intro and the body.
+    ;; one mark, `calm` at bar 4: its region is the loop body (motif requires
+    ;; a calm mark). No mark on the intro: jumping to one would loop its four
+    ;; bars. To start over from the top, (player-jump! p 0 0).
     (define (theme-text)
       (events->tune-text "Signal Overdrive main theme: Redline" THEME-TEMPO NBARS (theme-events)
                          (bus-text) (theme-bank-text)
-                         #f (list (cons 'intro 0) (cons 'calm INTRO-BARS)) INTRO-BARS))))
+                         #f (list (cons 'calm INTRO-BARS)) INTRO-BARS))))

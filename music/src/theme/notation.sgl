@@ -181,23 +181,32 @@
 
     (define (range n) (let loop ((i (- n 1)) (acc '())) (if (< i 0) acc (loop (- i 1) (cons i acc)))))
 
-    ;; A looping tune (loop-to = a bar, one pattern per bar): the last row
-    ;; gets a Bxx jump back to that bar's order position, on the highest
-    ;; channel free there, and a release that falls on the row just past
-    ;; the end is written on the loop target's first row instead, unless a
-    ;; cell is already there (an onset there takes the voice over anyway).
+    ;; A looping tune (loop-to = a bar, one pattern per bar, the default
+    ;; order): the last row gets a Bxx jump back to that bar's order
+    ;; position, on the highest channel free there, and a release that falls
+    ;; on the row just past the end is written on the loop target's first row
+    ;; instead. If a note or release is already there, it takes over; an
+    ;; effect-only cell there is an error (the release would be lost).
+    ;; The wrapped release also plays when the intro reaches the loop
+    ;; target, so a note held from the intro across that row would be cut:
+    ;; give every channel an onset or a release there.
     (define (loop-cells cells nbars loop-to)
       (let* ((end (* 32 nbars))
              (target (* 32 loop-to))
-             (taken? (lambda (row ch cs) (let find ((cs cs))
-                                           (cond ((null? cs) #f)
-                                                 ((and (= (car (car cs)) row) (= (cadr (car cs)) ch)) #t)
-                                                 (else (find (cdr cs)))))))
+             (cell-at (lambda (row ch cs) (let find ((cs cs))
+                                            (cond ((null? cs) #f)
+                                                  ((and (= (car (car cs)) row) (= (cadr (car cs)) ch)) (car cs))
+                                                  (else (find (cdr cs)))))))
+             (taken? (lambda (row ch cs) (and (cell-at row ch cs) #t)))
              (inside (filter (lambda (c) (< (car c) end)) cells))
              (wrapped (let loop ((cs (filter (lambda (c) (= (car c) end)) cells)) (acc inside))
                         (cond ((null? cs) acc)
-                              ((taken? target (cadr (car cs)) acc) (loop (cdr cs) acc))
-                              (else (loop (cdr cs) (cons (cons target (cdr (car cs))) acc))))))
+                              (else
+                               (let ((there (cell-at target (cadr (car cs)) acc)))
+                                 (cond ((not there) (loop (cdr cs) (cons (cons target (cdr (car cs))) acc)))
+                                       ((equal? (caddr there) "...")
+                                        (error "score: a wrapped release lands on an effect cell" there))
+                                       (else (loop (cdr cs) acc))))))))
              (jump-ch (let pick ((ch 8))
                         (cond ((< ch 1) (error "score: no channel free for the loop's jump on the last row"))
                               ((taken? (- end 1) ch wrapped) (pick (- ch 1)))
@@ -210,6 +219,8 @@
       (let* ((order (if (and (pair? opt) (car opt)) (car opt) (range nbars)))
              (marks (if (and (pair? opt) (pair? (cdr opt))) (cadr opt) '()))
              (loop-to (and (pair? opt) (pair? (cdr opt)) (pair? (cddr opt)) (caddr opt)))
+             (_ (when (and loop-to (car opt))
+                  (error "score: loop-to needs the default order (bar n at position n)")))
              (cells (uniq-cells (events->cells events)))
              (_ (for-each (lambda (c)
                             (when (or (< (car c) 0) (> (car c) (* 32 nbars))
