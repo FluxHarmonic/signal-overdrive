@@ -93,31 +93,24 @@
         (decal-init! VIEW-W VIEW-H)
         (intro-set-mark! (texture "fh-mark.png"))
         ;; Warm everything the frame loop does before publishing music: draw
-        ;; AND present two zero-dt frames, and make the loop's own per-frame
-        ;; calls once (scaler, gamepad, keys). A first use can be slow (a
-        ;; drawn frame is compiled and run at the present; the first gamepad
-        ;; read initializes the joystick backend), and after audio start a
-        ;; stall longer than the 250 ms music ring is heard as a gap: 19695,
-        ;; 17647 and 18671 sounding underrun frames at the title in native
-        ;; races. Zero-dt frames cannot advance the simulation or open audio.
-        (let ((t0 (current-second)))
-          (let warm ((n 0))
-            (when (< n 2)
-              (core-frame! 0.0 (frame-width) (frame-height) #t)
-              (wait-frame)
-              (core-startup-mark! "warm-present")
-              (window-scaler-frame! scaler)
-              (core-startup-mark! "warm-scaler")
-              (pad-poll! (core-pad))
-              (core-startup-mark! "warm-pad")
-              (keys-poll! (core-keys) KEYS)
-              (core-startup-mark! "warm-keys")
-              (warm (+ n 1))))
-          (display (string-append "signal-overdrive: renderer warm-up "
-                                  (number->string (exact (round (* 1000 (- (current-second) t0)))))
-                                  " ms"))
-          (newline))
-        (core-startup-mark! "warm-up")
+        ;; AND present two zero-dt frames, and make the loop's own slow
+        ;; first calls once. A drawn frame is compiled and run at the
+        ;; present, and the first gamepad read initializes the joystick
+        ;; backend (674 ms measured). After audio start a stall longer than
+        ;; the 250 ms music ring is heard as a gap: 17647-19695 sounding
+        ;; underrun frames at the title in native races. Zero-dt frames
+        ;; cannot advance the simulation or open audio, and keys are not
+        ;; read here, so nothing pressed during startup acts.
+        (let warm ((n 0))
+          (when (< n 2)
+            (core-frame! 0.0 (frame-width) (frame-height) #t)
+            (wait-frame)
+            (core-startup-mark! "warm-present")
+            (window-scaler-frame! scaler)
+            (pad-poll! (core-pad))
+            (core-startup-mark! "warm-scaler-and-pad")
+            (warm (+ n 1))))
+        (keys-clear! (core-keys))
         ;; Device/streams start after window, textures and warm drawing.
         (core-audio-start!)
         (let ((t0 (current-second)))

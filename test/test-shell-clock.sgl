@@ -6,6 +6,7 @@
         (signal music conductor)
         (signal music clock)
         (signal tuning)
+        (signal shell music)
         (signal shell core))
 
 (set-store-root! "/tmp/signal-conductor-shell-test-store")
@@ -81,8 +82,13 @@
     (assert-equal 0 (conductor-tick (race-song (core-race))))))
 
 (test-group "shell: catch-up limit"
+  ;; A stall the music ring survives must cost the race no time: the
+  ;; default catch-up is the ring's target depth in ticks.
   (test "the catchup-ticks knob defaults to the music ring's depth"
-    (assert-equal CATCH-UP-STEPS (exact (round (tuning-ref (tuning-defaults) (quote catchup-ticks)))))))
+    (let ((ring-ms (list-ref (music-readout) 1)))
+      (assert-equal (exact (round (* 60 (/ ring-ms 1000.0))))
+                    (exact (round (tuning-ref (tuning-defaults) (quote catchup-ticks)))))
+      (assert-equal CATCH-UP-STEPS (exact (round (tuning-ref (tuning-defaults) (quote catchup-ticks))))))))
 
 (test-group "shell: deliberate clock-skew arm"
   (test "the skew arm plants 1% even with audio muted, and none restores wall time"
