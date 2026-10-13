@@ -6,7 +6,7 @@
 ;;;   carrier stats IN.wav-less: see render's printed peak and RMS
 
 (define-library (carrier main)
-  (import (sigil core) (sigil io) (sigil string) (sigil math) (sigil process)
+  (import (sigil core) (sigil io) (sigil string) (sigil math) (sigil process) (sigil fs) (sigil crypto)
           (motif tune) (motif tune player)
           (carrier score) (carrier render) (carrier analysis) (carrier probe) (carrier damage))
   (export main)
@@ -17,11 +17,33 @@
       (let* ((k (expt 10.0 d)) (r (/ (round (* x k)) k)))
         (number->string r)))
 
+    ;; Writes the generated tune, and OUT.sha256 beside it: the hash of what
+    ;; was written. It refuses to overwrite OUT if OUT no longer matches
+    ;; that hash (it was edited in the tracker since), unless OUT already
+    ;; equals the new output. Fold a tracker edit into score.sgl, or move
+    ;; the edited file aside, then regenerate. Crash's song builder guards
+    ;; its generated scores the same way; there is no force flag.
     (define (cmd-tune out)
-      (let ((t (audition-tune)))
-        (write-tune-file t out)
-        (say "carrier: wrote " out " (" (number->string (length (tune-order t))) " bars)")
-        0))
+      (let* ((t (audition-tune))
+             (text (tune->string t))
+             (new-hash (sha256 text))
+             (side (string-append out ".sha256"))
+             (cur (and (file-exists? out) (sha256 (read-file-string out))))
+             (last (and (file-exists? side) (string-trim (read-file-string side)))))
+        (cond
+          ((and cur (not (equal? cur new-hash)) (not (equal? cur last)))
+           (say "carrier: REFUSING to overwrite " out ": "
+                (if last
+                    "it changed since it was generated (a tracker edit?)."
+                    (string-append "there is no " side " to show it is generated output."))
+                " Fold the edit into src/carrier/score.sgl or move the file aside, then regenerate.")
+           1)
+          (else
+           (write-file-string out text)
+           (write-file-string side (string-append new-hash "\n"))
+           (say "carrier: wrote " out " (" (number->string (length (tune-order t))) " bars)"
+                (if (equal? cur new-hash) ", unchanged" ""))
+           0))))
 
     (define (cmd-render in out sr)
       (let* ((t (read-tune-file in))

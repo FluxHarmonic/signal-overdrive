@@ -48,9 +48,10 @@
        "  (instruments\n"
        ;; 1: a short sine thud with a click on top (the fm index is the click)
        "    (instrument id: 1 name: \"thud\" patch: (chip-kick decay: 0.17 drive: 0.6 index: 1.3 sweep: 2.6 sweep-decay: 0.018) volume: 46 pan: 0)\n"
-       ;; 2: a dry, tight clap with a metallic tick layered on its attack
-       "    (instrument id: 2 name: \"dry-clap\" patch: (chip-clap cutoff: 5600 decay: 0.045 gain: 0.85 hp: 1200 spacing: 0.006) volume: 36 send: 0.03 pan: 0"
-       " layers: ((chip-hat crush-bits: 12 decay: 0.018 hp: 6500 metal: 0.7 noise: 0.1 octave: 0 volume: 0.45)))\n"
+       ;; 2: the snare: a short FM body and noise, the dry clap layered on it,
+       ;; and the metallic tick on its attack (David: "there's no snare")
+       "    (instrument id: 2 name: \"snare-clap\" patch: (chip-snare body: 0.6 crush-bits: 12 hp: 1500 noise: 0.6 noise-decay: 0.12) volume: 40 gain: 0.7 send: 0.06 pan: 0"
+       " layers: ((chip-clap cutoff: 5600 decay: 0.045 gain: 0.85 hp: 1200 spacing: 0.006 octave: 0 volume: 0.55) (chip-hat crush-bits: 12 decay: 0.018 hp: 6500 metal: 0.7 noise: 0.1 octave: 0 volume: 0.3)))\n"
        ;; 3, 4: closed clicks on the 16ths, and a longer one for turnarounds
        "    (instrument id: 3 name: \"tick\" patch: (chip-hat crush-bits: 14 decay: 0.022 hp: 5600 metal: 0.4 noise: 0.18) volume: 20 pan: 0.2)\n"
        "    (instrument id: 4 name: \"tick-open\" patch: (chip-hat crush-bits: 14 decay: 0.09 hp: 5600 metal: 0.35 noise: 0.2) volume: 18 pan: 0.2)\n"
@@ -154,9 +155,58 @@
     (define (letter-of c) (car c))
 
     ;; ------------------------------------------------------------
+    ;; Drums (revised after David's listen, 2026-10-13: "there's no snare
+    ;; and the kick hits don't really feel interesting rhythmically").
+    ;; A two-bar kick phrase: bar A pushes against the backbeat (1, the
+    ;; "and" of 2, the "and" of 3), bar B echoes the call's 3+3+2 (1, the
+    ;; fourth 16th, 3, the last 16th of 3); every fourth bar pushes into the
+    ;; next (13, 14). The snare (a snare with the clap layered on it) is on
+    ;; 2 and 4, with ghosts in lap 2 and fills into the section changes.
+    ;; Positions are 16ths in the bar; each entry is (pos vol).
+    ;; ------------------------------------------------------------
+    (define KICK-A '((0 46) (6 40) (10 44)))
+    (define KICK-B '((0 46) (3 36) (8 44) (11 40)))
+    (define KICK-PUSH '((0 46) (6 40) (10 44) (13 30) (14 42)))
+    (define BACKBEAT '((4 44) (12 46)))
+
+    (define (hits ch inst m at entries)
+      (map (lambda (e) (ev ch (+ at (car e)) 1 m inst (cadr e))) entries))
+    (define (kick-hits at entries) (hits 1 I-KICK (midi 'D 2) at entries))
+    (define (snare-hits at entries) (hits 2 I-CLAP (midi 'D 3) at entries))
+
+    ;; the snare fill into lap 2 (lap 1's last bar): 16ths from beat 3 rising,
+    ;; 32nds on the last beat
+    (define SNARE-FILL-LONG '((4 44) (8 26) (10 30) (12 34) (13 36) (14 38) (14.5 40) (15 42) (15.5 46)))
+    ;; lap 2's loop turnaround: the last beat
+    (define SNARE-FILL-SHORT '((4 44) (12 40) (13 32) (14 38) (15 44)))
+
+    (define (lap1-drums at b)
+      (let ((four (modulo b 4)))
+        (append
+         (kick-hits at (cond ((= b 15) '((0 46) (6 40) (10 44)))
+                             ((= four 3) KICK-PUSH)
+                             ((odd? b) KICK-B)
+                             (else KICK-A)))
+         (snare-hits at (cond ((< b 4) '((12 40)))                   ; the verse opens half-time
+                              ((= b 15) SNARE-FILL-LONG)
+                              ((memv b '(7 11)) (append BACKBEAT '((15 14))))
+                              (else BACKBEAT))))))
+
+    (define (lap2-drums at b)
+      (let ((four (modulo b 4)))
+        (append
+         (kick-hits at (cond ((= four 3) KICK-PUSH)
+                             ((odd? b) (append KICK-B '((15 22))))   ; a ghost kick into A
+                             (else KICK-A)))
+         (snare-hits at (cond ((= b 7) SNARE-FILL-SHORT)
+                              ((= four 3) (append BACKBEAT '((14 30) (15 36))))
+                              ((odd? b) (append BACKBEAT '((7 14) (9 12))))
+                              (else (append BACKBEAT '((15 16)))))))))
+
+    ;; ------------------------------------------------------------
     ;; lap1: the verse, 16 bars, the loop is bars 9 to 16.
-    ;; Bars 1-4: kick, ticks, bass and the call; bars 5-8 add the clap and
-    ;; stabs; bars 9-16 are the full verse. The call sounds at bars 1, 5, 9
+    ;; Bars 1-4: kick, ticks, bass, the call and a half-time snare; bars 5-8
+    ;; add the backbeat and stabs; bars 9-16 are the full verse. The call sounds at bars 1, 5, 9
     ;; and 13; the two bars after each are the withheld answer: silence in
     ;; the lead, the reverb's tail and the band.
     ;; ------------------------------------------------------------
@@ -173,8 +223,7 @@
                    (evs (append
                          (bass-bar at r nr (if (< b 4) 34 38))
                          (ticks-bar at (if (< b 4) 24 28) (if (< b 4) 10 13) (if (= b 15) '(12 13 14 15) '()))
-                         (kick at (if (= four 3) '(0 6 8 14) '(0 6 8)) 44)
-                         (if (>= b 4) (clap at '(4 12) 36) '())
+                         (lap1-drums at b)
                          (if (>= b 4)
                              (list (stab at 6 2 c 30) (stab at 14 1 c 22))
                              '())
@@ -202,8 +251,7 @@
                          (bass-bar at r nr 40)
                          (ticks-bar at 30 14 (if (= four 3) '(14) '()))
                          (if (= four 3) (list (ev 3 (+ at 14) 1 (midi 'C 8) I-TICK-OPEN 26)) '())
-                         (kick at (if (= four 3) '(0 6 8 11 14) '(0 6 8 11)) 46)
-                         (clap at (if (= four 3) '(4 12 15) '(4 12)) 38)
+                         (lap2-drums at b)
                          (list (stab at 0 4 c 30) (stab at 6 2 c 26)
                                (stab at 14 2 next 24))
                          (arp-bar at c 26)
