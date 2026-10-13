@@ -1,0 +1,92 @@
+;;; The live player and the offline reference share this pull path. It
+;;; knows Motif but no sink; simulation decisions arrive as conductor data.
+(define-library (signal music playback)
+  (import (sigil struct)
+          (sigil math)
+          (motif tune player)
+          (signal music song)
+          (signal music conductor)
+          (signal music clock))
+  (export playback-open playback-pull! playback-close! playback-player
+          playback-origin-frame playback-walker-frame playback-log playback-missed
+          playback-set-region!)
+  (begin
+    (define-struct playback
+      (player)
+      (rate)
+      (origin-frame)
+      (mode default: 'planned)
+      (requested default: #f mutable: #t)
+      (landed default: #f mutable: #t)
+      (log default: '() mutable: #t)
+      (missed default: 0 mutable: #t))
+
+    (define (bar-frame bar rate)
+      (exact (round (* bar (song-bar-seconds) rate))))
+
+    (define (playback-set-region! b mark)
+      (let* ((section (song-section-ref mark))
+             (from (song-section-loop-from section))
+             (to (song-section-loop-to section)))
+        (if from
+            (let* ((start (song-order-row (song-section-from section)))
+                   (a (song-position (+ start (* from SONG-ROWS-PER-BAR))))
+                   ;; The upper bound may be the end of the score. Look
+                   ;; up its preceding row and take the next order.
+                   (last (song-position (- (+ start (* to SONG-ROWS-PER-BAR)) 1))))
+              (player-set-region! (playback-player b) (car a) (+ 1 (car last))))
+            (player-set-region! (playback-player b) #f #f))))
+
+    (define (playback-open tune rate c inserts (keys: (mode 'planned)))
+      (let* ((start (conductor-position c))
+             (p (open-tune-player tune rate start: start loop: #f inserts: inserts))
+             (row (tick->song-row (conductor-tick c)))
+             (origin (exact (round (* row (/ (* 2.5 SONG-TICKS-PER-ROW) SONG-BPM) rate))))
+             (b (playback player: p rate: rate origin-frame: origin mode: mode)))
+        (playback-set-region! b (conductor-section c))
+        b))
+
+    (define (playback-walker-frame b)
+      (let ((timeline (player-timeline (playback-player b))))
+        (+ (playback-origin-frame b)
+           (if (pair? timeline) (vector-ref (car timeline) 2) 0))))
+
+    (define (request-jump! b c)
+      (let ((plan (conductor-next-jump c)))
+        (when plan
+          (let* ((key (cons (jump-mark plan) (jump-bar plan)))
+                 (walker (playback-walker-frame b))
+                 (window (jump-handoff-window walker
+                                              (bar-frame (- (jump-bar plan) 1) (playback-rate b))
+                                              (bar-frame (jump-bar plan) (playback-rate b)))))
+            (unless (equal? key (playback-requested b))
+              (cond
+                ((or (eq? (playback-mode b) 'immediate) (eq? window 'send))
+                 (unless (player-jump-to-mark! (playback-player b) (jump-mark plan))
+                   (error "missing Motif mark" (jump-mark plan)))
+                 (set-playback-requested! b key)
+                 (set-playback-log! b (cons (vector 'handoff (jump-mark plan) (jump-bar plan) walker)
+                                           (playback-log b))))
+                ((eq? window 'missed)
+                 (set-playback-requested! b key)
+                 (set-playback-missed! b (+ 1 (playback-missed b)))
+                 (set-playback-log! b (cons (vector 'missed (jump-mark plan) (jump-bar plan) walker)
+                                           (playback-log b))))))))))
+
+    (define (playback-pull! b c out offset frames)
+      (request-jump! b c)
+      (let* ((p (playback-player b))
+             (ok (player-pull! p out offset frames))
+             (landed (player-landed p)))
+        (when (and landed (not (equal? landed (playback-landed b))))
+          (let ((requested (playback-requested b)))
+            (unless requested (error "player landed without a conductor plan" landed))
+            (playback-set-region! b (car requested))
+            (set-playback-landed! b landed)
+            (set-playback-log! b
+              (cons (vector 'landing (car requested) (cdr requested)
+                            (+ (playback-origin-frame b) (cddr landed)))
+                    (playback-log b)))))
+        ok))
+
+    (define (playback-close! b) (player-close! (playback-player b)))))

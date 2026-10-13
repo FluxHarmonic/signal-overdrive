@@ -63,8 +63,8 @@ CONDUCTOR_CUES=music/carrier/cues.sgl scripts/compile-score
 ```
 
 Those Carrier filenames are illustrative; the composer owns its files.
-During local development the source-only compiler reads the existing
-Motif and sigil-dsp checkouts, configurable through `CONDUCTOR_MOTIF`
+The source-only compiler reads the locked
+Motif and sigil-dsp dependency trees, configurable through `CONDUCTOR_MOTIF`
 and `CONDUCTOR_DSP`. `CONDUCTOR_SIGIL` defaults to the installed 0.22.11
 compiler matching the game lock, with its cache in `/tmp` and nice 15.
 
@@ -72,3 +72,10 @@ compiler matching the game lock, with its cache in `/tmp` and nice 15.
 `scripts/test-score` checks compiled triggers and multi-bar patterns.
 The captured-audio drift gate and live shell integration are separate
 work; these source tests do not establish audio synchronization.
+
+`(signal music playback)` owns the Motif pull path shared by the live
+stream and offline reference. It waits until the actual walker timeline
+has passed the preceding bar's first row before handing over a jump.
+Its diagnostics record handoff and actual landing frames separately from
+the simulation's intended jump log. `test/test-playback.sgl` renders this
+path offline through seven channel inserts; it opens no audio device.

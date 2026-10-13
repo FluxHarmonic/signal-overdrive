@@ -1,0 +1,67 @@
+;;; Native offline pulls only: these tests never open an audio context.
+(import (sigil test)
+        (sigil list)
+        (motif tune)
+        (motif tune player)
+        (signal music score)
+        (signal music conductor)
+        (signal music playback)
+        (signal music inserts))
+
+(define RATE 44100)
+(define tune (read-tune-string SCORE-TUNE-TEXT))
+
+(define (advance-to c tick)
+  (if (>= (conductor-tick c) tick)
+      c
+      (advance-to (conductor-step c) tick)))
+
+;; The render head stays one 250 ms queue ahead of the simulated ear.
+;; Decisions still arrive on simulation ticks; pulls walk ahead of render.
+(define (render-plan mode)
+  (let* ((c (conductor-plan (conductor-new 'lap1) 'lap2 3))
+         (b (playback-open tune RATE c MUSIC-INSERTS mode: mode))
+         (buffer (make-bytevector (* 8 256) 0))
+         (total (exact (round (* 4 (song-bar-seconds) RATE)))))
+    (let loop ((c c))
+      (when (< (player-rendered (playback-player b)) total)
+        (let* ((ear (max 0 (- (player-rendered (playback-player b)) (/ RATE 4))))
+               (tick (exact (floor (* (/ ear (* 1.0 RATE)) 60.0))))
+               (next (advance-to c tick)))
+          (playback-pull! b next buffer 0 256)
+          (loop next))))
+    b))
+
+(test-group "playback: actual Motif landings"
+  (test "the planned handoff lands on the conductor's exact target bar"
+    (let* ((b (render-plan 'planned))
+           (land (find (lambda (entry) (eq? 'landing (vector-ref entry 0))) (playback-log b)))
+           (handoff (find (lambda (entry) (eq? 'handoff (vector-ref entry 0))) (playback-log b))))
+      (assert-equal 0 (playback-missed b))
+      (assert-true land)
+      (assert-equal 226800 (vector-ref land 3))
+      (assert-true (> (vector-ref handoff 3) 151200))
+      (assert-true (< (vector-ref handoff 3) 226800))
+      (assert-equal 1 (length (filter (lambda (entry) (eq? 'landing (vector-ref entry 0))) (playback-log b))))
+      (playback-close! b)))
+
+  (test "immediate-handoff sabotage lands two bars early"
+    (let* ((b (render-plan 'immediate))
+           (land (find (lambda (entry) (eq? 'landing (vector-ref entry 0))) (playback-log b))))
+      (assert-true land)
+      (assert-equal 75600 (vector-ref land 3))
+      (assert-true (> (abs (- 226800 (vector-ref land 3))) (* RATE 0.060)))
+      (playback-close! b)))
+
+  (test "all seven insert channels expose their intended live parameters"
+    (let* ((b (playback-open tune RATE (conductor-new 'lap1) MUSIC-INSERTS))
+           (p (playback-player b)))
+      (for-each (lambda (channel)
+                  (assert-true (memq 'bits (player-insert-params p channel)))
+                  (assert-true (memq 'rate-div (player-insert-params p channel))))
+                '(1 2 3 7))
+      (assert-true (memq 'cutoff (player-insert-params p 4)))
+      (assert-true (memq 'depth (player-insert-params p 5)))
+      (assert-true (memq 'gain (player-insert-params p 6)))
+      (assert-equal '() (player-insert-params p 8))
+      (playback-close! b))))

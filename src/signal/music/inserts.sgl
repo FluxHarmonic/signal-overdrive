@@ -1,0 +1,32 @@
+;;; The seven-channel insert path, initially clean. Damage policy waits
+;;; for M0's audition; the live path and its cost can already be measured.
+(define-library (signal music inserts)
+  (import (motif graph))
+  (export MUSIC-INSERTS)
+  (begin
+    (define (drum-insert signal)
+      (g:crush signal
+               (g:param 'drive 1.0 0.0 8.0)
+               (g:param 'bits 24.0 1.0 24.0)
+               (g:param 'rate-div 1.0 1.0 16.0)))
+
+    (define (bass-insert signal)
+      (g:butlp signal (g:param 'cutoff 16000.0 20.0 20000.0)))
+
+    (define (pad-insert signal)
+      (g:chorus (g:butlp signal (g:param 'cutoff 16000.0 20.0 20000.0))
+                (g:param 'rate 0.5 0.0 8.0)
+                (g:param 'depth 0.0 0.0 20.0)
+                (g:param 'mix 0.0 0.0 1.0)))
+
+    (define (lead-insert signal)
+      (g:mul (g:chorus signal
+                       (g:param 'rate 0.5 0.0 8.0)
+                       (g:param 'depth 0.0 0.0 20.0)
+                       (g:param 'mix 0.0 0.0 1.0))
+             (g:param 'gain 1.0 0.0 1.0)))
+
+    (define MUSIC-INSERTS
+      (list (cons 1 drum-insert) (cons 2 drum-insert) (cons 3 drum-insert)
+            (cons 4 bass-insert) (cons 5 pad-insert) (cons 6 lead-insert)
+            (cons 7 drum-insert)))))

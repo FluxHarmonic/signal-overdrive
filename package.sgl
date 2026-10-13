@@ -91,6 +91,8 @@
     ;; The placeholder sound's sink: miniaudio natively, the WebAudio bridge
     ;; on the web (sigil-wasm-audio), as Phantom Burn.
     (from-git url: "codeberg:sigil/sigil-audio" version: "^0.13.0")
+    ;; The live adaptive song; its channel inserts are the measured music path.
+    (from-git url: "codeberg:sigil/motif" version: "^0.8.1")
     (from-git url: sigil-repo package: "sigil-wasm-audio" version: ">=0.22.11, <0.22.12" configs: '(web)))
 
   dev-dependencies: (list

@@ -44,6 +44,14 @@ for (const [section, bars] of sections) {
           add(7, row < 16 ? "A-5" : "D-6", 24);
         if (section === "traced" && [6, 22].includes(row)) add(8, "D#5", 20);
       }
+      // Every section entry clears stems absent from its arrangement;
+      // Motif's mark jumps preserve sounding voices between sections.
+      if (bar === 0 && row === 0) {
+        for (let channel = 1; channel <= 8; channel++) {
+          if (!cells.some((cell) => cell.startsWith(`(${channel} `)))
+            cells.push(`(${channel} "===" 0 0 "000")`);
+        }
+      }
       if (cells.length) rows.push(`      (row ${row} ${cells.join(" ")})`);
     }
     patterns.push(`    (pattern id: ${pos} rows: 32\n${rows.join("\n")})`);

@@ -3,8 +3,8 @@
 set -eu
 cd "$(dirname "$0")/.."
 CONDUCTOR_SIGIL="${CONDUCTOR_SIGIL:-$HOME/.sigil/versions/0.22.11/sigil}"
-CONDUCTOR_MOTIF="${CONDUCTOR_MOTIF:-$HOME/Projects/Code/sigil/motif}"
-CONDUCTOR_DSP="${CONDUCTOR_DSP:-$HOME/Projects/Code/sigil/sigil-dsp}"
+CONDUCTOR_MOTIF="${CONDUCTOR_MOTIF:-.sigil/deps/motif}"
+CONDUCTOR_DSP="${CONDUCTOR_DSP:-.sigil/deps/sigil-dsp}"
 export XDG_CACHE_HOME="${CONDUCTOR_CACHE_ROOT:-/tmp/signal-conductor-cache}"
 if [ "$#" -eq 0 ]; then
   set -- "${CONDUCTOR_TUNE:-music/placeholder/parts.cts}" \
