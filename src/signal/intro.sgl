@@ -117,23 +117,36 @@
         (if (= (+ ua va) 0.0) 0.0 (/ ua (+ ua va)))))
 
     ;; The card's camera at its time; the end pose is the title's first.
+    ;; Position, height, heading and the optical centre's row ease from
+    ;; straight above the mark to the title camera's. The pitch is solved
+    ;; so the mark sits on a row that eases from the middle of the screen to
+    ;; the row it has under the title camera: the mark's depression below
+    ;; level, plus the angle that row sits above the optical centre. So the
+    ;; mark recedes along the road, rising only a little on the screen,
+    ;; while the horizon tilts down into view; at both ends the pitch is
+    ;; exactly the start's and the title camera's.
     (define (card-camera tuning tr t w h)
       (let* ((end (title-camera (title-new) tuning tr w h))
              (m (mark-place tr))
              (f (cam-focal end))
              (h0 (caddr m))
              (k (tilt tuning t))
-             ;; from straight above the mark: the screen's centre on it
+             ;; the start: the camera straight above the mark, its centre on it
              (back (/ TOP-HEIGHT (tan TOP-PITCH)))
              (x0 (- (car m) (* back (sin h0))))
              (y0 (+ (cadr m) (* back (cos h0))))
-             (pitch (lerp TOP-PITCH (cam-pitch end) k))
-             (cy (lerp (* 0.5 h) (cam-cy end) k)))
-        (make-cam (lerp x0 (cam-x end) k) (lerp y0 (cam-y end) k)
-                  (lerp TOP-HEIGHT (cam-height end) k)
-                  (angle-lerp h0 (cam-heading end) k)
-                  pitch (cam-fov end)
-                  (- cy (* f (tan pitch))) w h)))
+             (x (lerp x0 (cam-x end) k)) (y (lerp y0 (cam-y end) k))
+             (height (lerp TOP-HEIGHT (cam-height end) k))
+             (heading (angle-lerp h0 (cam-heading end) k))
+             (cy (lerp (* 0.5 h) (cam-cy end) k))
+             ;; the mark's depression below level, along the camera's view
+             (dep (lambda (cx cy* hd ht)
+                    (atan ht (max 1.0 (+ (* (- (car m) cx) (sin hd)) (* (- (cadr m) cy*) (- (cos hd))))))))
+             (dep-end (dep (cam-x end) (cam-y end) (cam-heading end) (cam-height end)))
+             (row-end (- (cam-cy end) (* f (tan (- (cam-pitch end) dep-end)))))
+             (row (lerp (* 0.5 h) row-end k))
+             (pitch (+ (dep x y heading height) (atan (- cy row) f))))
+        (make-cam x y height heading pitch (cam-fov end) (- cy (* f (tan pitch))) w h)))
 
     ;; The frame's camera: the card's while it runs (the gate's frame sits
     ;; on the card's first pose, under black), else #f.

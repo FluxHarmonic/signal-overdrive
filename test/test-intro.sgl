@@ -70,6 +70,17 @@
             (when (= k 2) (assert-true (> g 0.8)))
             (when (>= k (+ lock 1)) (assert-true (near? g 0.0 1e-9)))
             (loop (+ k 1) (intro-step i TUNING RACE #f #f) g))))))
+  (test "the mark stays on screen all through the card, sliding only up toward the horizon"
+    (let* ((tr (race-track RACE))
+           (m (track-point tr MARK-S 0.0)))
+      (let loop ((i (intro-new TUNING #f)) (last 1000.0) (k 0))
+        (when (eq? (intro-phase i) 'card)
+          (let* ((c (intro-camera i TUNING RACE 480 270))
+                 (p (camera-project c (car m) (cadr m) 0.0 1.0)))
+            (assert-true (and p (>= (projected-x p) 0.0) (< (projected-x p) 480.0)
+                              (>= (projected-y p) 0.0) (< (projected-y p) 270.0)))
+            (assert-true (<= (projected-y p) (+ last 0.01)))
+            (loop (intro-step i TUNING RACE #f #f) (projected-y p) (+ k 1)))))))
   (test "it hands into the title's first camera with no cut"
     (let* ((n (ticks (tuning-ref TUNING 'card-len)))
            (last (car (run (intro-new TUNING #f) (- n 1) #f #f)))
