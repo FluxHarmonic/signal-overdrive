@@ -8,7 +8,7 @@
 ;;; list (signal tuning) keeps: the handling's knobs and the race's own
 ;;; (laps, rivals, rival-pace, boost-lap).
 ;;;
-;;; Phases: title (the grid, waiting for a start), countdown (3 s, no
+;;; Phases: title (the grid, waiting for a start), countdown (four bars, no
 ;;; throttle), race, finished (every lap done), corrupt (integrity hit 0).
 ;;; From finished or corrupt, a start after a second begins a new race.
 ;;;
@@ -19,15 +19,16 @@
 ;;; over the line counts nothing.
 
 (define-library (signal race)
-  (import (sigil core)
-          (sigil struct)
+  (import (sigil struct)
           (sigil math)
           (sigil list)
           (signal track)
-          (signal handling))
+          (signal handling)
+          (signal music conductor)
+          (signal music progress))
 
   (export race race? race-new race-step race-start race-track
-          race-phase race-tick race-player race-rivals race-clock race-countdown race-events race-start-tick
+          race-phase race-tick race-player race-rivals race-clock race-countdown race-events race-start-tick race-song
           racer racer? racer-machine racer-lap racer-lap-start racer-last-lap racer-best-lap
           racer-halfway racer-finished racer-place racer-name racer-colour racer-progress
           race-laps race-place-of race-tuning-ref RACE-DEFAULTS
@@ -74,6 +75,7 @@
       (tick default: 0)
       (clock default: 0)
       (countdown default: 0)
+      (song default: #f)
       (player default: #f)
       (rivals default: '())
       (over-tick default: 0)
@@ -117,12 +119,15 @@
                                                 lane: (* 0.25 (- (modulo (* i 7) 3) 1)))
                                          acc)))))))
         (race track: t
+              song: (conductor-new 'calm)
               player: (racer machine: (grid-machine t 1 1) name: "ZERO")
               rivals: rivals
               phase: 'title)))
 
     (define (race-start tuning r)
-      (race (race-new tuning) phase: 'countdown countdown: 180 tick: (race-tick r)))
+      (race (race-new tuning)
+            phase: 'countdown countdown: (song-bar->tick 4)
+            song: (conductor-new 'grid) tick: (race-tick r)))
 
     ;; --- the rivals' driving -----------------------------------------------------------
 
@@ -271,7 +276,7 @@
     (define (race-step tuning r controls start?)
       (let* ((t (race-track r))
              (tick (+ (race-tick r) 1))
-             (r (race r tick: tick events: '())))
+             (r (race r tick: tick song: (conductor-step (race-song r)) events: '())))
         (case (race-phase r)
           ((title) (if start? (race-start tuning r) r))
           ((finished corrupt)
@@ -279,8 +284,9 @@
                (race-start tuning r)
                (drive tuning t r NO-INPUT #f)))
           ((countdown)
-           (let ((r (race r countdown: (- (race-countdown r) 1))))
-             (if (<= (race-countdown r) 0)
+           (let ((r (race r countdown: (max 0 (- (song-bar->tick 4)
+                                                (conductor-tick (race-song r)))))))
+             (if (conductor-grid-done? (race-song r))
                  (race r phase: 'race clock: 0 start-tick: (race-tick r))
                  r)))
           (else (drive tuning t r controls #t)))))
@@ -314,7 +320,15 @@
                                (if (null? xs) acc
                                    (loop (cdr xs) (+ i 1)
                                          (append (map (lambda (e) (cons i e)) (machine-events (racer-machine (car xs)))) acc))))))
-             (r (race r player: p2 rivals: rs2 clock: (+ (race-clock r) (if racing? 1 0)) events: events)))
+             (index (track-index-at t (machine-s pm)))
+             (forward (+ (* (machine-vx pm) (track-tx t index))
+                         (* (machine-vy pm) (track-ty t index))))
+             (song (if racing?
+                       (conductor-race-plan (race-song r) (racer-progress p2) forward
+                                            (* laps (track-length t)))
+                       (race-song r)))
+             (r (race r player: p2 rivals: rs2 song: song
+                      clock: (+ (race-clock r) (if racing? 1 0)) events: events)))
         (cond ((not racing?) r)
               ((<= (machine-integrity (racer-machine p2)) 0.0)
                (race r phase: 'corrupt over-tick: tick))

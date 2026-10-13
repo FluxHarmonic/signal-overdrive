@@ -1,6 +1,7 @@
 (import (sigil test)
         (signal music song)
         (signal music conductor)
+        (signal music progress)
         (signal music clock))
 
 (define (advance c ticks)
@@ -57,6 +58,37 @@
                   (conductor-section (advance (conductor-new 'uplink) (song-bar->tick 8))))))
 
 (test-group "conductor: planned jumps"
+  (test "automatic exits are available to the shell before their landing bar"
+    (let ((grid (conductor-next-jump (conductor-new 'grid)))
+          (fill (conductor-next-jump (conductor-new 'fill))))
+      (assert-equal 'lap1 (jump-mark grid))
+      (assert-equal 4 (jump-bar grid))
+      (assert-equal 'traced (jump-mark fill))
+      (assert-equal 2 (jump-bar fill))))
+
+  (test "race predictions wait until near a target, then commit one bar ahead"
+    (let* ((c (advance (conductor-new 'lap1) 20))
+           (far (conductor-race-plan c 0.0 500.0 30000.0))
+           (near (conductor-race-plan c 8700.0 500.0 30000.0))
+           (plan (conductor-pending near)))
+      (assert-equal #f (conductor-pending far))
+      (assert-equal 'lap2 (jump-mark plan))
+      (assert-true (>= (- (song-bar->tick (jump-bar plan)) (conductor-tick near)) 103))
+      (assert-equal plan (conductor-pending (conductor-race-plan near 0.0 500.0 30000.0)))))
+
+  (test "the fill starts two bars before the predicted drop and stays committed after a crash"
+    (let* ((c (advance (conductor-new 'hold) 20))
+           (planned (conductor-race-plan c 17200.0 500.0 30000.0))
+           (plan (conductor-pending planned)))
+      (assert-equal 'fill (jump-mark plan))
+      (assert-equal plan (conductor-pending (conductor-race-plan planned 17200.0 0.0 30000.0)))
+      (let ((after (advance planned (- (song-bar->tick (+ (jump-bar plan) 2)) (conductor-tick c)))))
+        (assert-equal 'traced (conductor-section after)))))
+
+  (test "stopped or backwards motion cannot predict a crossing"
+    (assert-equal #f (conductor-pending (conductor-race-plan (conductor-new 'lap1) 9999.0 0.0 30000.0)))
+    (assert-equal #f (conductor-pending (conductor-race-plan (conductor-new 'lap1) 9999.0 -500.0 30000.0))))
+
   (test "late, unknown and already committed jumps are refused"
     (let ((c (advance (conductor-new 'lap1) 20)))
       (assert-error (conductor-plan c 'lap2 1))

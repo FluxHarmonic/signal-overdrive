@@ -16,8 +16,7 @@
 ;;; drawn sprite-size texels wide whichever cell it comes from.
 
 (define-library (signal scene)
-  (import (sigil core)
-          (sigil math)
+  (import (sigil math)
           (sigil string)
           (sigil list)
           (sigil graphics)
@@ -33,7 +32,8 @@
           (signal race)
           (signal tuning)
           (signal fx state)
-          (signal fx lights))
+          (signal fx lights)
+          (signal music conductor))
 
   (export VIEW-W VIEW-H scene-init! scene-ready? scene-frame! scene-camera
           scene-world-ms speed-kmh lap-clock)
@@ -546,8 +546,8 @@
            (rect! 70 56 340 26 "#0D0A1A")
            (centred! "DELIVER THE SIGNAL TO THE UPLINK." 60 "#4DF2D9")
            (centred! (string-append (number->string laps) " LAPS. KEEP THE CARGO CLEAN.") 71 "#CCE6FF")
-           (let ((n (+ 1 (quotient (race-countdown r) 60))))
-             (centred! (number->string n) 96 "#FFCC33" 4)))
+           (let ((n (conductor-count-in (race-song r))))
+             (when n (centred! (number->string n) 96 "#FFCC33" 4))))
           ((race)
            (when (< (race-clock r) 60) (centred! "GO" 90 "#4DF2D9" 4)))
           ((finished) (finish-panel! r p (cdr (assq 'restart-line info))))

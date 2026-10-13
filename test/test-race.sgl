@@ -7,9 +7,11 @@
         (signal handling)
         (signal race)
         (signal tuning)
+        (signal music conductor)
         (sigil list))
 
 (define T (tuning-defaults))
+(define GRID-TICKS (song-bar->tick 4))
 
 ;; The player on the racing line too (the autopilot), n ticks.
 (define (run tuning r n)
@@ -22,18 +24,29 @@
 (define (started tuning) (race-step tuning (race-new tuning) NO-INPUT #t))
 
 (test-group "race: start"
-  (test "the title waits; a start begins a 3 s countdown, then the race"
+  (test "the title waits; a start runs four grid bars, then GO starts lap1"
     (let* ((r (race-new T)))
       (assert-equal 'title (race-phase (race-step T r NO-INPUT #f)))
       (let ((c (started T)))
         (assert-equal 'countdown (race-phase c))
-        (assert-equal 'countdown (race-phase (run T c 170)))
-        (assert-equal 'race (race-phase (run T c 181))))))
+        (assert-equal 'countdown (race-phase (run T c (- GRID-TICKS 1))))
+        (let ((go (run T c GRID-TICKS)))
+          (assert-equal 'race (race-phase go))
+          (assert-equal 'lap1 (conductor-section (race-song go)))
+          (assert-equal 0 (race-clock go))))))
 
   (test "nobody moves in the countdown"
-    (let* ((c (run T (started T) 120))
+    (let* ((c (run T (started T) (- GRID-TICKS 1)))
            (m (racer-machine (race-player c))))
       (assert-true (< (machine-speed m) 1e-9))))
+
+  (test "restart resets the song to grid instead of retaining a pending jump"
+    (let* ((running (run T (started T) (* 60 20)))
+           (restart (race-start T running)))
+      (assert-equal 'grid (conductor-section (race-song restart)))
+      (assert-equal 0 (conductor-tick (race-song restart)))
+      (assert-equal #f (conductor-pending (race-song restart)))
+      (assert-equal 1 (length (conductor-log (race-song restart))))))
 
   (test "the grid has the player and five rivals, behind the line"
     (let ((r (race-new T)))
@@ -46,7 +59,7 @@
   (define R2 (run (handling-set T 'laps 2.0) (started (handling-set T 'laps 2.0)) (* 60 90)))
 
   (test "crossing the line starts lap 1"
-    (let ((r (run T (started T) (+ 181 120))))
+    (let ((r (run T (started T) (+ GRID-TICKS 120))))
       (assert-equal 1 (racer-lap (race-player r)))))
 
   (test "the autopilot finishes two laps inside 90 s, with lap times"
@@ -78,7 +91,7 @@
   (test "crossing the line again without passing halfway counts no lap"
     ;; just over the line on lap 1, put back 60 texels behind it, heading
     ;; on: it crosses the line a second time, which is not a lap
-    (let* ((r (run T (started T) (+ 181 120)))
+    (let* ((r (run T (started T) (+ GRID-TICKS 120)))
            (t (race-track r))
            (p (race-player r))
            (pt (track-point t (- (track-length t) 60.0) 0.0))
@@ -92,7 +105,7 @@
       (assert-equal 1 (racer-lap (race-player r2)))))
 
   (test "pushed back over the line on lap 1, a machine's progress does not jump a lap"
-    (let* ((r (run T (started T) (+ 181 120)))
+    (let* ((r (run T (started T) (+ GRID-TICKS 120)))
            (t (race-track r))
            (p (race-player r))
            (before (racer-progress p))
@@ -115,7 +128,7 @@
 
   (test "driving backwards over the line counts no lap"
     ;; turned round on the grid: full throttle the wrong way for 10 s
-    (let* ((c (run T (started T) 181))
+    (let* ((c (run T (started T) GRID-TICKS))
            (p (race-player c))
            (m (racer-machine p))
            (back (machine m heading: (+ (machine-heading m) 3.141592653589793)))
@@ -147,9 +160,22 @@
               (assert-true iced)              ; it did cross the patch
               (assert-equal 0 walls)))))))
 
+(test-group "race: song progression"
+  (test "a full three-lap loop race visits every race section and the coda"
+    (let* ((tu (handling-set (handling-set T 'track 1.0) 'laps 3.0))
+           (r (run tu (started tu) (* 60 130)))
+           (log (reverse (conductor-log (race-song r)))))
+      (assert-equal 'finished (race-phase r))
+      (assert-equal '(grid lap1 lap2 hold fill traced uplink results)
+                    (map (lambda (entry) (vector-ref entry 2)) log))
+      (assert-equal 'results (conductor-section (race-song r)))
+      (for-each (lambda (entry)
+                  (assert-equal (song-bar->tick (vector-ref entry 1)) (vector-ref entry 0)))
+                log))))
+
 (test-group "race: corrupt cargo"
   (test "integrity at zero ends the run as corrupt, and a start restarts it"
-    (let* ((c (run T (started T) 181))
+    (let* ((c (run T (started T) GRID-TICKS))
            (p (race-player c))
            (r (race c player: (racer p machine: (machine (racer-machine p) integrity: 0.0))))
            (r2 (race-step T r NO-INPUT #f)))

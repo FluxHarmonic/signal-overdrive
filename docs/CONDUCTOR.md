@@ -5,6 +5,14 @@ computes rows directly from ticks and records section landings as
 `#(tick absolute-bar mark)`, newest first. The audible clock and pacing
 policy are separate in `(signal music clock)`; the shell will apply them.
 
+The race state carries its conductor. Starting or restarting a delivery
+resets the song to grid; GO and lap1 start together after four complete
+bars. The count-in occupies the last three beats of grid. Pure distance
+and forward-speed predictions commit lap2, hold, fill and uplink changes
+at least a bar ahead. Fill begins two bars before the predicted final-lap
+line and remains committed if the player crashes afterward. Race phases
+continue to follow the player's actual crossings.
+
 `scripts/compile-score` runs Motif's `compile-tune` before the package's
 runtime modules compile. It generates `src/signal/music/score.sgl`.
 Runtime modules read this data and never compile a tune during a race.

@@ -1,0 +1,35 @@
+;;; Race policy over the pure conductor. Distances and forward speed come
+;;; from simulation state; prediction never reads wall time or audio.
+(define-library (signal music progress)
+  (import (signal music conductor))
+  (export conductor-race-plan)
+  (begin
+    (define (conductor-race-plan c progress forward-speed total-distance)
+      (if (or (conductor-pending c) (<= forward-speed 10.0))
+          c
+          (let* ((section (conductor-section c))
+                 (target (case section
+                           ((lap1) (/ total-distance 3.0))
+                           ((lap2) (/ total-distance 2.0))
+                           ((hold) (* total-distance (/ 2.0 3.0)))
+                           ((traced) total-distance)
+                           (else #f)))
+                 (next (case section
+                         ((lap1) 'lap2)
+                         ((lap2) 'hold)
+                         ((hold) 'fill)
+                         ((traced) 'uplink)
+                         (else #f)))
+                 (fill-bars (if (eq? section 'hold) 2 0))
+                 (horizon (* (+ fill-bars 2) (song-bar-seconds))))
+            (if (not target)
+                c
+                (let ((eta (/ (max 0.0 (- target progress)) forward-speed)))
+                  (if (> eta horizon)
+                      c
+                      (let* ((minimum (predicted-jump-bar c 0.0))
+                             ;; The fill is committed for two bars before
+                             ;; the aimed drop, with one bar of planning.
+                             (target-bar (max (+ minimum fill-bars)
+                                              (predicted-jump-bar c eta))))
+                        (conductor-plan c next (- target-bar fill-bars)))))))))))

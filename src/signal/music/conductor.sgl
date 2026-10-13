@@ -6,7 +6,7 @@
           (signal music song))
   (export conductor conductor? conductor-new conductor-step conductor-plan
           conductor-tick conductor-section conductor-entry-bar conductor-pending
-          conductor-log conductor-position conductor-bar conductor-row
+          conductor-log conductor-position conductor-bar conductor-row conductor-next-jump
           conductor-beat conductor-count-in conductor-grid-done? conductor-onset-mask
           tick->song-row tick->song-bar song-bar->tick song-bar-seconds
           predicted-jump-bar jump jump-mark jump-bar jump-decided-tick)
@@ -84,6 +84,17 @@
 
     (define (conductor-grid-done? c)
       (not (eq? (conductor-section c) 'grid)))
+
+    ;; Automatic exits are known from section entry, giving the shell the
+    ;; same bar-ahead handoff opportunity as a race-progress decision.
+    (define (conductor-next-jump c)
+      (or (conductor-pending c)
+          (let* ((section (song-section-ref (conductor-section c)))
+                 (next (song-section-next section)))
+            (and next
+                 (jump mark: next
+                       bar: (+ (conductor-entry-bar c) (song-section-bars section))
+                       decided-tick: (song-bar->tick (conductor-entry-bar c)))))))
 
     ;; A track crossing is a prediction, in seconds from this tick. Pick
     ;; the nearest bar, but leave at least one whole bar to plan it.
