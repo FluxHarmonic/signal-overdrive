@@ -1,0 +1,120 @@
+;;; Simulation-owned song time. No device, wall time, or Motif import.
+;;; A jump log is a replayable record of decisions, including their landings.
+(define-library (signal music conductor)
+  (import (sigil struct)
+          (sigil math)
+          (signal music song))
+  (export conductor conductor? conductor-new conductor-step conductor-plan
+          conductor-tick conductor-section conductor-entry-bar conductor-pending
+          conductor-log conductor-position conductor-bar conductor-row
+          conductor-beat conductor-count-in conductor-grid-done? conductor-onset-mask
+          tick->song-row tick->song-bar song-bar->tick song-bar-seconds
+          predicted-jump-bar jump jump-mark jump-bar jump-decided-tick)
+  (begin
+    ;; XM: 2.5/BPM seconds per tracker tick, three tracker ticks per row.
+    ;; At 60 simulation ticks/s, row = floor(tick * 14 / 45). Compute from
+    ;; the tick count each time; never accumulate rounded row durations.
+    (define (tick->song-row tick)
+      (exact (floor (/ (* tick SONG-BPM 2) (* 60 5 SONG-TICKS-PER-ROW)))))
+
+    (define (tick->song-bar tick)
+      (quotient (tick->song-row tick) SONG-ROWS-PER-BAR))
+
+    (define (song-bar->tick bar)
+      (exact (ceiling (/ (* bar SONG-ROWS-PER-BAR 60 5 SONG-TICKS-PER-ROW)
+                        (* SONG-BPM 2)))))
+
+    (define (song-bar-seconds)
+      (/ (* SONG-ROWS-PER-BAR 2.5 SONG-TICKS-PER-ROW) SONG-BPM))
+
+    (define-struct jump
+      (mark)
+      (bar)
+      (decided-tick))
+
+    (define-struct conductor
+      (tick default: 0)
+      (section default: 'grid)
+      (entry-bar default: 0)
+      (pending default: #f)
+      (log default: '()))
+
+    (define (conductor-new . marks)
+      (let ((mark (if (null? marks) 'grid (car marks))))
+        (song-section-ref mark)
+        (conductor section: mark log: (list (vector 0 0 mark)))))
+
+    (define (conductor-bar c) (tick->song-bar (conductor-tick c)))
+    (define (conductor-row c)
+      (modulo (tick->song-row (conductor-tick c)) SONG-ROWS-PER-BAR))
+    (define (conductor-beat c)
+      (quotient (conductor-row c) SONG-ROWS-PER-BEAT))
+
+    (define (section-bar c)
+      (let* ((section (song-section-ref (conductor-section c)))
+             (bar (- (conductor-bar c) (conductor-entry-bar c)))
+             (from (song-section-loop-from section))
+             (to (song-section-loop-to section)))
+        (if (and from (>= bar to))
+            (+ from (modulo (- bar from) (- to from)))
+            bar)))
+
+    (define (conductor-position c)
+      (song-position
+        (+ (song-order-row (song-section-from (song-section-ref (conductor-section c))))
+           (* (section-bar c) SONG-ROWS-PER-BAR)
+           (conductor-row c))))
+
+    ;; A note-on is offered on exactly one simulation tick, even though a
+    ;; tracker row spans several ticks. It is read from compiled score data.
+    (define (conductor-onset-mask c)
+      (if (or (= (conductor-tick c) 0)
+              (> (tick->song-row (conductor-tick c))
+                 (tick->song-row (- (conductor-tick c) 1))))
+          (let ((pos (conductor-position c)))
+            (song-onset-mask (car pos) (cdr pos)))
+          0))
+
+    ;; Three numbers on the last grid bar's last three beats, then GO.
+    (define (conductor-count-in c)
+      (if (and (eq? (conductor-section c) 'grid) (= (section-bar c) 3))
+          (let ((beat (conductor-beat c)))
+            (and (> beat 0) (- 4 beat)))
+          #f))
+
+    (define (conductor-grid-done? c)
+      (not (eq? (conductor-section c) 'grid)))
+
+    ;; A track crossing is a prediction, in seconds from this tick. Pick
+    ;; the nearest bar, but leave at least one whole bar to plan it.
+    (define (predicted-jump-bar c seconds-away)
+      (let* ((now (/ (* (conductor-tick c) 1.0) 60.0 (song-bar-seconds)))
+             (aim (+ now (/ (max 0.0 seconds-away) (song-bar-seconds)))))
+        (max (exact (ceiling (+ now 1.0))) (exact (round aim)))))
+
+    (define (conductor-plan c mark bar)
+      (song-section-ref mark)
+      (unless (and (exact-integer? bar) (>= bar 0))
+        (error "song jump target must be a nonnegative integer bar" bar))
+      (when (< bar (predicted-jump-bar c 0.0))
+        (error "song jump must be planned at least a bar ahead" mark bar))
+      (when (conductor-pending c)
+        (error "song jump already committed" (conductor-pending c)))
+      (conductor c pending: (jump mark: mark bar: bar decided-tick: (conductor-tick c))))
+
+    (define (land c mark bar)
+      (conductor c section: mark entry-bar: bar pending: #f
+                 log: (cons (vector (conductor-tick c) bar mark) (conductor-log c))))
+
+    (define (conductor-step c)
+      (let* ((next (conductor c tick: (+ 1 (conductor-tick c))))
+             (bar (conductor-bar next))
+             (pending (conductor-pending next))
+             (section (song-section-ref (conductor-section next))))
+        (cond
+          ((and pending (>= bar (jump-bar pending)))
+           (land next (jump-mark pending) (jump-bar pending)))
+          ((and (song-section-next section)
+                (>= (- bar (conductor-entry-bar next)) (song-section-bars section)))
+           (land next (song-section-next section) bar))
+          (else next))))))

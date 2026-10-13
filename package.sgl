@@ -102,6 +102,13 @@
       name: 'build
       description: "Compile the racer (and, on the web config, link the browser app)"
       steps: (list
+        ;; Lower note-on triggers and the cue sheet before runtime modules
+        ;; compile. A mismatched score must fail the build, never linger.
+        (lambda (ctx)
+          (let ((status (process-run "scripts/compile-score")))
+            (unless (= status 0)
+              (error "music score compilation failed" status)))
+          ctx)
         ;; the web config links sigil-audio's native-init with no C of its own
         ;; on wasm: a stub supplies the symbol (src/c/wasm-audio-stub.c, Phantom's)
         (lambda (ctx)

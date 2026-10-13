@@ -1,0 +1,61 @@
+;;; The placeholder/Carrier interface, lowered from tune and cue-sheet data.
+;;; Order positions may contain several bars; score rows are unambiguous.
+(define-library (signal music song)
+  (import (sigil struct)
+          (sigil math)
+          (signal music score))
+  (export SONG-BPM SONG-ROWS-PER-BAR SONG-ROWS-PER-BEAT SONG-TICKS-PER-ROW
+          song-section song-section-mark song-section-from song-section-bars
+          song-section-loop-from song-section-loop-to song-section-next
+          SONG-SECTIONS song-section-ref song-order-row score-row->position
+          song-position song-onset-mask)
+  (begin
+    (define SONG-BPM SCORE-BPM)
+    (define SONG-ROWS-PER-BAR (* (car SCORE-METER) (cdr SCORE-METER)))
+    (define SONG-ROWS-PER-BEAT (car SCORE-METER))
+    (define SONG-TICKS-PER-ROW SCORE-SPEED)
+
+    ;; Loop bounds are section-relative bars, half open. #f means no loop.
+    (define-struct song-section
+      (mark)
+      (from)
+      (bars)
+      (loop-from default: #f)
+      (loop-to default: #f)
+      (next default: #f))
+
+    (define SONG-SECTIONS
+      (map (lambda (entry)
+             (song-section mark: (vector-ref entry 0)
+                           from: (vector-ref entry 1)
+                           bars: (vector-ref entry 2)
+                           loop-from: (vector-ref entry 3)
+                           loop-to: (vector-ref entry 4)
+                           next: (vector-ref entry 5)))
+           SCORE-SECTIONS))
+
+    (define (song-order-row pos) (vector-ref SCORE-ORDER-OFFSETS pos))
+
+    (define (score-row->position offsets row)
+      (unless (and (exact-integer? row) (<= 0 row)
+                   (< row (vector-ref offsets (- (vector-length offsets) 1))))
+        (error "song row is outside the score" row))
+      (let search ((lo 0) (hi (- (vector-length offsets) 2)))
+        (let ((mid (quotient (+ lo hi) 2)))
+          (cond
+            ((< row (vector-ref offsets mid)) (search lo (- mid 1)))
+            ((>= row (vector-ref offsets (+ mid 1))) (search (+ mid 1) hi))
+            (else (cons mid (- row (vector-ref offsets mid))))))))
+
+    (define (song-position score-row)
+      (score-row->position SCORE-ORDER-OFFSETS score-row))
+
+    (define (song-onset-mask pos row)
+      (vector-ref (vector-ref SCORE-ONSET-MASKS pos) row))
+
+    (define (song-section-ref mark)
+      (let find ((sections SONG-SECTIONS))
+        (cond
+          ((null? sections) (error "unknown song section" mark))
+          ((eq? mark (song-section-mark (car sections))) (car sections))
+          (else (find (cdr sections))))))))

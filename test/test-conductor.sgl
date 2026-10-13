@@ -1,0 +1,127 @@
+(import (sigil test)
+        (signal music song)
+        (signal music conductor)
+        (signal music clock))
+
+(define (advance c ticks)
+  (let loop ((c c) (remaining ticks))
+    (if (= remaining 0)
+        c
+        (loop (conductor-step c) (- remaining 1)))))
+
+(test-group "conductor: tick clock"
+  (test "row time is computed from ticks without rounded accumulation"
+    (assert-equal 0 (tick->song-row 3))
+    (assert-equal 1 (tick->song-row 4))
+    (assert-equal 2240 (tick->song-row 7200))
+    (assert-equal 70 (tick->song-bar 7200))
+    (assert-equal 7200 (song-bar->tick 70)))
+
+  (test "score rows map to multi-bar order positions"
+    (assert-equal '(0 . 32) (score-row->position '#(0 64 96 160) 32))
+    (assert-equal '(1 . 0) (score-row->position '#(0 64 96 160) 64))
+    (assert-equal '(2 . 63) (score-row->position '#(0 64 96 160) 159))
+    (assert-error (score-row->position '#(0 64 96 160) 160)))
+
+  (test "compiled onsets pulse once per row rather than once per tick"
+    (assert-true (> (conductor-onset-mask (conductor-new 'lap1)) 0))
+    (assert-equal 0 (conductor-onset-mask (advance (conductor-new 'lap1) 1)))
+    (assert-true (> (conductor-onset-mask (advance (conductor-new 'lap1) 7)) 0))
+    (assert-equal 0 (conductor-onset-mask (advance (conductor-new 'lap1) 8))))
+
+  (test "grid holds four complete bars and starts lap1 on GO"
+    (let* ((go (song-bar->tick 4))
+           (before (advance (conductor-new) (- go 1)))
+           (after (conductor-step before)))
+      (assert-equal 'grid (conductor-section before))
+      (assert-equal 'lap1 (conductor-section after))
+      (assert-equal '(12 . 0) (conductor-position after))
+      (assert-equal go (vector-ref (car (conductor-log after)) 0))))
+
+  (test "count-in is 3, 2, 1 on the last three beats of grid"
+    (assert-equal #f (conductor-count-in (advance (conductor-new) 300)))
+    (assert-equal 3 (conductor-count-in (advance (conductor-new) 335)))
+    (assert-equal 2 (conductor-count-in (advance (conductor-new) 360)))
+    (assert-equal 1 (conductor-count-in (advance (conductor-new) 386))))
+
+  (test "lap1 repeats its second eight bars; hold repeats its riser"
+    (let ((verse (advance (conductor-new 'lap1) (song-bar->tick 16)))
+          (riser (advance (conductor-new 'hold) (song-bar->tick 8))))
+      (assert-equal '(20 . 0) (conductor-position verse))
+      (assert-equal '(40 . 0) (conductor-position riser))))
+
+  (test "fill ends in traced; uplink ends in results"
+    (assert-equal 'traced
+                  (conductor-section (advance (conductor-new 'fill) (song-bar->tick 2))))
+    (assert-equal 'results
+                  (conductor-section (advance (conductor-new 'uplink) (song-bar->tick 8))))))
+
+(test-group "conductor: planned jumps"
+  (test "late, unknown and already committed jumps are refused"
+    (let ((c (advance (conductor-new 'lap1) 20)))
+      (assert-error (conductor-plan c 'lap2 1))
+      (assert-error (conductor-plan c 'lap2 2.5))
+      (assert-error (conductor-plan c 'missing 3))
+      (assert-error (conductor-plan (conductor-plan c 'lap2 3) 'hold 4))))
+
+  (test "a committed jump lands on its absolute bar and is logged once"
+    (let* ((planned (conductor-plan (conductor-new 'lap1) 'lap2 3))
+           (before (advance planned (- (song-bar->tick 3) 1)))
+           (after (conductor-step before)))
+      (assert-equal 'lap1 (conductor-section before))
+      (assert-equal 'lap2 (conductor-section after))
+      (assert-equal '(28 . 0) (conductor-position after))
+      (assert-equal #f (conductor-pending after))
+      (assert-equal 2 (length (conductor-log (conductor-step after))))))
+
+  (test "crossing prediction leaves a full bar to hand over the jump"
+    (let ((c (advance (conductor-new 'lap1) 20)))
+      (assert-equal 2 (predicted-jump-bar c 0.0))
+      (assert-equal 3 (predicted-jump-bar c 4.8))))
+
+  (test "same tick decisions replay the identical positions and log"
+    (let ((first (advance (conductor-plan (conductor-new 'hold) 'fill 4) 800))
+          (second (advance (conductor-plan (conductor-new 'hold) 'fill 4) 800)))
+      (assert-equal (conductor-position first) (conductor-position second))
+      (assert-equal (conductor-log first) (conductor-log second))))
+
+  (test "walker handoff excludes both bar boundaries"
+    (assert-equal 'wait (jump-handoff-window 999 1000 2000))
+    (assert-equal 'wait (jump-handoff-window 1000 1000 2000))
+    (assert-equal 'send (jump-handoff-window 1001 1000 2000))
+    (assert-equal 'send (jump-handoff-window 1999 1000 2000))
+    (assert-equal 'missed (jump-handoff-window 2000 1000 2000))))
+
+(test-group "conductor: audible pacing"
+  (test "the nudge absorbs a 1% clock skew over two minutes"
+    (let loop ((frame 0) (sim 0.0) (ear 0.0) (p (pacing-new)))
+      (if (= frame 7200)
+          (assert-true (< (abs (- ear sim)) 0.030))
+          (let* ((dt (/ 1.0 60.0))
+                 (next (pace-frame p dt sim ear #t #f (quotient frame 103))))
+            (assert-equal #f (pacing-resync? next))
+            (loop (+ frame 1) (+ sim (pacing-dt next)) (+ ear (* dt 1.01)) next)))))
+
+  (test "audible clock subtracts depth, device latency and pause silence"
+    (assert-true (< (abs (- 1.815 (audible-seconds 96000 6000 48000 0.035 1200))) 1e-9)))
+
+  (test "a small error nudges ticks toward the ear without changing song position"
+    (let ((p (pace-frame (pacing-new) 1.0 5.0 5.020 #t #f 3)))
+      (assert-true (> (pacing-dt p) 1.0))
+      (assert-true (<= (pacing-dt p) 1.02))
+      (assert-equal #f (pacing-resync? p))))
+
+  (test "large gaps request audio resync at most once per bar, with a 2% cap"
+    (let* ((p (pace-frame (pacing-new) 1.0 5.0 6.0 #t #f 3))
+           (again (pace-frame p 1.0 5.0 6.0 #t #f 3))
+           (next (pace-frame again 1.0 5.0 6.0 #t #f 4)))
+      (assert-true (pacing-resync? p))
+      (assert-equal 1.02 (pacing-dt p))
+      (assert-equal #f (pacing-resync? again))
+      (assert-true (pacing-resync? next))))
+
+  (test "pause freezes pacing; suspended audio uses wall time"
+    (assert-equal 0.0 (pacing-dt (pace-frame (pacing-new) 1.0 0.0 4.0 #t #t 0)))
+    (let ((p (pace-frame (pacing-new) 1.0 0.0 4.0 #f #f 0)))
+      (assert-equal 1.0 (pacing-dt p))
+      (assert-equal #f (pacing-resync? p)))))

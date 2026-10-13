@@ -1,0 +1,92 @@
+(import (sigil test)
+        (sigil list)
+        (motif tune)
+        (signal music compile)
+        (signal music score)
+        (signal music song))
+
+(define placeholder (read-tune-file "music/placeholder/parts.cts"))
+(define cues (read-score-cues "music/placeholder/cues.sgl"))
+(define compiled (compile-score placeholder cues))
+
+(define (onsets-at data row channel)
+  (filter (lambda (entry)
+            (and (= row (vector-ref entry 0)) (= channel (vector-ref entry 1))))
+          (score-field data 'onsets)))
+
+;; Repack pairs of 32-row patterns into 64-row patterns, preserving every
+;; section boundary and cell. The odd hold section keeps a 32-row riser.
+(define (repack t)
+  (let loop ((order (tune-order t)) (old-pos 0) (pos 0)
+             (patterns '()) (new-order '()) (marks '()))
+    (if (null? order)
+        (tune t patterns: (reverse patterns) order: (reverse new-order) marks: (reverse marks))
+        (let* ((mark (find (lambda (entry) (= (cdr entry) old-pos)) (tune-marks t)))
+               (next-mark? (find (lambda (entry) (= (cdr entry) (+ old-pos 1))) (tune-marks t)))
+               (pair? (and (pair? (cdr order)) (not next-mark?)))
+               (first (tune-find-pattern t (car order)))
+               (cells (if pair?
+                          (append (tune-pattern-cells first)
+                                  (map (lambda (c) (cell c row: (+ 32 (cell-row c))))
+                                       (tune-pattern-cells (tune-find-pattern t (cadr order)))))
+                          (tune-pattern-cells first)))
+               (pattern (tune-pattern id: pos rows: (if pair? 64 32) cells: cells)))
+          (loop (if pair? (cddr order) (cdr order))
+                (+ old-pos (if pair? 2 1)) (+ pos 1)
+                (cons pattern patterns) (cons pos new-order)
+                (if mark (cons (cons (car mark) pos) marks) marks))))))
+
+(test-group "score: compiled source"
+  (test "runtime data exactly matches a fresh Motif compile"
+    (assert-equal SCORE-ONSETS (score-field compiled 'onsets))
+    (assert-equal SCORE-ORDER-OFFSETS (score-field compiled 'order-offsets))
+    (assert-equal SCORE-SECTIONS (score-field compiled 'sections))
+    (assert-equal SCORE-ONSET-MASKS (score-field compiled 'onset-masks))
+    (assert-equal 2910 (length SCORE-ONSETS)))
+
+  (test "tone portamento, vibrato and arpeggios do not fabricate onsets"
+    (let* ((t (tune-set-cell placeholder 0 (make-cell 16 6 74 0 36 "310")))
+           (t (tune-set-cell t 0 (make-cell 4 6 #f 0 0 "447")))
+           (t (tune-set-cell t 0 (make-cell 8 6 #f 0 0 "037")))
+           (data (compile-score t cues)))
+      (assert-equal 1 (length (onsets-at data 0 6)))
+      (assert-equal '() (onsets-at data 4 6))
+      (assert-equal '() (onsets-at data 8 6))
+      (assert-equal '() (onsets-at data 16 6))
+      (assert-equal 2909 (length (score-field data 'onsets)))))
+
+  (test "note-offs do not fabricate onsets"
+    (let ((data (compile-score (tune-set-cell placeholder 0 (make-cell 16 6 'off 0 0 "000")) cues)))
+      (assert-equal '() (onsets-at data 16 6))
+      (assert-equal 2909 (length (score-field data 'onsets)))))
+
+  (test "multi-bar patterns retain pitches, timing, and section-relative loops"
+    (let* ((data (compile-score (repack placeholder) cues))
+           (offsets (score-field data 'order-offsets))
+           (lap1 (find (lambda (entry) (eq? 'lap1 (vector-ref entry 0)))
+                       (score-field data 'sections))))
+      (assert-equal SCORE-ONSETS (score-field data 'onsets))
+      (assert-equal 384 (vector-ref offsets (vector-ref lap1 1)))
+      (assert-equal '(6 . 32) (score-row->position offsets 416))
+      (assert-equal 8 (vector-ref lap1 3))
+      (assert-equal 16 (vector-ref lap1 4))))
+
+  (test "an incompatible clock or tracker-controlled transport is refused"
+    (assert-error (compile-score (tune placeholder tempo: 141) cues))
+    (assert-error (compile-score (tune placeholder speed: 6) cues))
+    (assert-error (compile-score (tune-set-cell placeholder 0 (make-cell 1 1 #f 0 0 "B00")) cues))
+    (assert-error (compile-score (tune-set-cell placeholder 0 (make-cell 1 1 #f 0 0 "F90")) cues)))
+
+  (test "missing cue sections and out-of-bounds loops are refused"
+    (assert-error (compile-score placeholder '((id . bad) (sections . ()))))
+    (let ((bad (map (lambda (field)
+                     (if (eq? 'sections (car field))
+                         (cons 'sections
+                               (map (lambda (section)
+                                      (if (eq? 'lap1 (car section))
+                                          '(lap1 (loop . (8 . 17)) (next . #f))
+                                          section))
+                                    (cdr field)))
+                         field))
+                   cues)))
+      (assert-error (compile-score placeholder bad)))))

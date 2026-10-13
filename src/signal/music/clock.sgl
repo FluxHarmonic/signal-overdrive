@@ -1,0 +1,43 @@
+;;; Platform-light audible clock and pacing policy. The shell performs
+;;; resyncs; this module never moves a simulation or opens a device.
+(define-library (signal music clock)
+  (import (sigil struct)
+          (sigil math))
+  (export audible-seconds pacing pacing-new pace-frame
+          pacing-dt pacing-gap pacing-resync? pacing-last-resync-bar
+          jump-handoff-window)
+  (begin
+    ;; Delivered and queued are DEVICE frames, not Motif render frames.
+    ;; Paused frames are frames explicitly inserted as silence on pause.
+    (define (audible-seconds delivered queued device-rate latency paused)
+      (- (/ (- delivered queued paused) (* 1.0 device-rate)) latency))
+
+    (define-struct pacing
+      (dt default: 0.0)
+      (gap default: 0.0)
+      (resync? default: #f)
+      (last-resync-bar default: -1))
+
+    (define (pacing-new) (pacing))
+
+    (define (pace-frame p wall-dt simulation-seconds audible running? paused? bar)
+      (let* ((dt (max 0.0 wall-dt))
+             (gap (if running? (- audible simulation-seconds) 0.0))
+             (resync? (and running? (not paused?) (> (abs gap) 0.060)
+                           (not (= bar (pacing-last-resync-bar p)))))
+             ;; Close 10% of the gap per frame, capped at 2% of wall dt.
+             (nudge (if running?
+                        (max (* -0.02 dt) (min (* 0.02 dt) (* gap 0.1)))
+                        0.0)))
+        (pacing p dt: (if paused? 0.0 (+ dt nudge))
+                  gap: gap resync?: resync?
+                  last-resync-bar: (if resync? bar (pacing-last-resync-bar p)))))
+
+    ;; Motif walks ahead of render. Hand over AFTER N-1's first row was
+    ;; walked, BEFORE N's first row; the latter is a missed window, never
+    ;; permission to send the jump late. Units here are absolute frames.
+    (define (jump-handoff-window walker-frame preceding-bar-frame target-bar-frame)
+      (cond
+        ((<= walker-frame preceding-bar-frame) 'wait)
+        ((>= walker-frame target-bar-frame) 'missed)
+        (else 'send)))))

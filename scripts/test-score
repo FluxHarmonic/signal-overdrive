@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")/.."
+CONDUCTOR_SIGIL="${CONDUCTOR_SIGIL:-$HOME/.sigil/versions/0.22.11/sigil}"
+CONDUCTOR_MOTIF="${CONDUCTOR_MOTIF:-$HOME/Projects/Code/sigil/motif}"
+CONDUCTOR_DSP="${CONDUCTOR_DSP:-$HOME/Projects/Code/sigil/sigil-dsp}"
+export XDG_CACHE_HOME="${CONDUCTOR_CACHE_ROOT:-/tmp/signal-conductor-cache}"
+exec nice -n 15 "$CONDUCTOR_SIGIL" -L src -L scripts/music/src \
+  -L .sigil/deps/sigil-test/src -L "$CONDUCTOR_MOTIF/src" -L "$CONDUCTOR_DSP/src" \
+  eval '(begin (load "test/test-score.sgl") (run-tests))'

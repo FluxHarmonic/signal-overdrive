@@ -1,0 +1,23 @@
+;;; Build-time entry. Carrier can replace the tune and cues without code changes.
+(import (sigil process)
+        (sigil fs)
+        (motif tune)
+        (signal music compile))
+
+(define arguments
+  (let find ((remaining (cdr (command-line))))
+    (cond
+      ((null? remaining) '())
+      ((string=? (car remaining) "--") (cdr remaining))
+      (else (find (cdr remaining))))))
+(define tune-path (if (pair? arguments) (car arguments) "music/placeholder/parts.cts"))
+(define cues-path (if (> (length arguments) 1) (cadr arguments) "music/placeholder/cues.sgl"))
+(define output-path (if (> (length arguments) 2) (caddr arguments) "src/signal/music/score.sgl"))
+
+(define score (compile-score (read-tune-file tune-path) (read-score-cues cues-path)))
+(write-file-string output-path (score-module-string score))
+(display "Compiled score: ")
+(display (score-field score 'id))
+(display " / onsets: ")
+(display (length (score-field score 'onsets)))
+(newline)
