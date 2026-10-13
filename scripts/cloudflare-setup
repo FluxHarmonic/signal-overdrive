@@ -1,0 +1,28 @@
+#!/bin/sh
+# The one-time Cloudflare account changes signaloverdrive.net needs. THE
+# ACCOUNT OWNER RUNS THIS. A thin front for substratic's cloudflare-setup,
+# which reads every name from substratic.sgv (Pages project signaloverdrive,
+# production branch master, R2 bucket signaloverdrive-wasm, zone
+# signaloverdrive.net, domains signaloverdrive.net and www.signaloverdrive.net).
+#
+#   scripts/cloudflare-setup            report only: what exists and what each
+#                                       step would do; writes nothing
+#   scripts/cloudflare-setup --create   create the Pages project and the
+#                                       private R2 bucket, each only if
+#                                       missing; nothing is public after this
+#   scripts/cloudflare-setup --domain   attach the domains to the project and
+#                                       create their proxied CNAMEs; refuses
+#                                       before the first production deploy and
+#                                       where a name already points elsewhere
+#
+# Credentials: CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID from the
+# environment, else the pass entry substratic.sgv names. The site's own token
+# is scoped to its bucket and cannot see or create buckets, so --create needs
+# the account's admin token in the environment.
+set -eu
+cd "$(dirname "$0")/.." || exit 1
+if [ ! -f .sigil/deps/substratic/tasks/cloudflare-setup.sgl ]; then
+  echo "cloudflare-setup: substratic's tasks are not installed here; run: sigil deps install" >&2
+  exit 2
+fi
+exec sgx substratic:cloudflare-setup "$@"

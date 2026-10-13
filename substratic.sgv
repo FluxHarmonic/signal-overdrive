@@ -1,0 +1,44 @@
+;;; Signal Overdrive's configuration for substratic's shared site tools
+;;; (substratic tasks/: build-remote, stage-web, check-site, publish-web,
+;;; verify-live, pages-dev-check, cloudflare-setup, host-site). Read as
+;;; data, never evaluated; an unknown key or section is refused.
+(substratic schema: 1)
+
+(publish
+  ;; the token: CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID from the
+  ;; environment when set, else this pass entry (token on line 1, an
+  ;; "account: <id>" line after it)
+  credentials: (pass "cloudflare/signaloverdrive-site")
+  pages: (project: "signaloverdrive"
+          production-branch: "master"
+          preview-branch: "preview"
+          domains: ("signaloverdrive.net" "www.signaloverdrive.net")
+          zone: "signaloverdrive.net"
+          ;; the newest date this box's wrangler 4.112 workerd supports
+          compatibility-date: "2026-07-14")
+  ;; the wasm in R2, served by the generated Function at
+  ;; /w/<sha16>/signal-overdrive.wasm with its own CORP and COEP; the
+  ;; Function says noindex (a binary is no page) though the site is public
+  wasm: (bucket: "signaloverdrive-wasm" binding: "WASM" route: "w" noindex: yes)
+  apps: ((name: "signal-overdrive"
+          ;; a runner build: SIGNAL_WEB_DIR=build/remote-web-<sha>
+          web: (dir: "build/web" env: "SIGNAL_WEB_DIR")
+          ;; the game's path. site/_headers isolates /drive/*: change the two
+          ;; together (check-site's arm refuses a game path _headers does not
+          ;; isolate)
+          mount: "drive"))
+  ;; public from 0.1: robots.txt allows everything, no X-Robots-Tag on the
+  ;; site, and only the 404 page asks not to be indexed
+  indexing: index
+  ;; site/'s tracked files, whole
+  site: (source: "site"
+         copy: tracked
+         required: ("index.html" "404.html" "robots.txt" "_headers" "_redirects" "style.css"
+                    "logo.png" "favicon.png" "favicon.ico" "mark.png" "shots/og.png" "fonts/OFL.txt"))
+  ;; the site's own legs of check-site: the landing, the disabled PLAY 0.1,
+  ;; the phone width, the 404, the analytics, and the game path's isolation
+  check: (arm: "scripts/check-site-arm.mjs"
+          gate-files: ("scripts/plausible-check.mjs"))
+  ;; a private preview on the VPN (substratic's host-site serves both ports)
+  host: (https: 8861 http: 8862 dir: "~/Projects/Code/sigil/signal-overdrive-site-hosted" interface: "wg0")
+  remote: (web-config: web))
