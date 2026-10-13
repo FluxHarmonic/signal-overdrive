@@ -1,0 +1,19 @@
+Signal Overdrive logo, direction corrupt
+
+EMBED.txt  1317 bytes  sha256 5aa36c3d8d87026e
+apple-touch-icon.png  180x180  sha256 979821144ccec066
+favicon.ico  400 bytes  sha256 aa0f39ca54e3589e
+favicon.png  32x32  sha256 e68c5607f1954c06
+logo-1x.png  348x48  sha256 eebcb6b56feb1639
+logo-4x.png  1392x192  sha256 3a6a2bb8fb48c6f4
+logo-glitch-1.png  696x96  sha256 010c0405804b8e33
+logo-glitch-2.png  696x96  sha256 53aa1f00db73b52f
+logo-glitch-3.png  696x96  sha256 0b1b4bebe80188c6
+logo-glitch-4.png  696x96  sha256 c557342c477ee553
+logo-glitch-5.png  696x96  sha256 9790312a8f4277e4
+logo-glitch-6.png  696x96  sha256 3923b84223542303
+logo-glitch-7.png  696x96  sha256 8cba8afd2767d966
+logo-glitch-8.png  696x96  sha256 2ef9acfc15950797
+logo-glitch.js  1911 bytes  sha256 ca8201b86e719686
+logo.png  696x96  sha256 2ec5ff2af679be83
+og.png  1200x630  sha256 62e813fa4dc74121

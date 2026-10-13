@@ -1,0 +1,26 @@
+Signal Overdrive logo, direction CORRUPT: the files for the site
+Written by scripts/art/gen-logo.mjs --export corrupt. Pixel art: show it at
+whole multiples of its size where you can, and always nearest-neighbour.
+
+The wordmark
+  logo.png 696x96 (2x), logo-1x.png 348x48, logo-4x.png 1392x192
+
+  With the glitch (logo.png stays the picture with JS off and under
+  prefers-reduced-motion):
+    <img class="logo" src="/logo.png" width="696" height="96" alt="Signal Overdrive" data-glitch="/logo-glitch-{n}.png">
+    <script src="/logo-glitch.js" defer></script>
+    .logo { image-rendering: pixelated; max-width: 100%; height: auto; }
+  The frames logo-glitch-1.png to -8.png are the same size as logo.png.
+
+The icons
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  favicon.ico holds the 16 and 32 px drawings; apple-touch-icon.png is 180x180.
+
+The social preview
+    <meta property="og:image" content="https://signaloverdrive.net/og.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:card" content="summary_large_image">
+  og.png is the game's title frame at 2x with the logo on it.
