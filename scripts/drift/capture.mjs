@@ -1,0 +1,154 @@
+// One actual native autopilot race, on a private headless X server and
+// verified worker-null. No runner, speaker, Python or hosting is used.
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { spawn, execFileSync } from "node:child_process";
+import { analyze, parseTrace } from "./analyze.mjs";
+
+const ROOT = path.resolve(process.env.CONDUCTOR_ROOT || process.cwd());
+const RUN = path.resolve(process.argv[2]);
+const ARM = process.argv[3] || "normal";
+if (!["normal", "depth", "immediate", "skew"].includes(ARM)) throw new Error("invalid capture arm");
+const BIN = path.resolve(process.env.CONDUCTOR_BINARY || path.join(ROOT, "build/release/bin/signal-overdrive"));
+if (!fs.existsSync(BIN)) throw new Error("no release binary");
+fs.mkdirSync(RUN, { recursive: true });
+const cpu = fs.readFileSync("/proc/self/status", "utf8").match(/^Cpus_allowed_list:\s*(\d+)/m)?.[1];
+if (!cpu) throw new Error("no allowed CPU");
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const children = new Set();
+function launch(command, args, options = {}) {
+  const child = spawn("taskset", ["-c", cpu, "nice", "-n", "15", command, ...args],
+    { cwd: ROOT, detached: true, ...options });
+  children.add(child);
+  child.on("exit", () => children.delete(child));
+  return child;
+}
+function stop(child, signal = "SIGTERM") {
+  if (child && child.exitCode === null) {
+    try { process.kill(-child.pid, signal); } catch { /* already exited */ }
+  }
+}
+function cachedTool(name, packagePrefix) {
+  try { return execFileSync("sh", ["-c", 'command -v "$1"', "sh", name], { encoding: "utf8" }).trim(); }
+  catch {
+    const file = fs.readdirSync("/gnu/store").filter(entry => entry.includes(`-${packagePrefix}-`))
+      .map(entry => `/gnu/store/${entry}/bin/${name}`).find(file => fs.existsSync(file));
+    if (!file) throw new Error(`no cached ${name}; no package fetch is permitted`);
+    return file;
+  }
+}
+const pulse = args => execFileSync("pactl", args, { encoding: "utf8", timeout: 5000 });
+let logFD, capFD, clockFD, gameText = "", captureBytes = 0;
+let game, capture, xserver, reference;
+const timeout = setTimeout(() => { for (const child of children) stop(child, "SIGKILL"); }, 600000);
+try {
+  const nullSink = pulse(["list", "short", "sinks"]).split("\n").map(line => line.split(/\s+/))
+    .find(fields => fields[1] === "worker-null");
+  if (!nullSink) throw new Error("worker-null is absent; refusing to initialize audio");
+  if (!pulse(["list", "short", "sources"]).split("\n").some(line => line.split(/\s+/)[1] === "worker-null.monitor"))
+    throw new Error("worker-null monitor is absent");
+  const xerr = fs.openSync(path.join(RUN, "xvfb.log"), "w");
+  xserver = launch(cachedTool("Xvfb", "xorg-server"), ["-displayfd", "3", "-screen", "0", "1600x1000x24", "-nolisten", "tcp", "-noreset"],
+    { stdio: ["ignore", "ignore", xerr, "pipe"] });
+  fs.closeSync(xerr);
+  let displayText = "";
+  xserver.stdio[3].on("data", bytes => { displayText += bytes; });
+  for (let i = 0; i < 100 && !/^\d+\s*$/.test(displayText); i++) {
+    if (xserver.exitCode !== null) throw new Error("Xvfb exited");
+    await sleep(50);
+  }
+  if (!/^\d+\s*$/.test(displayText)) throw new Error("Xvfb did not allocate a private display");
+  const env = { ...process.env, DISPLAY: `:${displayText.trim()}`, SIGIL_APP_PLATFORM: "x11",
+    SIGIL_AUDIO_BACKEND: "pulseaudio", SIGIL_AUDIO_VERBOSE: "1", PULSE_SINK: "worker-null",
+    PIPEWIRE_NODE: "worker-null", XDG_DATA_HOME: path.join(RUN, "xdg"),
+    LIBGL_ALWAYS_SOFTWARE: "1", LP_NUM_THREADS: "1", GALLIUM_DRIVER: "llvmpipe" };
+  delete env.WAYLAND_DISPLAY;
+  const store = path.join(env.XDG_DATA_HOME, "signal-overdrive");
+  fs.mkdirSync(store, { recursive: true });
+  fs.writeFileSync(path.join(store, "scale.sgl"), "2\n");
+  logFD = fs.openSync(path.join(RUN, "game.log"), "w");
+  capFD = fs.openSync(path.join(RUN, "capture.pcm"), "w");
+  clockFD = fs.openSync(path.join(RUN, "capclock.txt"), "w");
+  capture = launch("parec", ["--device=worker-null.monitor", "--format=s16le", "--rate=48000", "--channels=2", "--latency-msec=10", "--raw"],
+    { env, stdio: ["ignore", "pipe", "pipe"] });
+  capture.stdout.on("data", bytes => {
+    fs.writeSync(capFD, bytes); captureBytes += bytes.length;
+    fs.writeSync(clockFD, `${Date.now()} ${captureBytes}\n`);
+  });
+  capture.stderr.on("data", bytes => fs.appendFileSync(path.join(RUN, "parec.log"), bytes));
+  await sleep(300);
+  if (capture.exitCode !== null) throw new Error("parec failed to open the verified monitor");
+  game = launch(path.join(ROOT, "scripts/dev"), [BIN, "--start", "--autopilot", "--track=loop", "--musiclog",
+    `--music-sabotage=${ARM === "normal" ? "none" : ARM}`, "--quit-after", "400"],
+    { env, stdio: ["ignore", "pipe", "pipe"] });
+  function gameOutput(bytes) { fs.writeSync(logFD, bytes); gameText += bytes; }
+  game.stdout.on("data", gameOutput); game.stderr.on("data", gameOutput);
+  let verifiedPID = null;
+  function verifyRoute() {
+    const inputs = JSON.parse(pulse(["-f", "json", "list", "sink-inputs"]));
+    const ours = inputs.filter(input => {
+      const pid = input.properties?.["application.process.id"];
+      if (!pid) return false;
+      try { return fs.realpathSync(`/proc/${pid}/exe`) === fs.realpathSync(BIN); } catch { return false; }
+    });
+    if (!ours.length) return false;
+    if (ours.some(input => String(input.sink) !== nullSink[0])) throw new Error("game stream escaped worker-null");
+    verifiedPID = ours[0].properties["application.process.id"];
+    fs.writeFileSync(path.join(RUN, "routing.json"), JSON.stringify(ours.map(input => ({ index: input.index, sink: input.sink, pid: input.properties["application.process.id"] })), null, 2));
+    return true;
+  }
+  for (let i = 0; i < 200 && !verifyRoute(); i++) {
+    if (game.exitCode !== null) throw new Error("game exited before opening its Pulse stream");
+    await sleep(50);
+  }
+  if (!verifiedPID) throw new Error("no verified game stream on worker-null");
+  const xdotool = cachedTool("xdotool", "xdotool");
+  let windowID;
+  for (let i = 0; i < 300 && !windowID; i++) {
+    try { windowID = execFileSync(xdotool, ["search", "--onlyvisible", "--name", "^Signal Overdrive$"], { env, encoding: "utf8", timeout: 2000 }).trim().split("\n")[0]; }
+    catch { /* graphics still starting */ }
+    if (!windowID) await sleep(100);
+  }
+  if (!windowID) throw new Error("no private headless game window");
+  execFileSync(xdotool, ["windowfocus", "--sync", windowID], { env, timeout: 5000 });
+  fs.writeFileSync(path.join(RUN, "meta.json"), JSON.stringify({ arm: ARM, binary: BIN, display: env.DISPLAY,
+    game_pid: verifiedPID, null_sink: nullSink[0], cpu, load_start: os.loadavg(), commit: execFileSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8" }).trim() }, null, 2));
+  let complete = false;
+  for (let i = 0; i < 400; i++) {
+    await sleep(1000);
+    if (i % 2 === 0 && !verifyRoute()) throw new Error("game Pulse stream disappeared");
+    const trace = parseTrace(gameText), final = trace.jumps.find(jump => jump.mark === "results");
+    if (final && trace.clocks.at(-1)?.song > final.bar * 12 / 7 + 4) { complete = true; break; }
+    if (game.exitCode !== null) break;
+  }
+  if (!complete) throw new Error("full intended race/coda did not complete");
+  stop(game); await sleep(1000); stop(game, "SIGKILL");
+  await sleep(300); stop(capture); await sleep(100); stop(capture, "SIGKILL");
+  const trace = parseTrace(gameText);
+  fs.writeFileSync(path.join(RUN, "intended.sgv"), `(${trace.jumps.map(jump => `#(${jump.tick} ${jump.bar} ${jump.mark})`).join("\n ")})\n`);
+  const frames = Math.ceil((trace.clocks.at(-1).song + 2) * 48000);
+  const renderLog = fs.openSync(path.join(RUN, "reference.log"), "w");
+  reference = launch(path.join(ROOT, "scripts/dev"), [BIN, "--music-reference", path.join(RUN, "intended.sgv"), path.join(RUN, "reference.pcm"), String(frames)],
+    { env: { ...env, SIGIL_AUDIO_BACKEND: "null" }, stdio: ["ignore", renderLog, renderLog] });
+  fs.closeSync(renderLog);
+  const code = await new Promise((resolve, reject) => { reference.once("exit", resolve); reference.once("error", reject); });
+  if (code !== 0) throw new Error(`offline reference failed (${code})`);
+  const result = analyze(RUN);
+  fs.writeFileSync(path.join(RUN, "analysis.json"), JSON.stringify(result, null, 2) + "\n");
+  const expected = ARM === "normal" ? result.pass : !result.pass;
+  fs.writeFileSync(path.join(RUN, "RESULT"), `RESULT: ${expected ? "PASS" : "FAIL"} — ${ARM} captured gate ${result.pass ? "GREEN" : "RED"}\n`);
+  console.log(JSON.stringify({ ...result, arm: ARM, expected_verdict: expected, rows: undefined }));
+  process.exitCode = expected ? 0 : 1;
+} catch (error) {
+  fs.writeFileSync(path.join(RUN, "RESULT"), `RESULT: SETUP-FAILED — ${error.message}\n`);
+  console.error(`SETUP-FAILED: ${error.message}`); process.exitCode = 125;
+} finally {
+  clearTimeout(timeout);
+  for (const child of children) {
+    stop(child, "SIGKILL");
+    child.stdout?.removeAllListeners("data");
+    child.stderr?.removeAllListeners("data");
+  }
+  for (const fd of [logFD, capFD, clockFD]) if (fd !== undefined) fs.closeSync(fd);
+}

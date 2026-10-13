@@ -1,0 +1,25 @@
+(import (sigil test)
+        (signal music reference)
+        (signal music conductor))
+
+(define plan (list '#(0 0 grid) (vector (song-bar->tick 4) 4 'lap1)
+                   (vector (song-bar->tick 21) 21 'lap2)))
+
+(test-group "reference: intended decisions"
+  (test "intended logs reject actual-driver sample records and invalid clocks"
+    (assert-equal plan (reference-validate plan))
+    (assert-error (reference-validate '(#(landing lap1 4 302400))))
+    (assert-error (reference-validate '(#(0 0 grid) #(1 4 lap1))))
+    (assert-error (reference-validate '(#(0 0 lap1)))))
+
+  (test "the future log plans the target while positions still follow the current section"
+    (let ((c (reference-conductor plan 60)))
+      (assert-equal 'grid (conductor-section c))
+      (assert-equal 'lap1 (jump-mark (conductor-pending c)))
+      (assert-equal 4 (jump-bar (conductor-pending c)))))
+
+  (test "the recorded simulation landing selects the new section at its bar"
+    (let ((c (reference-conductor plan (song-bar->tick 21))))
+      (assert-equal 'lap2 (conductor-section c))
+      (assert-equal 21 (conductor-entry-bar c))
+      (assert-false (conductor-pending c)))))
