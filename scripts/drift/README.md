@@ -15,6 +15,11 @@ monotonic clock. This isolates drawing contention and is recorded in
 metadata. Keep graphical capture evidence when comparing the two modes.
 `CONDUCTOR_GC_PROFILE=1` records the pinned runtime's collection events in
 separate game/reference JSONL files to diagnose long live-frame pauses.
+`node scripts/drift/replay-capture.mjs SOURCE NEW_RUNDIR` re-renders only
+the intended-log reference for saved real PCM at its logged device rate.
+It requires a fresh directory, copies the capture/clock/log unchanged,
+records the original metadata and reference binary hash, and has a
+two-minute limit. It never opens audio or a window or edits SOURCE.
 
 `node scripts/drift/focus.mjs RUNDIR` tests native focus loss separately,
 muted. It copies the binary, opens a private Xvfb, unmaps/remaps only its
