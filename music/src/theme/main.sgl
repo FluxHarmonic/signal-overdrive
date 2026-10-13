@@ -1,48 +1,101 @@
 ;;; (theme main) - The main theme's tools
 ;;;
+;;;   carrier theme tune OUT.cts            write the full theme (Redline):
+;;;                                         refuses to overwrite a tracker edit
 ;;;   carrier theme sketch NAME OUT.cts     write a round-1 sketch (redline,
 ;;;                                         night-wire, uplink)
 ;;;   carrier theme render IN.cts OUT.wav [dry]
-;;;                                         render through the live player with
+;;;                                         one pass through the live player with
 ;;;                                         the theme's inserts (dry: none), 48 kHz
+;;;   carrier theme render-loop IN.cts OUT.wav SECONDS [menu]
+;;;                                         the tune looping (loop: #t) for SECONDS,
+;;;                                         faded over its last 2.5 s; menu: no
+;;;                                         drums and channels 4-8 low-passed
 ;;;   carrier theme stems IN.cts [DIR [CH ...]] each channel (or those named)
-;;;                                         soloed: peak and RMS,
+;;;                                         soloed, one pass: peak and RMS,
 ;;;                                         and a WAV per channel into DIR
 ;;;
-;;; The theme's one insert is a feedback delay on the lead (channel 6),
-;;; a dotted eighth at the tune's tempo: the game opens the theme's player
-;;; with (theme-inserts tempo) for the lead to sound as rendered here.
+;;; The theme's inserts, (theme-inserts tempo): channel 6 (the overdriven
+;;; lead) has a feedback delay, a dotted eighth at the tune's tempo, then
+;;; a low-pass; channels 4, 5, 7 and 8 have a low-pass. Every low-pass is a
+;;; Butterworth pair with one `cutoff` param, open (0.45 of the rate) as
+;;; built. The game opens the theme's player with these inserts so it
+;;; sounds as rendered here; closing the cutoffs is the menu version.
 
 (define-library (theme main)
-  (import (sigil core) (sigil io) (sigil string) (sigil math) (sigil fs)
+  (import (sigil core) (sigil io) (sigil string) (sigil math) (sigil fs) (sigil crypto)
+          (only (sigil dsp core) dsp-sample-rate)
           (motif tune) (motif tune player) (motif graph)
           (carrier render) (carrier analysis)
-          (theme sketches))
-  (export theme-main theme-inserts lead-delay-insert)
+          (theme sketches) (theme redline))
+  (export theme-main theme-inserts lead-delay-insert MENU-CUTOFF)
   (begin
     (define (say . xs) (for-each display xs) (newline))
     (define SR 48000)
+    (define MENU-CUTOFF 1500.0)
 
     (define (fixed x d)
       (let* ((k (expt 10.0 d)) (r (/ (round (* x k)) k)))
         (number->string r)))
     (define (dbfs x) (fixed (* 20 (/ (log (max x 1e-9)) (log 10.0))) 2))
 
+    ;; two Butterworth low-passes sharing one `cutoff` (24 dB per octave),
+    ;; open at 0.45 of the rate (near-transparent there, unlike the Moog)
+    (define (lowpass-stage x)
+      (let ((hi (* 0.45 (dsp-sample-rate))))
+        (g:butlp (g:butlp x (g:param 'cutoff hi 20.0 hi)) (g:param 'cutoff hi 20.0 hi))))
+
     ;; dry plus the delayed signal: a dotted eighth, feedback 0.35, at 0.25
     (define (lead-delay-insert tempo)
       (let ((t (* 0.75 (/ 60.0 tempo))))
-        (lambda (in) (g:add in (g:mul (g:delay in t 0.35) 0.25)))))
+        (lambda (in) (lowpass-stage (g:add in (g:mul (g:delay in t 0.35) 0.25))))))
 
-    (define (theme-inserts tempo) (list (cons 6 (lead-delay-insert tempo))))
+    (define (theme-inserts tempo)
+      (cons (cons 6 (lead-delay-insert tempo))
+            (map (lambda (ch) (cons ch lowpass-stage)) '(4 5 7 8))))
 
-    (define (open t dry?)
-      (open-tune-player t SR inserts: (if dry? '() (theme-inserts (tune-tempo t)))))
+    (define (open t dry? . keys)
+      (open-tune-player t SR inserts: (if dry? '() (theme-inserts (tune-tempo t)))
+                        loop: (and (pair? keys) (car keys))))
 
     ;; the larger of the two channels' peaks, and the mid's RMS
     (define (levels bv frames)
       (let ((l (bv->channel bv frames 0)) (r (bv->channel bv frames 1)))
         (values (max (peak l 0 frames) (peak r 0 frames))
                 (rms (bv->mid bv frames) 0 frames))))
+
+    (define (report what in out frames bv)
+      (call-with-values (lambda () (levels bv frames))
+        (lambda (pk lv)
+          (say "theme: rendered " in " -> " out ": " (fixed (/ frames (* 1.0 SR)) 2) " s, " what
+               ", sample peak " (dbfs pk) " dBFS, mid RMS " (dbfs lv) " dBFS"))))
+
+    ;; Writes the full theme, and OUT.sha256 beside it: the hash of what was
+    ;; written. It refuses to overwrite OUT if OUT no longer matches that
+    ;; hash (edited in the tracker since), unless OUT already equals the new
+    ;; output: fold the edit into src/theme/redline.sgl first. As `carrier
+    ;; tune` does for Carrier.
+    (define (cmd-tune out)
+      (let* ((t (read-tune-string (theme-text)))
+             (text (tune->string t))
+             (new-hash (sha256 text))
+             (side (string-append out ".sha256"))
+             (cur (and (file-exists? out) (sha256 (read-file-string out))))
+             (last (and (file-exists? side) (string-trim (read-file-string side)))))
+        (cond
+          ((and cur (not (equal? cur new-hash)) (not (equal? cur last)))
+           (say "theme: REFUSING to overwrite " out ": "
+                (if last
+                    "it changed since it was generated (a tracker edit?)."
+                    (string-append "there is no " side " to show it is generated output."))
+                " Fold the edit into src/theme/redline.sgl or move the file aside, then regenerate.")
+           1)
+          (else
+           (write-file-string out text)
+           (write-file-string side (string-append new-hash "\n"))
+           (say "theme: wrote " out " (" (number->string (length (tune-order t))) " bars)"
+                (if (equal? cur new-hash) ", unchanged" ""))
+           0))))
 
     (define (cmd-sketch name out)
       (let* ((sym (string->symbol name)))
@@ -63,12 +116,42 @@
              (bv (car r)) (frames (cdr r)))
         (player-close! p)
         (write-wav16 out bv frames SR 1.0)
-        (call-with-values (lambda () (levels bv frames))
-          (lambda (pk lv)
-            (say "theme: rendered " in " -> " out ": " (fixed (/ frames (* 1.0 SR)) 2) " s, "
-                 (if dry? "no inserts, " "lead delay, ")
-                 "sample peak " (dbfs pk) " dBFS, mid RMS " (dbfs lv) " dBFS")))
+        (report (if dry? "no inserts" "the theme's inserts") in out frames bv)
         0))
+
+    ;; scale the last n frames of a stereo f32 render down to silence
+    (define (fade-out! bv frames n)
+      (let loop ((i (max 0 (- frames n))))
+        (when (< i frames)
+          (let ((g (/ (- frames i) (* 1.0 n))))
+            (let ch ((c 0))
+              (when (< c 2)
+                (let ((off (+ (* 8 i) (* 4 c))))
+                  (bytevector-ieee-single-set! bv off (* g (bytevector-ieee-single-ref bv off 'little)) 'little))
+                (ch (+ c 1)))))
+          (loop (+ i 1)))))
+
+    (define (cmd-render-loop in out seconds menu?)
+      (let* ((t (read-tune-file in))
+             (p (open t #f #t))
+             (frames-wanted (exact (round (* seconds SR)))))
+        (when menu?
+          (for-each (lambda (ch) (player-set-channel-volume! p ch 0.0)) '(1 2 3))
+          ;; the set answers #f when the channel's insert has no such param:
+          ;; refuse rather than render an unfiltered "menu" version
+          (for-each (lambda (ch)
+                      (unless (player-set-insert-param! p ch 'cutoff MENU-CUTOFF)
+                        (error "theme: no cutoff on channel's insert" ch)))
+                    '(4 5 6 7 8)))
+        (let* ((r (render-player p SR '() frames-wanted))
+               (bv (car r)) (frames (cdr r)))
+          (player-close! p)
+          (fade-out! bv frames (exact (round (* 2.5 SR))))
+          (write-wav16 out bv frames SR 1.0)
+          (report (if menu? "looping, menu (no drums, 4-8 at 1500 Hz)" "looping") in out frames bv)
+          (say "theme: loop sample " (number->string (or (player-loop-sample p) -1))
+               " (where the walk loops back to, in samples at the render's rate)")
+          0)))
 
     ;; chs: the channels to solo (all eight when empty)
     (define (cmd-stems in dir chs)
@@ -90,20 +173,28 @@
 
     (define (channel-arg? s)
       (let ((n (string->number s))) (and n (exact-integer? n) (<= 1 n 8))))
+    (define (seconds-arg? s)
+      (let ((n (string->number s))) (and n (real? n) (> n 3) (<= n 600))))
     (define (every ok? xs) (or (null? xs) (and (ok? (car xs)) (every ok? (cdr xs)))))
 
     (define (theme-main args)
       (cond
         ((null? args) (theme-main '("help")))
+        ((and (= (length args) 2) (equal? (car args) "tune")) (cmd-tune (cadr args)))
         ((and (= (length args) 3) (equal? (car args) "sketch")) (cmd-sketch (cadr args) (caddr args)))
         ((and (equal? (car args) "render")
               (or (= (length args) 3) (and (= (length args) 4) (equal? (cadddr args) "dry"))))
          (cmd-render (cadr args) (caddr args) (= (length args) 4)))
+        ((and (equal? (car args) "render-loop") (>= (length args) 4) (seconds-arg? (cadddr args))
+              (or (= (length args) 4) (and (= (length args) 5) (equal? (list-ref args 4) "menu"))))
+         (cmd-render-loop (cadr args) (caddr args) (string->number (cadddr args)) (= (length args) 5)))
         ((and (equal? (car args) "stems") (>= (length args) 2)
               (every channel-arg? (if (> (length args) 3) (cdddr args) '())))
          (cmd-stems (cadr args) (if (>= (length args) 3) (caddr args) #f)
                     (if (> (length args) 3) (map string->number (cdddr args)) '())))
         (else
-         (say "usage: carrier theme sketch NAME OUT.cts | carrier theme render IN.cts OUT.wav [dry]"
+         (say "usage: carrier theme tune OUT.cts | carrier theme sketch NAME OUT.cts"
+              " | carrier theme render IN.cts OUT.wav [dry]"
+              " | carrier theme render-loop IN.cts OUT.wav SECONDS [menu]"
               " | carrier theme stems IN.cts [DIR [CH ...]]")
          1)))))

@@ -30,7 +30,11 @@
 (define-library (theme sketches)
   (import (sigil core) (sigil string) (sigil list)
           (theme notation) (theme bank))
-  (export sketch-text sketch-tempo SKETCHES)
+  (export sketch-text sketch-tempo SKETCHES
+          ;; the parts the full theme (theme redline) builds on
+          line line-plain ticks kick snare pad arp-bar bass-root pad-root
+          HOOK redline-bass half-time-bass FOUR OFFBEATS EIGHTHS TICK-PITCH
+          KICK-A KICK-B KICK-PUSH CARRIER-ACCENTS)
   (begin
     (define SKETCHES '(redline night-wire uplink))
 

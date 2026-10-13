@@ -1,0 +1,235 @@
+;;; (theme redline) - Signal Overdrive's main theme: Redline, in full
+;;;
+;;; The title screen's music: a four-bar intro into a 40-bar body that
+;;; loops for as long as the title is up (the tune's last row jumps back to
+;;; the body). 140 BPM, D minor; a bar is 1.714 s, so the intro is 6.9 s and
+;;; the body 68.6 s.
+;;;
+;;; Proposition: an eight-bar hook in the overdriven lead over a falling
+;;; i-VII-VI-V (Dm C Bb A). It climbs D E F and bends up into its high
+;;; notes, and every A-major bar ends on C sharp, which pulls back to D, so
+;;; the hook drives into its own repeat. The intro plays the hook's first
+;;; four bars clean, in Carrier's hollow lead (the signal), over a band that
+;;; builds; then the overdriven lead takes it (the signal, run hot).
+;;;
+;;;   bars   section  what happens
+;;;   0-3    intro    the hit, the band building, the hook's head in
+;;;                   Carrier's lead (clean, no bends)
+;;;   4-11   A        the hook in the overdriven lead; no arp
+;;;   12-19  A2       the hook again, the arp under it, Carrier's lead
+;;;                   doubling the climb an octave down
+;;;   20-27  B        the bridge, half time: Bb Gm Eb A. Falling triads,
+;;;                   sequenced down in thirds, in Carrier's lead; the
+;;;                   overdriven lead answers over E-flat (the flat second)
+;;;                   and A, the darkest turn in the piece
+;;;   28-35  B2       the bridge again at full time: the overdriven lead
+;;;                   takes it with Carrier's lead an octave above, the arp
+;;;                   returns, then two bars of A that rise into the hook
+;;;   36-43  A3       the hook at full strength: doubled throughout, the arp,
+;;;                   a 16th bass with Carrier's octave jumps, open ticks
+;;;   (loop to bar 4)
+;;;
+;;; Channels (the race songs' layout, so every stem is separable):
+;;;   1 kick  2 snare (and the crash)  3 ticks  4 bass  5 pad (the
+;;;   progression)  6 overdriven lead (the hook)  7 arp  8 Carrier's lead
+;;;
+;;;   (theme-text) -> .cts text; THEME-SECTIONS: (name from to) in bars
+
+(define-library (theme redline)
+  (import (sigil core) (sigil string) (sigil list)
+          (theme notation) (theme bank)
+          (only (theme sketches) line line-plain ticks kick snare pad arp-bar bass-root pad-root
+                HOOK redline-bass half-time-bass FOUR OFFBEATS EIGHTHS TICK-PITCH
+                KICK-A KICK-B KICK-PUSH CARRIER-ACCENTS))
+  (export theme-text THEME-SECTIONS THEME-TEMPO INTRO-BARS BODY-BARS THEME-CHORDS)
+  (begin
+    (define THEME-TEMPO 140)
+    (define INTRO-BARS 4)
+    (define BODY-BARS 40)
+    (define NBARS (+ INTRO-BARS BODY-BARS))
+
+    (define THEME-SECTIONS
+      '((intro 0 4) (a 4 12) (a2 12 20) (b 20 28) (b2 28 36) (a3 36 44)))
+
+    (define (section-of n)
+      (let find ((ss THEME-SECTIONS))
+        (cond ((null? ss) (error "theme: bar outside the sections" n))
+              ((and (>= n (cadr (car ss))) (< n (caddr (car ss)))) (car ss))
+              (else (find (cdr ss))))))
+
+    (define (cat-map f xs) (apply append (map f xs)))
+    (define (span a b) (if (>= a b) '() (cons a (span (+ a 1) b))))
+
+    ;; the chord of each bar
+    (define HOOK-CHORDS '((D . m) (C . M) (Bb . M) (A . M)))
+    (define BRIDGE-CHORDS '((Bb . M) (Bb . M) (G . m) (G . m) (Eb . M) (Eb . M) (A . M) (A . M)))
+    (define (chord-of n)
+      (let* ((s (section-of n)) (k (- n (cadr s))))
+        (case (car s)
+          ((b b2) (list-ref BRIDGE-CHORDS k))
+          (else (list-ref HOOK-CHORDS (modulo k 4))))))
+    (define THEME-CHORDS (map chord-of (span 0 NBARS)))
+
+    ;; ------------------------------------------------------------
+    ;; The bridge's lines. Each pair of bars has the rhythm 6 2 8 | 4 4 8
+    ;; (the hook's opening 6 2, then a held note): falling triads, Bb then
+    ;; G minor, then the overdriven lead's answer over E-flat and A.
+    ;; ------------------------------------------------------------
+    (define BRIDGE-CALL
+      (list
+       '((0 6 D 5 44) (6 2 C 5 40) (8 8 Bb 4 44))
+       '((0 4 F 5 44) (4 4 D 5 40) (8 8 C 5 42))
+       '((0 6 Bb 4 44) (6 2 A 4 40) (8 8 G 4 44))
+       '((0 4 D 5 44) (4 4 Bb 4 40) (8 8 A 4 42))))
+    (define BRIDGE-ANSWER
+      (list
+       '((0 6 G 5 46) (6 2 F 5 40) (8 8 Eb 5 44))
+       '((0 4 Bb 5 46) (4 4 G 5 42) (8 8 F 5 44))
+       '((0 12 E 5 46 bend D 5 8) (12 4 Cs 5 42))
+       '((0 8 A 4 42) (14 2 Cs 5 40))))
+    ;; B2's last two bars: up the A-major chord, bent into A, then the
+    ;; hook's last bar (A B-flat A, C sharp) into the hook
+    (define RISE '((0 4 Cs 5 42) (4 4 E 5 44) (8 8 A 5 46 bend G 5 8)))
+
+    (define (add-vol entries dv)
+      (map (lambda (e) (cons (car e) (cons (cadr e) (cons (caddr e) (cons (cadddr e) (cons (+ dv (list-ref e 4)) (list-tail e 5)))))))
+           entries))
+
+    ;; ------------------------------------------------------------
+    ;; Parts
+    ;; ------------------------------------------------------------
+    (define (crash at vol) (note 2 at 8 TICK-PITCH I-CRASH-DRY vol))
+
+    ;; 16ths with Carrier's octave jumps on the 3+3+2 accents; the last 16th
+    ;; is C sharp into a D-minor bar, else the fifth above the root
+    (define (drive-bass at chord into-d? loud)
+      (let ((r (bass-root (car chord))))
+        (cat-map (lambda (i)
+                   (let ((m (cond ((= i 15) (if into-d? (midi 'Cs 2) (+ r 7)))
+                                  ((memv i '(3 6 11 14)) (+ r 12))
+                                  (else r))))
+                     (note 4 (+ at i) 1 m I-BASS
+                           (cond ((memv i '(0 8)) (+ loud 6))
+                                 ((memv i '(3 6 11 14)) (+ loud 3))
+                                 (else loud)))))
+                 (span 0 16))))
+
+    (define SNARE-ROLL-8THS '((0 20) (2 22) (4 30) (6 24) (8 26) (10 28) (12 34) (14 32)))
+    (define SNARE-ROLL-16THS
+      (map (lambda (i) (list i (+ 20 (exact (round (* i 1.7)))))) (span 0 16)))
+    ;; ticks in 32nds over the last beat (Carrier's turnaround)
+    (define (tick-roll at)
+      (cat-map (lambda (k) (note 3 (+ at 12 (* k 0.5)) 0.5 TICK-PITCH I-TICK (+ 14 (* 2 k)))) (span 0 8)))
+
+    ;; the hook section's drums (A, A2, A3): four on the floor, the
+    ;; backbeat, a push and a fill into each D-minor bar
+    (define (hook-drums at hb ticks-soft open-every-bar?)
+      (let ((into-d? (memv hb '(3 7))))
+        (append
+         (kick at (if into-d? (append FOUR '((14 32))) FOUR))
+         (snare at (cond ((= hb 7) '((4 44) (12 40) (13 30) (14 36) (15 42)))
+                         ((= hb 3) '((4 44) (12 46) (14 18) (15 24)))
+                         ((odd? hb) '((4 44) (12 46) (15 14)))
+                         (else '((4 44) (12 46)))))
+         (if (or into-d? open-every-bar?)
+             (append (ticks at (span 0 14) OFFBEATS 28 ticks-soft)
+                     (note 3 (+ at 14) 1 TICK-PITCH I-TICK-OPEN 26))
+             (ticks at (span 0 16) OFFBEATS 28 ticks-soft)))))
+
+    ;; ------------------------------------------------------------
+    ;; One bar
+    ;; ------------------------------------------------------------
+    (define (theme-bar n)
+      (let* ((at (* BAR n))
+             (s (section-of n))
+             (k (- n (cadr s)))          ; bar within its section
+             (chord (chord-of n))
+             (hb (modulo k 8)))
+        (case (car s)
+          ((intro)
+           (append
+            (pad at chord 16 34)
+            (line-plain 8 I-SIGNAL at (list-ref HOOK k) 0 42)
+            (case k
+              ((0) (append (kick at '((0 46))) (crash at 44)
+                           (note 4 at 8 (bass-root 'D) I-BASS 44)
+                           (ticks at (span 8 16) OFFBEATS 16 8)))
+              ((1) (append (kick at '((0 40)))
+                           (redline-bass at chord #f 34)
+                           (ticks at (span 0 16) OFFBEATS 16 8)))
+              ((2) (append (kick at '((0 42) (4 36) (8 40) (12 36)))
+                           (redline-bass at chord #f 36)
+                           (ticks at (span 0 16) OFFBEATS 22 10)))
+              (else (append (kick at (append FOUR '((14 32))))
+                            (snare at '((8 20) (10 24) (12 28) (13 30) (14 34) (15 40)))
+                            (redline-bass at chord #t 38)
+                            (ticks at (span 0 16) OFFBEATS 22 10))))))
+          ((a a2)
+           (let ((second? (eq? (car s) 'a2)))
+             (append
+              (hook-drums at hb (if second? 14 12) #f)
+              (if (= k 0) (crash at 44) '())
+              (redline-bass at chord (memv hb '(3 7)) 40)
+              (pad at chord 16 34)
+              (line 6 I-OVERDRIVE at (list-ref HOOK hb))
+              (if second? (arp-bar at chord 22) '())
+              (if (and second? (>= hb 4)) (line-plain 8 I-SIGNAL at (list-ref HOOK hb) -12 16) '()))))
+          ((b)
+           (append
+            (kick at '((0 46) (10 30)))
+            (snare at (case k
+                        ((3) '((8 44) (14 20) (15 26)))
+                        ((7) '((8 44) (12 30) (13 34) (14 38) (15 42)))
+                        (else '((8 44)))))
+            (ticks at EIGHTHS '(0 4 8 12) 22 12)
+            (half-time-bass at (bass-root (car chord)) 38 #f)
+            (pad at chord 16 30)
+            (if (< k 4)
+                (line 8 I-SIGNAL at (list-ref BRIDGE-CALL k))
+                (line 6 I-OVERDRIVE at (list-ref BRIDGE-ANSWER (- k 4))))))
+          ((b2)
+           (append
+            (cond ((< k 4)
+                   (append (kick at (cond ((= k 3) KICK-PUSH) ((odd? k) KICK-B) (else KICK-A)))
+                           (snare at '((4 44) (12 46)))
+                           (ticks at (span 0 16) CARRIER-ACCENTS 28 14)))
+                  ((< k 6)
+                   (append (kick at FOUR) (snare at '((4 44) (12 46)))
+                           (ticks at (span 0 16) OFFBEATS 28 14)))
+                  ((= k 6)
+                   (append (kick at FOUR) (snare at SNARE-ROLL-8THS)
+                           (ticks at (span 0 16) OFFBEATS 28 16)))
+                  (else
+                   (append (kick at (append FOUR '((14 34)))) (snare at SNARE-ROLL-16THS)
+                           (ticks at (span 0 12) OFFBEATS 28 16) (tick-roll at))))
+            (if (= k 0) (crash at 44) '())
+            (if (< k 6)
+                (redline-bass at chord #f 40)
+                (drive-bass at chord (= k 7) 40))
+            (pad at chord 16 34)
+            (arp-bar at chord 24)
+            (cond ((< k 4)
+                   (append (line 6 I-OVERDRIVE at (add-vol (list-ref BRIDGE-CALL k) 2))
+                           (line-plain 8 I-SIGNAL at (list-ref BRIDGE-CALL k) 12 20)))
+                  ((< k 6) (line 6 I-OVERDRIVE at (list-ref BRIDGE-ANSWER (- k 4))))
+                  ((= k 6) (line 6 I-OVERDRIVE at RISE))
+                  (else (line 6 I-OVERDRIVE at (list-ref HOOK 7))))))
+          ((a3)
+           (append
+            (hook-drums at hb 16 #t)
+            (if (= k 0) (crash at 44) '())
+            (drive-bass at chord (memv hb '(3 7)) 40)
+            (pad at chord 16 36)
+            (line 6 I-OVERDRIVE at (list-ref HOOK hb))
+            (arp-bar at chord 26)
+            (line-plain 8 I-SIGNAL at (list-ref HOOK hb) -12 16)))
+          (else (error "theme: unknown section" s)))))
+
+    (define (theme-events) (cat-map theme-bar (span 0 NBARS)))
+
+    ;; marks: `intro` (bar 0) and `calm` (bar 4, the loop body; motif
+    ;; requires a calm mark). Their regions are the intro and the body.
+    (define (theme-text)
+      (events->tune-text "Signal Overdrive main theme: Redline" THEME-TEMPO NBARS (theme-events)
+                         (bus-text) (theme-bank-text)
+                         #f (list (cons 'intro 0) (cons 'calm INTRO-BARS)) INTRO-BARS))))

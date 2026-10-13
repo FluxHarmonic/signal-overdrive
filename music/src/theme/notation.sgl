@@ -16,7 +16,7 @@
 ;;; slide's later rows get an effect-only cell until the pitch arrives.
 ;;;
 ;;;   (events->tune-text name tempo nbars events bus instruments
-;;;                      [order] [marks]) -> .cts text
+;;;                      [order] [marks] [loop-to]) -> .cts text
 ;;;
 ;;; One pattern per bar. `order` defaults to bars 0..nbars-1 in sequence;
 ;;; `marks` is a list of (name . order-position), written `(marks calm: 0 ...)`;
@@ -181,19 +181,46 @@
 
     (define (range n) (let loop ((i (- n 1)) (acc '())) (if (< i 0) acc (loop (- i 1) (cons i acc)))))
 
+    ;; A looping tune (loop-to = a bar, one pattern per bar): the last row
+    ;; gets a Bxx jump back to that bar's order position, on the highest
+    ;; channel free there, and a release that falls on the row just past
+    ;; the end is written on the loop target's first row instead, unless a
+    ;; cell is already there (an onset there takes the voice over anyway).
+    (define (loop-cells cells nbars loop-to)
+      (let* ((end (* 32 nbars))
+             (target (* 32 loop-to))
+             (taken? (lambda (row ch cs) (let find ((cs cs))
+                                           (cond ((null? cs) #f)
+                                                 ((and (= (car (car cs)) row) (= (cadr (car cs)) ch)) #t)
+                                                 (else (find (cdr cs)))))))
+             (inside (filter (lambda (c) (< (car c) end)) cells))
+             (wrapped (let loop ((cs (filter (lambda (c) (= (car c) end)) cells)) (acc inside))
+                        (cond ((null? cs) acc)
+                              ((taken? target (cadr (car cs)) acc) (loop (cdr cs) acc))
+                              (else (loop (cdr cs) (cons (cons target (cdr (car cs))) acc))))))
+             (jump-ch (let pick ((ch 8))
+                        (cond ((< ch 1) (error "score: no channel free for the loop's jump on the last row"))
+                              ((taken? (- end 1) ch wrapped) (pick (- ch 1)))
+                              (else ch)))))
+        (cons (list (- end 1) jump-ch "..." 0 0 (string-append "B" (hex2 loop-to))) wrapped)))
+
     ;; Cells past the last bar are a composing error (a note off the end).
+    ;; opt: [order] [marks] [loop-to]
     (define (events->tune-text name tempo nbars events bus instruments . opt)
       (let* ((order (if (and (pair? opt) (car opt)) (car opt) (range nbars)))
              (marks (if (and (pair? opt) (pair? (cdr opt))) (cadr opt) '()))
+             (loop-to (and (pair? opt) (pair? (cdr opt)) (pair? (cddr opt)) (caddr opt)))
              (cells (uniq-cells (events->cells events)))
              (_ (for-each (lambda (c)
                             (when (or (< (car c) 0) (> (car c) (* 32 nbars))
                                       (and (= (car c) (* 32 nbars)) (not (off? c))))
                               (error "score: a cell outside the bars" c)))
                           cells))
-             ;; a release on the row just past the last bar is dropped:
-             ;; the tune's end releases every voice
-             (cells (filter (lambda (c) (< (car c) (* 32 nbars))) cells))
+             ;; a release on the row just past the last bar is dropped (the
+             ;; tune's end releases every voice), or wrapped to the loop's start
+             (cells (if loop-to
+                        (loop-cells cells nbars loop-to)
+                        (filter (lambda (c) (< (car c) (* 32 nbars))) cells)))
              (in-bar (lambda (b) (filter (lambda (c) (and (>= (car c) (* 32 b)) (< (car c) (* 32 (+ b 1))))) cells)))
              (shift (lambda (b cs) (map (lambda (c) (cons (- (car c) (* 32 b)) (cdr c))) cs))))
         (string-append

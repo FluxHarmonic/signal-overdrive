@@ -16,13 +16,13 @@
 (define-library (theme bank)
   (import (sigil core) (sigil string))
   (export I-KICK I-SNARE I-TICK I-TICK-OPEN I-BASS I-MINOR-STAB I-MAJOR-STAB
-          I-SIGNAL I-ARP I-OVERDRIVE I-MINOR-PAD I-MAJOR-PAD I-CRASH
-          bank-text bus-text)
+          I-SIGNAL I-ARP I-OVERDRIVE I-MINOR-PAD I-MAJOR-PAD I-CRASH I-CRASH-DRY
+          bank-text theme-bank-text bus-text)
   (begin
     (define I-KICK 1) (define I-SNARE 2) (define I-TICK 3) (define I-TICK-OPEN 4)
     (define I-BASS 5) (define I-MINOR-STAB 6) (define I-MAJOR-STAB 7) (define I-SIGNAL 8)
     (define I-ARP 9) (define I-OVERDRIVE 10) (define I-MINOR-PAD 11) (define I-MAJOR-PAD 12)
-    (define I-CRASH 13)
+    (define I-CRASH 13) (define I-CRASH-DRY 14)
 
     ;; Carrier's hollow FM lead, as a patch body (used alone and as a layer)
     (define SIGNAL-PATCH
@@ -40,7 +40,8 @@
 
     ;; gains are mix trims (instrument gain:, which leaves the performance
     ;; velocities alone); set by measurement, see the theme's notes
-    (define (bank-text overdrive-gain pad-gain)
+    ;; extra: more instrument lines, for the full theme's own
+    (define (bank-text overdrive-gain pad-gain . extra)
       (string-append
        "  (instruments\n"
        ;; --- Carrier's bank, verbatim ---
@@ -64,7 +65,20 @@
        "    (instrument id: 12 name: \"major-pad\" patch: (" (pad-patch "1.259921") ") volume: 24 gain: " (number->string pad-gain) " send: 0.25 pan: -0.15)\n"
        "    (instrument id: 13 name: \"crash\" patch: (chip-noise attack: 0.001 crush-bits: 12 cutoff: 11000 decay: 1.2 hp: 3500 osc-amp: 0.6 release: 0.4 sustain: 0) volume: 26 gain: 0.8 send: 0.25 pan: 0.1"
        " layers: ((chip-hat crush-bits: 10 decay: 0.6 hp: 5000 metal: 0.8 noise: 0.2 octave: 0 volume: 0.35)))\n"
+       (if (pair? extra) (car extra) "")
        "  )\n"))
+
+    ;; The full theme's bank: the sketches' instruments plus a crash for the
+    ;; snare's channel (all eight channels are taken). A channel takes the
+    ;; send and pan of the first instrument it plays, so this one has the
+    ;; snare's; a crash rings out its release when the snare takes over.
+    ;; Played at the snare's note volume, levelled with gain (round 1's
+    ;; crash was volume 30 at gain 0.8).
+    (define (theme-bank-text)
+      (bank-text 0.5 1.2
+                 (string-append
+                  "    (instrument id: 14 name: \"crash-dry\" patch: (chip-noise attack: 0.001 crush-bits: 12 cutoff: 11000 decay: 1.2 hp: 3500 osc-amp: 0.6 release: 0.4 sustain: 0) volume: 44 gain: 0.55 send: 0.06 pan: 0"
+                  " layers: ((chip-hat crush-bits: 10 decay: 0.6 hp: 5000 metal: 0.8 noise: 0.2 octave: 0 volume: 0.35)))\n")))
 
     ;; Carrier's bus, with the compressor's makeup at -0.5 dB where
     ;; Carrier's is +1 (makeup is in dB, not a linear gain): the theme is
