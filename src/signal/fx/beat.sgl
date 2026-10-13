@@ -1,0 +1,128 @@
+;;; (signal fx beat) - The seam between the music and the effects: one
+;;; tick's view of the song, a `pulse`. The effects read nothing else about
+;;; the music, so swapping the stub below for the conductor is one adapter
+;;; function in the shell.
+;;;
+;;; A pulse:
+;;;   section  the song section's mark: calm grid lap1 lap2 hold fill traced
+;;;            uplink results (design §3.4)
+;;;   bar      the song bar, counted from the song's start (monotone)
+;;;   row      the row within the bar, 0..31 (8 rows a beat, 4 beats a bar:
+;;;            the conductor's SONG-ROWS-PER-BEAT and SONG-ROWS-PER-BAR)
+;;;   onsets   the channels with a note-on THIS tick, bit (channel - 1):
+;;;            bit 0 kick, 1 snare, 2 hats, 3 bass, 4 pad, 5 lead, 6 arp,
+;;;            7 Gibson's ICE (design P8). An onset is offered on exactly one
+;;;            tick, the first tick of its row, as conductor-onset-mask does.
+;;;   drop     #t on the one tick the drop lands (the first downbeat of
+;;;            `traced`)
+;;;   energy   0..1, how much of the world is lit and moving (the cue
+;;;            sheet's per-section energy, §3.3)
+;;;
+;;; The stub (stub-pulse) is the conductor's clock without the score: the
+;;; same tick-to-row arithmetic (140 BPM, row = floor(tick * 14 / 45)), a
+;;; fixed four-on-the-floor pattern, and the section chosen by the shell
+;;; from race progress (stub-section).
+;;;
+;;; The conductor's adapter, once feat/conductor is merged (its API as of
+;;; 17ef5e2), is:
+;;;   (make-pulse (conductor-section c) (conductor-bar c) (conductor-row c)
+;;;               (conductor-onset-mask c)
+;;;               <drop: the tick `traced` lands: (conductor-section c) is traced
+;;;                and (conductor-tick c) = (song-bar->tick (conductor-entry-bar c))>
+;;;               (section-energy (conductor-section c)))
+;;; with c = (race-song r). Nothing else in the effects changes.
+
+(define-library (signal fx beat)
+  (import (sigil core))
+
+  (export make-pulse pulse? pulse-with-section pulse-section pulse-bar pulse-row pulse-onsets pulse-drop pulse-energy
+          ROWS-PER-BEAT ROWS-PER-BAR KICK SNARE HATS PAD ARP ICE
+          onset? tick->row tick->bar bar->tick new-row? section-energy
+          stub-pulse stub-section)
+
+  (begin
+    (define ROWS-PER-BEAT 8)
+    (define ROWS-PER-BAR 32)
+    ;; onset bits
+    (define KICK 0) (define SNARE 1) (define HATS 2) (define PAD 4) (define ARP 6) (define ICE 7)
+
+    ;; A pulse is a vector, made positionally: it is made every tick, and a
+    ;; keyword struct's constructor measured 10 to 42 us a call natively
+    ;; against 0.5 us for a vector (several times that in the web build).
+    (define (make-pulse section bar row onsets drop energy)
+      (vector 'pulse section bar row onsets drop energy))
+    (define (pulse? p) (and (vector? p) (= (vector-length p) 7) (eq? (vector-ref p 0) 'pulse)))
+    (define (pulse-section p) (vector-ref p 1))
+    (define (pulse-bar p) (vector-ref p 2))
+    (define (pulse-row p) (vector-ref p 3))
+    (define (pulse-onsets p) (vector-ref p 4))
+    (define (pulse-drop p) (vector-ref p 5))
+    (define (pulse-energy p) (vector-ref p 6))
+    ;; the same pulse in another section (the showcase's TRACED)
+    (define (pulse-with-section p s)
+      (make-pulse s (pulse-bar p) (pulse-row p) (pulse-onsets p) (pulse-drop p) (pulse-energy p)))
+
+    (define BITS #(1 2 4 8 16 32 64 128))
+    (define (onset? p bit) (odd? (quotient (pulse-onsets p) (vector-ref BITS bit))))
+
+    ;; The conductor's arithmetic: 140 BPM, 3 tracker ticks a row, 60
+    ;; simulation ticks a second. Computed from the tick each time.
+    (define (tick->row tick) (quotient (* tick 14) 45))
+    (define (tick->bar tick) (quotient (tick->row tick) ROWS-PER-BAR))
+    ;; the first tick of a bar
+    (define (bar->tick bar)
+      (let ((t (quotient (* bar ROWS-PER-BAR 45) 14)))
+        (if (< (tick->row t) (* bar ROWS-PER-BAR)) (+ t 1) t)))
+    (define (new-row? tick) (or (= tick 0) (> (tick->row tick) (tick->row (- tick 1)))))
+
+    (define (section-energy s)
+      (case s
+        ((calm) 0.2) ((grid) 0.3) ((lap1) 0.5) ((lap2) 0.75) ((hold) 0.6)
+        ((fill) 0.85) ((traced) 1.0) ((uplink) 0.9) ((results) 0.4) (else 0.5)))
+
+    ;; The stub's pattern, by row in the bar: kick on every beat, snare on 2
+    ;; and 4, hats on the off-beat eighths, the pad and Gibson's channel on
+    ;; the downbeat, the arp on every eighth. Gibson's channel plays only
+    ;; while traced.
+    (define (stub-onsets row section)
+      (let* ((beat? (= 0 (modulo row ROWS-PER-BEAT)))
+             (bits (+ (if beat? 1 0)
+                      (if (memv row '(8 24)) 2 0)
+                      (if (= 4 (modulo row 8)) 4 0)
+                      (if (= row 0) 16 0)
+                      (if (= 0 (modulo row 4)) 64 0)
+                      (if (and (= row 0) (eq? section 'traced)) 128 0))))
+        bits))
+
+    ;; One tick's pulse. song-tick: ticks since the song started (the race
+    ;; tick will do for the stub); section: the shell's (stub-section);
+    ;; traced-at: the song tick the player crossed into the final lap, or
+    ;; #f. The drop lands on the first downbeat at or after it.
+    (define (stub-pulse song-tick section traced-at)
+      (let* ((row-all (tick->row song-tick))
+             (row (modulo row-all ROWS-PER-BAR))
+             (bar (quotient row-all ROWS-PER-BAR))
+             (fresh (new-row? song-tick))
+             (drop (and traced-at fresh (= row 0)
+                        (= song-tick (bar->tick (let ((b (tick->bar traced-at)))
+                                                  (if (= traced-at (bar->tick b)) b (+ b 1))))))))
+        (make-pulse section bar row
+                    (if fresh (stub-onsets row section) 0)
+                    drop
+                    (section-energy section))))
+
+    ;; The section the race is in, from its progress (the stub's stand-in
+    ;; for the conductor's plan): phase is the race's, lap the player's lap,
+    ;; laps the race's, halfway? whether the player has passed the lap's
+    ;; halfway point.
+    (define (stub-section phase lap laps halfway?)
+      (case phase
+        ((title) 'calm)
+        ((countdown) 'grid)
+        ((finished) 'uplink)
+        ((corrupt) 'results)
+        (else
+         (cond ((<= lap 1) (if (>= laps 2) 'lap1 'traced))
+               ((>= lap laps) 'traced)
+               ((and (= lap (- laps 1)) halfway?) 'hold)
+               (else 'lap2)))))))

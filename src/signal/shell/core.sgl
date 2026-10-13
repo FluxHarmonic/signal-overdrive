@@ -31,7 +31,10 @@
           (signal race)
           (signal tuning)
           (signal scene)
-          (signal shell audio))
+          (signal shell audio)
+          (signal fx beat)
+          (signal fx state)
+          (signal fx showcase))
 
   (export core-boot! core-frame! core-keys core-sticks core-pad core-param! core-touch!
           core-tap! core-race core-tuning core-describe core-probe core-knobs-markdown GAME-NAME
@@ -106,24 +109,121 @@
                     (when (eq? (car e) 'player)
                       (let ((ev (cdr e)))
                         (cond ((memq ev '(boost)) (set! *kick* 1.0)
-                               (popup! (string-append "-" (number->string (exact (round (handling-ref *tuning* 'boost-cost))))) "#FF9F1A"))
-                              ((eq? ev 'pad) (set! *kick* 0.8) (popup! "PAD" "#FFCC33"))
-                              ((eq? ev 'ice) (popup! "ICE" "#FF5959"))
+                               (popup! (string-append "-" (number->string (exact (round (handling-ref *tuning* 'boost-cost))))) "#F2731A"))   ; orange: speed (P16)
+                              ((eq? ev 'pad) (set! *kick* 0.8) (popup! "PAD" "#F2731A"))
+                              ((eq? ev 'ice) (popup! "ICE" "#FF9F1A"))   ; amber: ICE (P16)
                               ((and (pair? ev) (eq? (car ev) 'wall))
-                               (set! *glitch* (max *glitch* (min 1.0 (/ (cdr ev) 300.0))))
                                (let ((cost (exact (round (* (cdr ev) (handling-ref *tuning* 'wall-damage))))))
                                  (when (>= cost 1) (popup! (string-append "-" (number->string cost)) "#FF5959"))))))))
                   (race-events r))
         (when (and (machine-on-repair m) (= 0 (modulo (race-tick r) 20)))
           (popup! "+" "#4DF2D9"))
-        (when (> (machine-scramble m) 0.0) (set! *glitch* (max *glitch* 0.3)))
+        ;; the glitch is (signal fx state)'s: at most 6 ticks a hit (P15); the
+        ;; scramble's lasting sign is the HUD's, never the road's
         (set! *kick* (* *kick* 0.92))
-        (set! *glitch* (* *glitch* 0.9))
+        (set! *glitch* (fx-glitch-now *fx*))
         (set! *corrupt* (if (eq? (race-phase r) 'corrupt) (min 1.0 (+ *corrupt* 0.03)) 0.0))
         (set! *popups* (let keep ((ps *popups*))
                          (cond ((null? ps) '())
                                ((> (caddr (car ps)) 50) (keep (cdr ps)))
                                (else (cons (list (car (car ps)) (cadr (car ps)) (+ 1 (caddr (car ps)))) (keep (cdr ps)))))))))
+    ;; --- the 0.1 effects ---------------------------------------------------------------
+    ;; (signal fx state), stepped every tick from the stub's pulse (the
+    ;; conductor's later: see (signal fx beat)), the player's events and
+    ;; the integrity. Fires come from the page's panel ("fx-fire=wall"),
+    ;; the F-keys and the showcase.
+    (define *fx* (fx-new))
+    (define *fx-fires* '())
+    (define *traced-at* #f)       ; the tick the player started the final lap
+    (define *fx-caption* #f)
+    (define *fx-ms* 0.0)          ; fx-tick!'s CPU ms a frame, smoothed (in SIM)
+    (define *fx-frame-ms* 0.0)
+    (define FX-ORDER '(fx-dip fx-pools fx-chase fx-sky fx-glitch fx-warp fx-interf))
+    (define (fx-param? kv) (and (> (string-length kv) 3) (string=? (substring kv 0 3) "fx-")))
+    (define (showcase?) (> (tuning-ref *tuning* 'fx-showcase) 0.5))
+    (define (fx-solo)
+      (if (showcase?)
+          (car (showcase-at (race-tick *race*) (stub-pulse (race-tick *race*) 'lap1 #f)))
+          (exact (round (tuning-ref *tuning* 'fx-solo)))))
+    ;; an effect's intensity as the effects see it: 0 when another is solo
+    (define (fx-knob key)
+      (let ((solo (fx-solo))
+            (k (let find ((ks FX-ORDER) (i 1)) (cond ((null? ks) 0) ((eq? (car ks) key) i) (else (find (cdr ks) (+ i 1)))))))
+        (if (and (> solo 0) (> k 0) (not (= solo k))) 0.0 (tuning-ref *tuning* key))))
+
+    (define (fx-tick! r)
+      (let* ((p (race-player r))
+             (m (racer-machine p))
+             (laps (exact (round (race-tuning-ref *tuning* 'laps))))
+             (section (stub-section (race-phase r) (racer-lap p) laps (racer-halfway p))))
+        (if (eq? section 'traced)
+            (unless *traced-at* (set! *traced-at* (race-tick r)))
+            (set! *traced-at* #f))
+        (let* ((pl (stub-pulse (race-tick r) section *traced-at*))
+               (sc (and (showcase?) (showcase-at (race-tick r) pl)))
+               (pl (if (and sc (cadddr sc)) (pulse-with-section pl 'traced) pl))
+               (events (let loop ((es (race-events r)) (acc '()))
+                         (cond ((null? es) acc)
+                               ((eq? (caar es) 'player) (loop (cdr es) (cons (cdar es) acc)))
+                               (else (loop (cdr es) acc)))))
+               (fires (append *fx-fires* (if sc (cadr sc) '())))
+               (tier (tuning-ref *tuning* 'fx-tier))
+               (integrity (cond ((and sc (caddr sc)) (caddr sc))
+                                ((>= tier 0.0) tier)
+                                (else (machine-integrity m)))))
+          (set! *fx-fires* '())
+          (set! *fx-caption*
+                (let ((what (cond (sc (list-ref sc 4))
+                                  ((> (fx-solo) 0) (string-append "SOLO: " (vector-ref FX-NAMES (fx-solo))))
+                                  (else #f)))
+                      (forced (and (>= tier 0.0) (not (and sc (caddr sc)))
+                                   (string-append "TIER " (tier-name (integrity-tier tier)) " (FORCED)"))))
+                  (cond ((and what forced) (string-append what "  " forced))
+                        (else (or what forced)))))
+          (set! *fx* (fx-step *fx* pl events integrity
+                              (list (machine-x m) (machine-y m) (machine-heading m))
+                              fires fx-knob))
+          ;; the drop kicks the camera too (§3.3)
+          (when (and (fx-drop-now *fx*) (> (fx-knob 'fx-dip) 0.0)) (set! *kick* 1.0)))))
+
+    (define (fx-fire! what)
+      (cond ((eq? what 'tier)
+             ;; the integrity the effects see: real, then each tier down
+             (let* ((t (tuning-ref *tuning* 'fx-tier))
+                    (next (cond ((< t 0.0) 70.0) ((> t 50.0) 45.0) ((> t 25.0) 20.0) ((> t 7.0) 5.0) (else -1.0))))
+               (set! *tuning* (tuning-set *tuning* 'fx-tier next))
+               (say "fx tier " (if (< next 0.0) "real" (tier-name (integrity-tier next))))))
+            (else (set! *fx-fires* (cons what *fx-fires*)) (say "fx fire " (symbol->string what)))))
+
+    ;; Natively, and on the web too: E opens the tuning overlay at the
+    ;; effects' knobs (the web page has its own panel on E as well), F6
+    ;; solos the next effect, F7 the showcase, F8 a wall hit, F9 an ICE
+    ;; strike (a tracer: marked on the next downbeat, striking on the one
+    ;; after), F10 the drop, F2 the next integrity tier.
+    (define (fx-keys!)
+      (when (and (pressed? 'e) (not (eq? *platform* 'web)))
+        (set! *overlay* (if *overlay* #f
+                            (let find ((ks KNOBS) (i 0))
+                              (cond ((null? ks) 0) ((eq? (knob-group (car ks)) 'fx) i) (else (find (cdr ks) (+ i 1))))))))
+      (when (pressed? 'f6)
+        (set! *tuning* (tuning-set *tuning* 'fx-solo (modulo (+ 1 (exact (round (tuning-ref *tuning* 'fx-solo)))) 8)))
+        (say "fx solo " (number->string (exact (round (tuning-ref *tuning* 'fx-solo))))))
+      (when (pressed? 'f7)
+        (set! *tuning* (tuning-set *tuning* 'fx-showcase (if (showcase?) 0.0 1.0))))
+      (when (pressed? 'f8) (fx-fire! 'wall))
+      (when (pressed? 'f9) (fx-fire! 'ice))
+      (when (pressed? 'f10) (fx-fire! 'drop))
+      (when (pressed? 'f2) (fx-fire! 'tier)))
+
+    (define (fx-describe)
+      (string-append " fx-ms " (number->string (/ (round (* 100.0 *fx-ms*)) 100.0))
+                     " fx-tier " (number->string (fx-tier *fx*))
+                     " fx-interf " (number->string (/ (round (* 100.0 (fx-interf *fx*))) 100.0))
+                     " fx-section " (symbol->string (fx-section *fx*))
+                     " fx-bar " (number->string (fx-bar *fx*))
+                     " fx-chase " (number->string (fx-chase *fx*))
+                     " fx-solo " (number->string (fx-solo))))
+
     (define *overlay* #f)         ; the selected knob's row while the overlay is open
     (define *platform* 'desktop)
     (define *tapped* #f)
@@ -156,7 +256,13 @@
     (define (core-param! kv)
       (cond ((string=? kv "autopilot") (set! *autopilot* #t) (say "autopilot on"))
             ((string=? kv "start") (set! *start-now* #t))
+            ;; the effects panel's triggers: fx-fire=wall|ice|drop|tier
+            ((and (> (string-length kv) 8) (string=? (substring kv 0 8) "fx-fire="))
+             (fx-fire! (string->symbol (substring kv 8 (string-length kv)))))
+            ((string=? kv "showcase") (core-param! "fx-showcase=1"))
             ((string=? kv "fps") (set! *fps-on* #t))
+            ;; no HUD: clean captures, and the P15 gate's static frame
+            ((string=? kv "nohud") (set! *no-hud* #t))
             ((string=? kv "mute") (audio-mute!))
             ((string=? kv "hitchlog") (set! *hitch-print* #t))
             ((string=? kv "cues=0") (audio-cues! #f))
@@ -176,7 +282,7 @@
              (let ((t (tuning-parse! *tuning* kv)))
                (when t
                  (set! *tuning* t)
-                 (set! *race* (race-new *tuning*))
+                 (unless (fx-param? kv) (set! *race* (race-new *tuning*)))
                  (say "tuning " kv))))))
 
     ;; "steer,throttle,brake,boost,drift" from the page (0/1 for the last two).
@@ -236,7 +342,7 @@
         (set! *boost-latch* boost-now)
         (set! *touch-boost-pending* #f)
         (set! *last-throttle* throttle)
-        (if *autopilot*
+        (if (or *autopilot* (showcase?))
             (let ((m (racer-machine (race-player *race*))))
               (ai-input (race-track *race*) m 0.0 #t))
             (make-input steer throttle brake boost drift))))
@@ -245,7 +351,8 @@
       (let ((t (or *tapped* *start-now*)))
         (set! *tapped* #f)
         (set! *start-now* #f)
-        (or t (pressed? 'return 'space) (pad-pressed? *pad* 'start) (pad-pressed? *pad* 'a))))
+        (or t (and (showcase?) (memq (race-phase *race*) (quote (title finished corrupt))))
+            (pressed? (quote return) (quote space)) (pad-pressed? *pad* (quote start)) (pad-pressed? *pad* (quote a)))))
 
     ;; --- the overlay and the other keys ------------------------------------------------------
 
@@ -314,6 +421,9 @@
                       (race-events r))
             (record-best!)
             (ghost-tick! r was)
+            (let ((t0 (current-jiffy)))
+              (fx-tick! r)
+              (set! *fx-frame-ms* (+ *fx-frame-ms* (ms-since t0))))
             (effects-tick! r)
             (unless (eq? was (race-phase r))
               (say "phase " (symbol->string (race-phase r))
@@ -361,6 +471,7 @@
 
     ;; Frames per second, smoothed, for the F3 readout (?fps shows it from the start).
     (define *fps-on* #f)
+    (define *no-hud* #f)
     (define *fps* 60.0)
     (define *frame-ms* 16.7)
     (define *sim-ms* 0.0)        ; the race's steps this frame, CPU
@@ -426,7 +537,8 @@
                        " lap " (number->string (racer-lap (race-player *race*)))
                        " s " (number->string (exact (round (machine-s m))))
                        " speed " (number->string (speed-kmh m))
-                       " integrity " (number->string (exact (round (machine-integrity m)))))))
+                       " integrity " (number->string (exact (round (machine-integrity m))))
+                       (fx-describe))))
 
     (define (core-frame! dt win-w win-h integer-only)
       (set! *clock* (clock-advance *clock* dt))
@@ -435,12 +547,15 @@
         (set! *frame-ms* (+ (* 0.95 *frame-ms*) (* 0.05 (* 1000.0 dt)))))
       (when (pressed? 'f3) (set! *fps-on* (not *fps-on*)))
       (overlay-keys!)
+      (fx-keys!)
       (when (or (pressed? 'r) (pad-pressed? *pad* 'back))
         (set! *race* (race-start *tuning* *race*))
         (set! *cam-heading* #f)
         (say "restart"))
       (let ((t0 (current-jiffy)))
+        (set! *fx-frame-ms* 0.0)
         (step! (clock-steps *clock*))
+        (set! *fx-ms* (ease *fx-ms* *fx-frame-ms*))
         (set! *sim-ms* (ease *sim-ms* (ms-since t0))))
       (let ((t0 (current-jiffy)))
        (scene-frame! *tuning* *race* (or *cam-heading* 0.0)
@@ -448,7 +563,14 @@
                           (cons 'flash *flash*)
                           (cons 'spark *spark*)
                           (cons 'kick *kick*)
-                          (cons 'glitch *glitch*)
+                          (cons (quote glitch) *glitch*)
+                          (cons (quote fx) *fx*)
+                          (cons (quote fx-knob) fx-knob)
+                          (cons (quote fx-caption) *fx-caption*)
+                          (cons (quote traced-age) (and *traced-at* (eq? (race-phase *race*) (quote race))
+                                                        (- (race-tick *race*) *traced-at*)))
+                          (cons (quote fx-hint) (if (eq? *platform* (quote web)) #f "E EFFECTS  F6 SOLO  F7 SHOWCASE"))
+                          (cons (quote hud) (not *no-hud*))
                           (cons 'corrupt *corrupt*)
                           (cons 'popups *popups*)
                           (cons 'ghost (ghost-now *race*))

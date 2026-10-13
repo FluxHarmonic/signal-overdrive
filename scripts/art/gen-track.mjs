@@ -254,7 +254,7 @@ function build(name, def) {
       const s = l.s, u = l.d / HW;
       // the distance that picks the band, dithered: smooth edges in palette colours
       const ad = Math.abs(l.d) + jitter(x, y);
-      let c;
+      let c, code = 0;   // code: the effects code, stored as 255 - alpha (the ground shader reads it)
       if (ad <= HW) {
         c = road(x, y);
         // the start line: a checker band across the road
@@ -264,7 +264,8 @@ function build(name, def) {
           const zu = (u - z[2]) / (z[3] - z[2]) * 2 - 1;
           const chev = (zs + Math.abs(zu) * 18) % 18;
           const rim = zs < 2 || zs > z[1] - z[0] - 2 || Math.abs(zu) > 0.9;
-          c = rim ? C.LABEL_LIT : chev < 7 ? C.LABEL_LIT : chev < 9 ? C.ICE : C.HOT;
+          c = rim ? C.LABEL_LIT : chev < 7 ? C.LABEL_LIT : chev < 9 ? C.AMBER_DARK : C.HOT;
+          code = rim ? 49 : 33 + Math.floor(((zs + Math.abs(zu) * 18) % 72) / 4.5);
         }
         for (const z of ZONES.repair) if (inZone(z, s, u)) {
           let zs = s - z[0]; if (zs < 0) zs += LENGTH;
@@ -280,11 +281,12 @@ function build(name, def) {
           const v = (h % 97) / 97;
           const lane = (u - z[2]) * HW, zs0 = s - z[0];
           const rim = lane < 2 || lane > (z[3] - z[2]) * HW - 2 || zs0 < 2 || zs0 > z[1] - z[0] - 2;
-          c = rim ? C.TRACE_HOT : v < 0.18 ? C.ICE : v < 0.30 ? C.TRACE_HOT : v < 0.40 ? C.FACE_EDGE
-            : bayerOn(0.5, x, y) ? C.STATIC_B : C.RED;
+          c = rim ? C.ICE : v < 0.18 ? C.ICE : v < 0.30 ? C.AMBER : v < 0.40 ? C.FACE_EDGE
+            : bayerOn(0.5, x, y) ? C.STATIC_B : C.RUST;
+          code = 0;
         }
         // a guide line inside each edge, 4 texels, dashed along the track
-        if (ad > HW - 10 && ad <= HW - 6 && (Math.floor(s / 32) & 1) === 0) c = C.TEXT_DIM;
+        if (ad > HW - 10 && ad <= HW - 6 && (Math.floor(s / 32) & 1) === 0) { c = C.TEXT_DIM; code = 0; }
       } else if (ad <= HW + BARRIER) {
         // the barrier: a white lip, the lit rail in 24-texel blocks (magenta
         // left, cyan right), a dark base
@@ -293,11 +295,12 @@ function build(name, def) {
         const hot = l.d < 0 ? C.HIGHLIGHT : C.SELECTED;
         const dim = l.d < 0 ? C.PLUM_MID : C.TEAL;
         c = k < 2 ? C.FACE_EDGE : k < 10 ? (lit ? hot : dim) : C.BAR_A;
+        if (k >= 2 && k < 10) code = 1 + (Math.floor(s / 24) % 16) + (l.d < 0 ? 0 : 16);
       } else {
         const v = (ad - HW - BARRIER) / RUNOFF;
         c = bayerOn(v, x, y) ? floor(x, y) : C.BAR_A;
       }
-      world.set(x, y, c);
+      world.set(x, y, c, 255 - code);
     }
   }
   world.checkPalette(name);
@@ -329,7 +332,7 @@ function build(name, def) {
     let r = 0, g = 0, b = 0;
     for (let j = 0; j < TILE; j++) for (let i = 0; i < TILE; i++) {
       const p = t.canvas ? t.canvas.get(i, j) : world.get(t.tx * TILE + i, t.ty * TILE + j);
-      atlas.set(ax + i, ay + j, p.slice(0, 3)); r += p[0]; g += p[1]; b += p[2];
+      atlas.set(ax + i, ay + j, p.slice(0, 3), p[3]); r += p[0]; g += p[1]; b += p[2];
     }
     avg.set(id % PER_ROW, Math.floor(id / PER_ROW), [Math.round(r / 1024), Math.round(g / 1024), Math.round(b / 1024)]);
   });

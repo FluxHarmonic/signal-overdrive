@@ -1,0 +1,210 @@
+;;; (signal fx state) - The 0.1 effects' state, stepped once per simulation
+;;; tick from three inputs and nothing else: the tick's pulse ((signal fx
+;;; beat), the music), the player's events (wall hits, ICE, boosts), and
+;;; the cargo's integrity. Pure: no clock, no device, no GPU. The shell
+;;; reads the accessors below each frame and hands them to the shaders.
+;;;
+;;; The effects (design §4.1, the 0.1 subset):
+;;;   dip     the horizon dips on the drop's first downbeat, springs back
+;;;   pools   neon light pools on the ground swell on the kick
+;;;   chase   edge rails and pad chevrons step forward on the hats and beats
+;;;   sky     windows breathe on the kick, signs flash on the snare and
+;;;           change on the bar, the far glow follows the pad, Gibson's
+;;;           tower turns violet while TRACED
+;;;   glitch  tear bands, scrambled tiles and a split channel for 2 to 6
+;;;           ticks (P15: a momentary effect may cross the road for at most
+;;;           100 ms, 6 frames)
+;;;   warp    the road ripples along a tracer's reticle for the bar before
+;;;           it strikes (the telegraph)
+;;;   interf  tracking lines and colour bleed in the sky and the HUD only
+;;;           (P15), by integrity tier, with dropouts on the beat grid
+;;;
+;;; Each has an intensity knob, fx-NAME, 0 (off) to 1 (default) or more.
+
+(define-library (signal fx state)
+  (import (sigil core)
+          (sigil struct)
+          (sigil math)
+          (signal fx beat))
+
+  (export fx fx? fx-new fx-copy fx-step
+          fx-tick fx-kick fx-snare fx-beat fx-flare fx-pad fx-ice fx-traced fx-chase fx-padstep
+          fx-bar fx-row fx-section fx-dip-age fx-glitch-left fx-glitch-power fx-glitch-seed
+          fx-warp fx-warp-age fx-warp-struck fx-interf fx-tier fx-dropout fx-drop-now
+          fx-dip-rows fx-glitch-now fx-warp-strength
+          GLITCH-MAX-TICKS DIP-ROWS WARP-TELEGRAPH
+          integrity-tier tier-dropout? tier-name
+          bend-offset bend-screen-row)
+
+  (begin
+    ;; P15's cap, in ticks (one tick a frame at 60 fps): 100 ms.
+    (define GLITCH-MAX-TICKS 6)
+    ;; how far the horizon dips on the drop at intensity 1, rows
+    (define DIP-ROWS 12.0)
+    ;; a tracer's telegraph: one bar, downbeat to downbeat
+    (define WARP-TELEGRAPH (bar->tick 1))
+
+    ;; One record, updated in place by fx-step: a keyword copy of this
+    ;; struct measured 42 us natively (20 fields), a field set 0.25 us, and
+    ;; the web build multiplies both, so a copy per tick cost the frame
+    ;; about 2.6 ms of SIM in the browser. fx-copy snapshots it for tests.
+    (define-struct fx
+      (tick default: 0 mutable: #t)
+      ;; envelopes, 0..1, set by onsets and decaying per tick
+      (kick default: 0.0 mutable: #t) (snare default: 0.0 mutable: #t) (beat default: 0.0 mutable: #t)
+      (flare default: 0.0 mutable: #t) (pad default: 0.0 mutable: #t) (ice default: 0.0 mutable: #t)
+      (traced default: 0.0 mutable: #t)
+      ;; steps: the rails' chase on the hats, the pads' chevrons on the beat
+      (chase default: 0 mutable: #t) (padstep default: 0 mutable: #t)
+      (bar default: 0 mutable: #t) (row default: 0 mutable: #t) (section default: 'calm mutable: #t)
+      (dip-age default: #f mutable: #t)          ; ticks since the drop, or #f
+      (drop-now default: #f mutable: #t)         ; #t on the tick the drop lands
+      (glitch-left default: 0 mutable: #t) (glitch-power default: 0.0 mutable: #t)
+      (glitch-seed default: 0 mutable: #t)
+      ;; a tracer: (cx cy dx dy half-length half-width) in world texels,
+      ;; armed (waiting for a downbeat), then telegraphing, then struck
+      (warp default: #f mutable: #t) (warp-armed default: #f mutable: #t)
+      (warp-age default: 0 mutable: #t) (warp-struck default: #f mutable: #t)
+      (interf default: 0.0 mutable: #t) (tier default: 0 mutable: #t) (dropout default: #f mutable: #t))
+
+    (define (fx-new) (fx))
+    (define (fx-copy st) (fx st))
+
+    ;; --- integrity tiers (design §3.1) ------------------------------------------------
+
+    ;; 0 CLEAN (80 or more), 1 WORN (55), 2 DAMAGED (30), 3 FAILING (10),
+    ;; 4 CRITICAL (above 0), 5 CORRUPT (0).
+    (define (integrity-tier v)
+      (cond ((>= v 80.0) 0) ((>= v 55.0) 1) ((>= v 30.0) 2) ((>= v 10.0) 3) ((> v 0.0) 4) (else 5)))
+    (define (tier-name k)
+      (vector-ref #("CLEAN" "WORN" "DAMAGED" "FAILING" "CRITICAL" "CORRUPT") k))
+
+    ;; The dropouts, on the grid the lead's dropouts use (§3.1), so the
+    ;; picture drops out with the song: DAMAGED one 16th a bar (the last),
+    ;; FAILING every other beat (the first 16th of beats 2 and 4), CRITICAL
+    ;; all but the first beat, CORRUPT always. Rows are 32nds.
+    (define (tier-dropout? tier row)
+      (case tier
+        ((2) (>= row 30))
+        ((3) (or (= (quotient row 2) 4) (= (quotient row 2) 12)))
+        ((4) (>= row 8))
+        ((5) #t)
+        (else #f)))
+
+    ;; --- the horizon bend -------------------------------------------------------------
+
+    ;; The rows a screen row is pushed down by, for a dip of a rows: all of
+    ;; a above the horizon (the sky moves with it), easing to 0 at the
+    ;; bottom of the view. The ground shader draws row py from the flat
+    ;; row py - B(py).
+    (define (bend-offset py a horizon h)
+      (let ((u (max 0.0 (min 1.0 (/ (- h py) (- h horizon))))))
+        (* a u u)))
+
+    ;; The screen row a flat (unbent) row lands on: solves
+    ;; py - B(py) = y-flat by iteration (B's slope is under 1 for any
+    ;; dip smaller than half the ground's rows, so it converges).
+    (define (bend-screen-row y-flat a horizon h)
+      (let loop ((py y-flat) (k 0))
+        (if (= k 8) py (loop (+ y-flat (bend-offset py a horizon h)) (+ k 1)))))
+
+    ;; --- reading it -------------------------------------------------------------------
+
+    ;; The dip in rows at this tick: a damped swing, A at the drop, a small
+    ;; crest overshoot after a quarter of a second, settled in about 1.5 s.
+    (define (fx-dip-rows st intensity)
+      (let ((age (fx-dip-age st)))
+        (if (or (not age) (<= intensity 0.0) (> age 120))
+            0.0
+            (* intensity DIP-ROWS (exp (/ age -30.0)) (cos (/ (* age 6.283185307) 70.0))))))
+
+    ;; The glitch's strength now, 0 when none is running.
+    (define (fx-glitch-now st)
+      (if (> (fx-glitch-left st) 0) (fx-glitch-power st) 0.0))
+
+    ;; The tracer's ripple: rising through the telegraph, gone 12 ticks
+    ;; after the strike.
+    (define (fx-warp-strength st)
+      (cond ((not (fx-warp st)) 0.0)
+            ((fx-warp-struck st) (max 0.0 (- 1.0 (/ (fx-warp-age st) 12.0))))
+            (else (+ 0.35 (* 0.65 (/ (fx-warp-age st) WARP-TELEGRAPH))))))
+
+    ;; --- stepping ---------------------------------------------------------------------
+
+    (define (decay v k) (if (< v 0.002) 0.0 (* v k)))
+
+    ;; A glitch starts, or a stronger one replaces a weaker; it never
+    ;; runs more than GLITCH-MAX-TICKS.
+    (define (start-glitch! st power)
+      (let* ((p (max 0.0 (min 1.0 power)))
+             (n (min GLITCH-MAX-TICKS (+ 2 (exact (round (* 4.0 p)))))))
+        (unless (and (> (fx-glitch-left st) 0) (> (fx-glitch-power st) p))
+          (set-fx-glitch-left! st n)
+          (set-fx-glitch-power! st p)
+          (set-fx-glitch-seed! st (+ 1 (fx-glitch-seed st))))))
+
+    ;; One tick, in place; returns st. p: this tick's pulse; events: the
+    ;; player's events this tick ('boost, 'pad, 'ice, (wall . impact));
+    ;; integrity: the cargo's, or the panel's override; pose: (x y heading),
+    ;; the player's; fires: what the panel or a key asked for this tick
+    ;; ('wall 'ice 'drop); knob: (lambda (key) intensity).
+    (define (fx-step st p events integrity pose fires knob)
+      (let* ((kick? (onset? p KICK))
+             (row (pulse-row p))
+             (downbeat (and kick? (= 0 row)))
+             (drop (or (pulse-drop p) (and (memq 'drop fires) #t)))
+             (glitch-k (knob 'fx-glitch))
+             (interf-k (knob 'fx-interf)))
+        (set-fx-tick! st (+ 1 (fx-tick st)))
+        (set-fx-kick! st (if kick? 1.0 (decay (fx-kick st) 0.86)))
+        (set-fx-snare! st (if (onset? p SNARE) 1.0 (decay (fx-snare st) 0.8)))
+        (set-fx-beat! st (if (and kick? (= 0 (modulo row ROWS-PER-BEAT))) 1.0 (decay (fx-beat st) 0.9)))
+        (set-fx-flare! st (if drop 1.0 (decay (fx-flare st) 0.96)))
+        (set-fx-pad! st (if (onset? p PAD) (max (fx-pad st) (pulse-energy p)) (decay (fx-pad st) 0.99)))
+        (set-fx-ice! st (if (onset? p ICE) 1.0 (decay (fx-ice st) 0.93)))
+        (set-fx-traced! st (if (eq? (pulse-section p) 'traced)
+                               (min 1.0 (+ (fx-traced st) 0.03))
+                               (max 0.0 (- (fx-traced st) 0.03))))
+        (when (onset? p HATS) (set-fx-chase! st (+ 1 (fx-chase st))))
+        (when kick? (set-fx-padstep! st (+ 1 (fx-padstep st))))
+        (set-fx-bar! st (pulse-bar p))
+        (set-fx-row! st row)
+        (set-fx-section! st (pulse-section p))
+        (set-fx-drop-now! st drop)
+        (set-fx-dip-age! st (cond (drop 0) ((fx-dip-age st) (+ 1 (fx-dip-age st))) (else #f)))
+        (set-fx-glitch-left! st (max 0 (- (fx-glitch-left st) 1)))
+        ;; the glitch's triggers
+        (for-each (lambda (e)
+                    (cond ((and (pair? e) (eq? (car e) 'wall))
+                           (start-glitch! st (* glitch-k (min 1.0 (/ (cdr e) 300.0)))))
+                          ((eq? e 'ice) (start-glitch! st (* glitch-k 0.8)))))
+                  events)
+        (when (memq 'wall fires) (start-glitch! st (* glitch-k 0.8)))
+        ;; a tracer: armed by a fire, placed on the next downbeat in the
+        ;; player's lane, striking on the downbeat after
+        (when (memq 'ice fires) (set-fx-warp-armed! st #t))
+        (cond ((and (fx-warp-armed st) downbeat)
+               (let* ((h (caddr pose)) (fwx (sin h)) (fwy (- (cos h))) (ahead 600.0))
+                 (set-fx-warp-armed! st #f)
+                 (set-fx-warp-struck! st #f)
+                 (set-fx-warp-age! st 0)
+                 (set-fx-warp! st (list (+ (car pose) (* fwx ahead)) (+ (cadr pose) (* fwy ahead))
+                                        fwx fwy 460.0 34.0))))
+              ((fx-warp st)
+               (set-fx-warp-age! st (+ 1 (fx-warp-age st)))
+               (cond ((and (not (fx-warp-struck st)) downbeat (> (fx-warp-age st) 1))
+                      (set-fx-warp-struck! st #t)
+                      (set-fx-warp-age! st 0)
+                      (start-glitch! st glitch-k))
+                     ((and (fx-warp-struck st) (> (fx-warp-age st) 12))
+                      (set-fx-warp! st #f)
+                      (set-fx-warp-struck! st #f)))))
+        (when (<= glitch-k 0.0) (set-fx-glitch-left! st 0))
+        ;; interference, by tier
+        (let* ((tier (integrity-tier integrity))
+               (target (* interf-k (vector-ref #(0.0 0.25 0.5 0.75 1.0 1.0) tier)))
+               (v (fx-interf st)))
+          (set-fx-tier! st tier)
+          (set-fx-interf! st (if (< v target) (min target (+ v 0.05)) (max target (- v 0.02))))
+          (set-fx-dropout! st (and (> interf-k 0.0) (tier-dropout? tier row))))
+        st))))

@@ -1,0 +1,53 @@
+#!/bin/sh
+# scripts/gate-p15 [BUILD]   P15 (design §4.1): the signal's interference
+# never covers the road. Lasting integrity effects live in the sky and the
+# HUD only; if low integrity blurred the road, a struggling player would hit
+# more walls.
+#
+# How: the web build (default build/web) on the title screen, where the
+# camera, the machines and the road do not move, with no HUD (?nohud) and
+# interference alone (?fx-solo=7) at CRITICAL (?fx-tier=5, the strongest:
+# tracking lines, bleed, and static dropouts). Three canvas captures:
+# ON1 and ON2 with interference, OFF after fx-interf=0. Then, by pixel count
+# (ImageMagick compare -metric AE):
+#   ROAD  rows below the horizon (view row 82 down), ON1 against OFF: must be 0
+#   SKY   rows above it (to row 70), ON1 against OFF: must be at least 2000
+#         (the positive control: the interference is there to be seen)
+#   STILL rows below the horizon, ON1 against ON2: must be 0, or the frame
+#         was not static and the gate cannot judge (SETUP-FAILED)
+# Prints GREEN, RED or SETUP-FAILED with the counts, and exits 0, 1 or 2.
+# Renders on the GPU when GPU=1 (default), SwiftShader with GPU=0.
+set -eu
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+BUILD="${1:-$REPO/build/web}"
+OUT="$(mktemp -d /tmp/gate-p15-XXXXXX)"
+SCALE=2
+cat > "$OUT/steps.json" <<'EOF'
+[{"wait": 2500}, {"shot": "on1.png"}, {"wait": 700}, {"shot": "on2.png"},
+ {"param": "fx-interf=0"}, {"wait": 1500}, {"shot": "off.png"}]
+EOF
+GPUFLAG=""; [ "${GPU:-1}" = 1 ] && GPUFLAG="--gpu"
+if ! node "$REPO/scripts/fx-check.mjs" "$BUILD" "$OUT/steps.json" $GPUFLAG --scale $SCALE \
+     --query "mute&nohud&fx-solo=7&fx-tier=5" --out "$OUT" > "$OUT/run.log" 2>&1; then
+  echo "SETUP-FAILED: the capture did not run cleanly; $OUT/run.log:"; cat "$OUT/run.log"; exit 2
+fi
+grep -E "^renderer:" "$OUT/run.log" || true
+for f in on1 on2 off; do
+  [ -s "$OUT/$f.png" ] || { echo "SETUP-FAILED: no $f.png"; exit 2; }
+done
+W=$((480 * SCALE)); H=$((270 * SCALE))
+ROAD_Y=$((82 * SCALE)); ROAD_H=$((H - ROAD_Y)); SKY_H=$((70 * SCALE))
+count() {   # count A B HEIGHT Y: differing pixels in the band
+  guix shell imagemagick -- sh -c "convert '$1' -crop ${W}x$3+0+$4 +repage png:- > '$OUT/a.png'; \
+    convert '$2' -crop ${W}x$3+0+$4 +repage png:- > '$OUT/b.png'; \
+    compare -metric AE '$OUT/a.png' '$OUT/b.png' null: 2>&1 || true" | tail -1 | tr -dc '0-9'
+}
+ROAD=$(count "$OUT/on1.png" "$OUT/off.png" $ROAD_H $ROAD_Y)
+STILL=$(count "$OUT/on1.png" "$OUT/on2.png" $ROAD_H $ROAD_Y)
+SKY=$(count "$OUT/on1.png" "$OUT/off.png" $SKY_H 0)
+echo "road-diff $ROAD  still-diff $STILL  sky-diff $SKY  (pixels at scale $SCALE; captures in $OUT)"
+[ -n "$ROAD" ] && [ -n "$STILL" ] && [ -n "$SKY" ] || { echo "SETUP-FAILED: a count is empty (is ImageMagick reachable?)"; exit 2; }
+if [ "$STILL" -ne 0 ]; then echo "SETUP-FAILED: the road moved between two captures with interference on; the frame is not static"; exit 2; fi
+if [ "$SKY" -lt 2000 ]; then echo "RED: the sky barely changed ($SKY px): the interference is not showing, so the road check proves nothing"; exit 1; fi
+if [ "$ROAD" -ne 0 ]; then echo "RED: interference changed $ROAD road pixels (P15)"; exit 1; fi
+echo "GREEN: interference changed $SKY sky pixels and no road pixels"

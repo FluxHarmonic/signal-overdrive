@@ -42,12 +42,14 @@ const DEG = Math.PI / 180;
 // ---- colour ramps (dark to light) -------------------------------------------------
 const RAMPS = {
   player: [C.WIRE_DARK, C.TEAL, C.TEAL_MID, C.SELECTED, C.TEXT],
-  orange: [C.RUST, C.AMBER_DARK, C.HOT, C.ICE, C.LABEL_LIT],
+  orange: [C.RUST, C.AMBER_DARK, C.AMBER, C.HOT, C.LABEL_LIT],
   magenta: [C.PLUM, C.PLUM_MID, C.ORCHID, C.HIGHLIGHT, C.FACE],
+  // violet is Gibson's (P16): kept for Null's machine in 0.2, not used in 0.1
   violet: [C.INDIGO, C.VIOLET, C.VIOLET_MID, C.GIBSON, C.TEXT],
+  steel: [C.SLATE, C.SIDE_DARK, C.SLATE_MID, C.SLATE_LIGHT, C.FACE],
   trim: [C.BG, C.STATIC_B, C.SIDE_DARK, C.SIDE, C.STATIC_A],
   glass: [C.BAR_A, C.WIRE_DARK, C.COLD, C.SLATE_LIGHT, C.FACE_EDGE],
-  glow: [C.HOT, C.ICE, C.LABEL_LIT, C.FACE_EDGE, C.FACE_EDGE],
+  glow: [C.AMBER_DARK, C.HOT, C.LABEL_LIT, C.FACE_EDGE, C.FACE_EDGE],
 };
 
 // ---- the model (x right, y forward, z up) -------------------------------------------
@@ -242,7 +244,7 @@ const PLAYER = { kind: "falcon", body: RAMPS.player, pod: RAMPS.trim, stripe: RA
 const RIVALS = [
   { kind: "needle", body: RAMPS.orange, pod: RAMPS.trim, stripe: RAMPS.magenta },
   { kind: "brick", body: RAMPS.magenta, pod: RAMPS.trim, stripe: RAMPS.player },
-  { kind: "delta", body: RAMPS.violet, pod: RAMPS.trim, stripe: RAMPS.orange },
+  { kind: "delta", body: RAMPS.steel, pod: RAMPS.trim, stripe: RAMPS.orange },
 ];
 const ELEV_PLAYER = 17 * DEG, ELEV_RIVAL = 12 * DEG;
 const LEAN = [[-26, -10], [-12, -4], [0, 0], [12, 4], [26, 10]];   // roll, yaw (deg)
@@ -267,7 +269,7 @@ for (let y = 0; y < CH; y++) for (let x = 0; x < PW; x++) {
   const streaks = Array.from({ length: 14 }, () => ({ a: -Math.PI * (0.1 + 0.8 * R2()), v: 4 + 9 * R2(), l: 2 + 3 * R2() }));
   for (let fr = 0; fr < 4; fr++) {
     const ox = PW + fr * 32, oy = 7 * CH, t = (fr + 1) / 4;
-    const cols = [C.FACE_EDGE, C.LABEL_LIT, C.ICE, C.HOT];
+    const cols = [C.FACE_EDGE, C.LABEL_LIT, C.HOT, C.AMBER_DARK];
     streaks.forEach((st, i) => {
       if (i % 4 < fr) return;                       // fewer as it fades
       const r = st.v * t * 1.6;

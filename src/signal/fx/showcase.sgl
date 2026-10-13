@@ -1,0 +1,45 @@
+;;; (signal fx showcase) - The showcase: each 0.1 effect alone for eight
+;;; seconds, its trigger fired on the beat so it shows without driving into
+;;; it, then all of them together. Pure: a function of the tick and the
+;;; pulse.
+;;;
+;;; (showcase-at tick p) answers a list:
+;;;   solo     the effect shown alone (the fx-solo numbering), 0 for all
+;;;   fires    the triggers to fire this tick ('drop 'wall 'ice)
+;;;   integrity  the integrity the effects should see, or #f for the cargo's
+;;;   traced?  #t to show the effects as if TRACED (the tower)
+;;;   caption  what the HUD says
+
+(define-library (signal fx showcase)
+  (import (sigil core)
+          (signal fx beat))
+
+  (export showcase-at SHOWCASE-SEGMENT FX-NAMES)
+
+  (begin
+    (define SHOWCASE-SEGMENT 480)      ; ticks, 8 s
+    (define FX-NAMES '#("ALL" "HORIZON DIP" "LIGHT POOLS" "RAIL CHASE" "SKYLINE LIFE"
+                       "ICE GLITCH" "ICE WARP" "INTERFERENCE"))
+
+    (define (showcase-at tick p)
+      (let* ((seg (modulo (quotient tick SHOWCASE-SEGMENT) 8))
+             (within (modulo tick SHOWCASE-SEGMENT))
+             (downbeat (and (onset? p KICK) (= 0 (pulse-row p))))
+             (bar (pulse-bar p))
+             (solo (if (= seg 7) 0 (+ seg 1)))
+             (fires (case solo
+                      ((1) (if (and downbeat (even? bar)) '(drop) '()))
+                      ((5) (if downbeat '(wall) '()))
+                      ((6) (if (and downbeat (even? bar)) '(ice) '()))
+                      ((0) (cond ((and downbeat (= 0 (modulo bar 4))) '(drop))
+                                 ((and downbeat (= 2 (modulo bar 4))) '(wall))
+                                 (else '())))
+                      (else '())))
+             (integrity (and (= solo 7)
+                             (vector-ref #(70.0 45.0 20.0 5.0) (min 3 (quotient within 120)))))
+             (traced (and (= solo 4) (>= within 240))))
+        (list solo fires integrity traced
+              (string-append "SHOWCASE: " (vector-ref FX-NAMES solo)
+                             (cond ((= solo 7) "  INTEGRITY TIER CYCLING")
+                                   (traced "  (TRACED)")
+                                   (else ""))))))))

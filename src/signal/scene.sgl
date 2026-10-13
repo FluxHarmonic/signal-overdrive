@@ -31,7 +31,9 @@
           (signal track)
           (signal handling)
           (signal race)
-          (signal tuning))
+          (signal tuning)
+          (signal fx state)
+          (signal fx lights))
 
   (export VIEW-W VIEW-H scene-init! scene-ready? scene-frame! scene-camera
           scene-world-ms speed-kmh lap-clock)
@@ -139,6 +141,65 @@
                     (machine-x m) (machine-y m) cam-heading
                     (+ (tuning-ref tuning 'cam-dist) (* v (tuning-ref tuning 'speed-pull))))))
 
+    ;; --- the 0.1 effects -----------------------------------------------------------------
+
+    ;; This frame's horizon dip (rows) and the horizon row: sprites move
+    ;; down by what the ground under them moved (bend-screen-row inverts the
+    ;; ground shader's bend), so machines stay on the dipped road.
+    (define *dip* 0.0)
+    (define *horizon* 80.0)
+    (define (bend-dy py)
+      (if (= *dip* 0.0) 0.0 (- (bend-screen-row py *dip* *horizon* (exact->inexact VIEW-H)) py)))
+
+    ;; each track's light pools, made once
+    (define *pools* '())
+    (define (pools-of t)
+      (let ((e (assq (track-name t) *pools*)))
+        (if e (cdr e)
+            (let ((v (track-pools t)))
+              (set! *pools* (cons (cons (track-name t) v) *pools*))
+              v))))
+
+    ;; The effects' uniforms from (signal fx state): fx[0..5] and the
+    ;; lights (see (signal mode7 render)'s GROUND-FRAGMENT). knob: the
+    ;; shell's effective intensity per effect (0 when off or not the solo).
+    ;; hold: fx-hold, every transient effect pinned at its peak (for costs)
+    (define *hold* #f)
+    (define (fx-uniforms! r c st knob hold)
+      (let* ((on (lambda (k) (> (knob k) 0.0)))
+             (sky (knob 'fx-sky))
+             (h (cam-heading c))
+             (lights (if (on 'fx-pools)
+                         (pools-for-frame (pools-of (race-track r))
+                                          (+ (cam-x c) (* 500.0 (sin h))) (- (cam-y c) (* 500.0 (cos h)))
+                                          MODE7-LIGHTS
+                                          (lambda (kind)
+                                            (case kind
+                                              ((city) (+ 0.45 (* 0.75 (fx-kick st))))
+                                              ((pad) (+ 0.5 (* 0.8 (max (fx-beat st) (fx-flare st)))))
+                                              ((lane) (+ 0.8 (* 0.2 (fx-beat st))))
+                                              (else (+ 0.7 (* 0.3 (fx-ice st))))))
+                                          (knob 'fx-pools))
+                         '()))
+             (w (or (fx-warp st)
+                    (and hold (list (+ (cam-x c) (* 600.0 (sin h))) (- (cam-y c) (* 600.0 (cos h))) (sin h) (- (cos h)) 460.0 34.0))))
+             (wv (lambda (k d) (if w (list-ref w k) d)))
+             (flags (+ (if (on 'fx-pools) 1 0) (if (on 'fx-chase) 2 0) (if (on 'fx-sky) 4 0)
+                       (if (on 'fx-warp) 8 0) (if (on 'fx-interf) 16 0))))
+        (set! *hold* hold)
+        (set! *dip* (if hold (* DIP-ROWS (knob (quote fx-dip))) (fx-dip-rows st (knob (quote fx-dip)))))
+        (mode7-set-lights! lights)
+        (mode7-set-fx!
+         (list *dip* (if hold (knob (quote fx-glitch)) (fx-glitch-now st)) (modulo (fx-glitch-seed st) 97) (/ (fx-tick st) 60.0)
+               (modulo (fx-chase st) 16) (modulo (fx-padstep st) 12)
+               (* (knob 'fx-chase) (min 1.0 (+ (* 0.35 (fx-beat st)) (* 0.6 (fx-flare st)))))
+               (* sky (fx-kick st))
+               (* sky (fx-snare st)) (modulo (fx-bar st) 997)
+               (* sky (fx-traced st) (+ 0.6 (* 0.4 (fx-ice st)))) (* sky (fx-pad st))
+               (if hold (knob (quote fx-interf)) (fx-interf st)) (if (and (not hold) (fx-dropout st)) 1.0 0.0) flags (length lights)
+               (wv 0 0.0) (wv 1 0.0) (wv 2 0.0) (wv 3 1.0)
+               (wv 4 0.0) (wv 5 0.0) (* (knob (quote fx-warp)) (if hold 1.0 (fx-warp-strength st))) 0.0))))
+
     ;; --- sprites -------------------------------------------------------------------------
 
     (define PI 3.141592653589793)
@@ -163,7 +224,7 @@
                     (w (* k cw))
                     (h (* k CELL-H))
                     (x (round (- (projected-x p) (* 0.5 w))))
-                    (y (round (- (projected-y p) (* k ANCHOR-Y))))
+                    (y (round (+ (- (projected-y p) (* k ANCHOR-Y)) (bend-dy (projected-y p)))))
                     ;; the shadow's cell, the player's size, on the same ground point
                     (sw (round (* k PLAYER-CELL-W)))
                     (sx (round (- (projected-x p) (* 0.5 sw))))
@@ -238,10 +299,10 @@
                                    (w (* h 0.4)))
                               (list (projected-depth p)
                                     (lambda ()
-                                      (mode7-draw-sprite! *sheet* (round (- (projected-x p) (* 0.5 w))) (round (projected-y top))
+                                      (mode7-draw-sprite! *sheet* (round (- (projected-x p) (* 0.5 w))) (round (+ (projected-y top) (bend-dy (projected-y p))))
                                                           (round w) (round h) 208.0 (* 7 CELL-H) 240.0 (* 8 CELL-H) 0.0 '(0.0 0.0 0.0)))))))
                    (x0 (min (projected-x at) (projected-x bt))) (x1 (max (projected-x at) (projected-x bt)))
-                   (y0 (min (projected-y at) (projected-y bt)))
+                   (y0 (+ (min (projected-y at) (projected-y bt)) (bend-dy (projected-y a))))
                    (bh (max 2.0 (* 0.16 (- (projected-y a) (projected-y at)))))
                    (beam (list (* 0.5 (+ (projected-depth a) (projected-depth b)))
                                (lambda ()
@@ -356,27 +417,63 @@
               (when e (draw-texture-region *font* x y gw gh (* 6 (cdr e)) 0 5 7)))
             (loop (+ i 1) (+ x adv))))))
 
+    ;; The signal's interference on the HUD (P15: the HUD and the sky
+    ;; only): text in the top band (above HUD-BAND, which is sky) jitters
+    ;; sideways, bleeds a red copy, and during a dropout tears further and
+    ;; flickers. The meter is never touched: it's the one reading a
+    ;; struggling player needs.
+    (define HUD-BAND 58)
+    (define *hud-interf* 0.0)
+    (define *hud-dropout* #f)
+    (define *hud-frame* 0)
+    (define (h2 a b)
+      (let ((x (* 43758.5453 (sin (+ (* a 12.9898) (* b 78.233))))))
+        (- x (floor x))))
+
     (define (text! s vx vy hex . size)
-      (let ((k (if (pair? size) (car size) 1)))
-        (rgb "#0D0A1A")
-        (glyphs! s (+ (hx vx) (hs)) (+ (hy vy) (hs)) (* k (hs)))
-        (rgb hex)
-        (glyphs! s (hx vx) (hy vy) (* k (hs)))))
+      (let* ((k (if (pair? size) (car size) 1))
+             (L (if (< vy HUD-BAND) *hud-interf* 0.0))
+             (r (h2 vy *hud-frame*))
+             (j (cond ((<= L 0.0) 0)
+                      (*hud-dropout* (exact (round (* 8.0 (- (h2 *hud-frame* vy) 0.5)))))
+                      ((< r (* 0.35 L)) (exact (round (* 6.0 L (- (h2 *hud-frame* vy) 0.5)))))
+                      (else 0)))
+             (vx (+ vx j)))
+        (unless (and *hud-dropout* (< r 0.45))
+          (when (> L 0.3)
+            (rgb "#CC3340")
+            (glyphs! s (hx (+ vx 1 (exact (round (* 2.0 L))))) (hy vy) (* k (hs))))
+          (rgb "#0D0A1A")
+          (glyphs! s (+ (hx vx) (hs)) (+ (hy vy) (hs)) (* k (hs)))
+          (rgb hex)
+          (glyphs! s (hx vx) (hy vy) (* k (hs))))))
+
+    ;; tracking lines rolling down through the HUD's band
+    (define (hud-tracking!)
+      (when (> *hud-interf* 0.0)
+        (let* ((band (min HUD-BAND (- (exact (round *horizon*)) 2)))
+               (y (modulo (* 2 *hud-frame*) (max 1 band))))
+          (rect! 0 y VIEW-W 1 "#8A8FA0")
+          (when (< (+ y 1) band) (rect! 0 (+ y 1) VIEW-W 1 "#0D0A1A"))
+          (when (> *hud-interf* 0.5)
+            (let ((y2 (modulo (+ y 23) (max 1 band))))
+              (rect! 0 y2 VIEW-W 1 "#2A2D3A"))))))
     (define (text-w s . size) (/ (text-width s (* (if (pair? size) (car size) 1) (hs))) (fit-scale *fit*)))
     (define (centred! s vy hex . size)
       (let ((k (if (pair? size) (car size) 1)))
         (text! s (round (/ (- VIEW-W (text-w s k)) 2)) vy hex k)))
 
-    ;; The integrity meter: a bar of 2-pixel cells, cyan high, amber
-    ;; middling, red low; flashing white for a few frames after a hit.
+    ;; The integrity meter: a bar of 2-pixel cells, cyan (your live signal,
+    ;; P16) down to 30, red below it (the trace's danger), never amber (ICE's);
+    ;; flashing white for a few frames after a hit.
     ;; meter-shown: the integrity the meter showed last frame, easing down to
     ;; the real one, so what a hit or a boost spent drains away in white
     (define *meter-shown* 100.0)
     (define (meter! vx vy integrity flash tick)
       (let* ((cells 50)
              (lit (exact (ceiling (* cells (/ integrity INTEGRITY-MAX)))))
-             (col (cond ((> integrity 55.0) "#4DF2D9") ((> integrity 25.0) "#FF9F1A") (else "#FF5959")))
-             (col (if (and (< integrity 25.0) (odd? (quotient tick 8))) "#CC3340" col))
+             (col (if (>= integrity 30.0) "#4DF2D9" "#FF5959"))
+             (col (if (and (< integrity 30.0) (odd? (quotient tick 8))) "#CC3340" col))
              (col (if (> flash 0) "#FAFCFF" col)))
         (rect! (- vx 1) (- vy 1) (+ (* cells 3) 1) 8 "#0D0A1A")
         ;; two textured draws: every cell dim, then the lit ones
@@ -418,12 +515,22 @@
                         (text! (car pp) (+ (/ VIEW-W 2) 80) (- 15 (quotient age 6)) (cadr pp)))))
                   (cdr (assq 'popups info)))
         (cond ((> (machine-scramble m) 0.0)
-               (when (odd? (quotient tick 4)) (centred! "ICE: STEERING SCRAMBLED" 25 "#FF5959")))
-              ((> (machine-boost m) 0.0) (centred! "BOOST" 25 "#FFCC33"))
+               (when (odd? (quotient tick 4)) (centred! "ICE: STEERING SCRAMBLED" 25 "#FF9F1A")))   ; amber: ICE (P16)
+              ((> (machine-boost m) 0.0) (centred! "BOOST" 25 "#F2731A"))   ; orange: speed
               ((machine-on-repair m) (centred! "CHECKSUM LANE: REPAIRING" 25 "#4DF2D9"))
               ((and (eq? phase 'race) (>= (racer-lap p) (race-tuning-ref tuning 'boost-lap))
                     (> (machine-integrity m) (handling-ref tuning 'boost-cost)))
                (centred! "BOOST READY" 25 "#7380A6")))
+        ;; TRACED. on the final lap, red (P16), for its first three seconds
+        (let ((age (cdr (assq 'traced-age info))))
+          (when (and age (< age 180) (odd? (quotient age 10)))
+            (centred! "TRACED." 36 "#FF5959" 2)))
+        (hud-tracking!)
+        ;; the showcase's or the solo's caption, and the panel's key
+        (let ((cap (cdr (assq 'fx-caption info))))
+          (when cap (centred! cap (- VIEW-H 24) "#FFCC33")))
+        (when (and (cdr (assq 'fx-hint info)) (not (cdr (assq 'fps info))))
+          (text! (cdr (assq 'fx-hint info)) 8 (- VIEW-H 11) "#7380A6"))
         (case phase
           ((title)
            (centred! "SIGNAL OVERDRIVE" 70 "#FF59D9" 3)
@@ -583,16 +690,25 @@
              (dither? (> (tuning-ref tuning 'dither) 0.5))
              (f (view-fit win-w win-h VIEW-W VIEW-H integer-only: integer-only)))
         (set! *fit* f)
+        (set! *horizon* (tuning-ref tuning 'horizon))
+        (let ((st (cdr (assq 'fx info))))
+          (fx-uniforms! r c st (cdr (assq 'fx-knob info)) (> (tuning-ref tuning 'fx-hold) 0.5))
+          (set! *hud-interf* (* (if (> ((cdr (assq 'fx-knob info)) 'fx-interf) 0.0) 1.0 0.0) (fx-interf st)))
+          (set! *hud-dropout* (and (> *hud-interf* 0.0) (fx-dropout st)))
+          (set! *hud-frame* (quotient (fx-tick st) 2)))
         (begin-frame)
         (with-3d-pass *view* (list 0.05 0.04 0.10 1.0)
-          (mode7-draw-ground! c)
+          ;; fx-passes > 1 draws the ground again, to measure its GPU cost
+          (let passes ((k (exact (round (tuning-ref tuning 'fx-passes)))))
+            (mode7-draw-ground! c)
+            (when (> k 1) (passes (- k 1))))
           (draw-machines! c tuning r cam-heading (cdr (assq 'spark info)) (cdr (assq 'ghost info))))
         ;; the frame's effects, for the lookup pass
         (let ((v (min 1.0 (/ (machine-speed m) (handling-ref tuning 'top)))))
           (set-pipeline-uniform! *lut-pipe* 'fx
                                  (list (* (tuning-ref tuning 'speed-lines) (max 0.0 (min 1.0 (* 2.5 (- v 0.55)))) (+ 1.0 (cdr (assq 'kick info))))
                                        (cdr (assq 'time info))
-                                       (cdr (assq 'glitch info))
+                                       (if *hold* ((cdr (assq 'fx-knob info)) 'fx-glitch) (cdr (assq 'glitch info)))
                                        (cdr (assq 'corrupt info))))
           (set-pipeline-uniform! *lut-pipe* 'vp (list (* 0.5 VIEW-W) (tuning-ref tuning 'horizon) 0.0 0.0)))
         (when dither?
@@ -602,7 +718,7 @@
                 (draw-mesh *post-pipe* *tri* *view-tex*))))
         (view-present! *presenter* (if dither? *post* *view*) f)
         (set-blend-mode 'normal)
-        (hud! tuning r info)
+        (when (cdr (assq 'hud info)) (hud! tuning r info))
         (let ((sel (cdr (assq 'overlay info))))
           (when sel (overlay! tuning sel)))
         ;; F3: frames per second and the frame's interval, smoothed

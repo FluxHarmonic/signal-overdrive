@@ -13,7 +13,7 @@ set -eu
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 HOSTDIR="${HOSTDIR:-$HOME/Projects/Code/sigil/signal-overdrive-hosted}"
 PORT_TLS="${PORT_TLS:-8855}"
-PORT_HTTP="${PORT_HTTP:-8856}"
+PORT_HTTP="${PORT_HTTP-8856}"   # PORT_HTTP= (empty) serves https only
 mkdir -p "$HOSTDIR"
 cd "$HOSTDIR"
 HERE="$(pwd)"
@@ -34,13 +34,13 @@ stop_port() {
   rm -f "host-$1.pid"
 }
 stop_port $PORT_TLS
-stop_port $PORT_HTTP
+[ -n "$PORT_HTTP" ] && stop_port $PORT_HTTP
 [ "${1:-}" = "--stop" ] && exit 0
 
 WEB_REL="${WEB:-build/web}"
 case "$WEB_REL" in /*) WEB="$WEB_REL" ;; *) WEB="$REPO/$WEB_REL" ;; esac
 [ -f "$WEB/signal-overdrive.wasm" ] || { echo "host: $WEB_REL/signal-overdrive.wasm missing; build --config web first"; exit 1; }
-[ -f "$WEB/assets/signal/track-atlas.png" ] || { echo "host: $WEB_REL/assets/signal missing"; exit 1; }
+[ -f "$WEB/assets/signal/oval-atlas.png" ] || { echo "host: $WEB_REL/assets/signal missing"; exit 1; }
 rm -rf site
 mkdir -p site
 cp -r "$WEB/index.html" "$WEB/signal-overdrive.wasm" "$WEB/assets" site/
@@ -48,6 +48,9 @@ for f in "$WEB"/sigil-wasm-bridges.*; do [ -f "$f" ] && cp "$f" site/; done
 cp "$REPO/README.md" site/README.md 2>/dev/null || true
 [ -f "$REPO/docs/readme.html" ] && cp "$REPO/docs/readme.html" site/readme.html
 [ -d "$REPO/docs/shots" ] && cp -r "$REPO/docs/shots" site/shots
+# the effects page and its captures
+[ -f "$REPO/docs/effects.html" ] && cp "$REPO/docs/effects.html" site/effects.html
+[ -d "$REPO/docs/fx" ] && cp -r "$REPO/docs/fx" site/fx
 cp "$REPO/scripts/serve.mjs" serve.mjs
 printf 'signal-overdrive %s\ncommit %s\nhosted %s\n' \
   "$(sha256sum site/signal-overdrive.wasm | cut -c1-12)" \
@@ -65,8 +68,10 @@ if [ ! -f tls/cert.pem ]; then
 fi
 nohup node serve.mjs site $PORT_TLS --tls > host-$PORT_TLS.log 2>&1 &
 echo $! > host-$PORT_TLS.pid
+if [ -n "$PORT_HTTP" ]; then
 nohup node serve.mjs site $PORT_HTTP > host-$PORT_HTTP.log 2>&1 &
 echo $! > host-$PORT_HTTP.pid
+fi
 sleep 1
-cat host-$PORT_TLS.log host-$PORT_HTTP.log
+cat host-$PORT_TLS.log; [ -n "$PORT_HTTP" ] && cat host-$PORT_HTTP.log || true
 cat site/version.txt

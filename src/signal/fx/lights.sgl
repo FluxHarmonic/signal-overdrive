@@ -1,0 +1,65 @@
+;;; (signal fx lights) - The neon light pools on the ground (design §4.1):
+;;; where a track's pools are, and which 16 the ground shader gets this
+;;; frame.
+;;;
+;;; The pools come from the track itself until the track file can list
+;;; them (0.2's track format, §7.2): an orange pool on every boost pad, cyan
+;;; pools along the checksum lane, an amber glow on every ICE patch, and the
+;;; city's magenta pools just outside the barrier every 520 texels,
+;;; alternating sides. Colour roles are P16's: orange is speed, cyan your
+;;; signal, amber ICE, magenta the city.
+;;;
+;;; A pool is a vector #(x y radius colour base kind): kind city, pad,
+;;; lane or ice, which says which pulse drives it.
+
+(define-library (signal fx lights)
+  (import (sigil core)
+          (sigil math)
+          (sigil list)
+          (signal track))
+
+  (export track-pools pools-for-frame)
+
+  (begin
+    (define CITY-EVERY 520.0)
+
+    (define (pool t s u radius colour base kind)
+      (let ((p (track-point t s u)))
+        (vector (car p) (cadr p) radius colour base kind)))
+
+    (define (track-pools t)
+      (let* ((len (track-length t))
+             (hw (track-hw t 0))
+             (out (+ 1.0 (/ 70.0 hw)))
+             (zone-mid (lambda (z) (list (* 0.5 (+ (car z) (cadr z))) (* 0.5 (+ (caddr z) (cadddr z))))))
+             (pads (map (lambda (z) (let ((m (zone-mid z))) (pool t (car m) (cadr m) 150.0 1 0.55 'pad)))
+                        (track-boost t)))
+             (ice (map (lambda (z) (let ((m (zone-mid z))) (pool t (car m) (cadr m) 140.0 3 0.35 'ice)))
+                       (track-ice t)))
+             (lane (apply append
+                          (map (lambda (z)
+                                 (let ((u (cadr (zone-mid z))))
+                                   (let loop ((s (+ (car z) 60.0)) (acc '()))
+                                     (if (> s (cadr z)) acc
+                                         (loop (+ s 260.0) (cons (pool t s u 120.0 2 0.4 'lane) acc))))))
+                               (track-repair t))))
+             (city (let loop ((s 200.0) (k 0) (acc '()))
+                     (if (> s (- len 100.0)) acc
+                         (loop (+ s CITY-EVERY) (+ k 1)
+                               (cons (pool t s (if (even? k) out (- out)) 190.0 0 0.5 'city) acc))))))
+        (list->vector (append pads ice lane city))))
+
+    ;; This frame's pools for the shader: the n (16 at most) nearest to the
+    ;; point (fx, fy) the camera looks at, each as (x y radius
+    ;; colour+intensity). level: (lambda (kind) 0..1), the pulse for a kind;
+    ;; scale: the pools' intensity knob.
+    (define (pools-for-frame pools fx fy n level scale)
+      (let* ((d2 (lambda (p) (+ (square (- (vector-ref p 0) fx)) (square (- (vector-ref p 1) fy)))))
+             (all (vector->list pools))
+             (sorted (list-sort (lambda (a b) (< (d2 a) (d2 b))) all))
+             (near (let take ((xs sorted) (k 0))
+                     (if (or (null? xs) (= k n)) '() (cons (car xs) (take (cdr xs) (+ k 1)))))))
+        (map (lambda (p)
+               (let ((i (min 0.99 (max 0.0 (* scale (vector-ref p 4) (level (vector-ref p 5)))))))
+                 (list (vector-ref p 0) (vector-ref p 1) (vector-ref p 2) (+ (vector-ref p 3) i))))
+             near)))))

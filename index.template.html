@@ -51,6 +51,26 @@
     .so-knob { width: 48px; height: 48px; margin: -24px 0 0 -24px; background: rgba(204,230,255,.4); }
     .so-zone { position: fixed; top: 0; bottom: 0; width: 50%; display: none; z-index: 1; pointer-events: none; }
     .so-zone.on { display: block; background: rgba(77,242,217,.08); }
+    /* the effects panel (E): Signal's palette, the tuning overlay's look */
+    #fx-open { position: fixed; right: 8px; bottom: 8px; z-index: 6; padding: 4px 8px; border-radius: 4px;
+               border: 1px solid #7380A6; background: rgba(13,10,26,.7); color: #CCE6FF;
+               font: bold 12px ui-monospace, monospace; cursor: pointer; }
+    #fx-panel { position: fixed; right: 8px; top: 8px; z-index: 7; display: none; max-height: calc(100vh - 16px);
+                overflow: auto; padding: 8px 10px; background: rgba(13,10,26,.92); border: 1px solid #5C4D8C;
+                color: #CCE6FF; font: 12px ui-monospace, monospace; min-width: 360px; }
+    #fx-panel.open { display: block; }
+    #fx-panel h2 { margin: 0 0 6px; font-size: 12px; color: #7380A6; font-weight: bold; letter-spacing: 1px; }
+    #fx-panel .row { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+    #fx-panel .name { width: 108px; }
+    #fx-panel .val { width: 30px; text-align: right; color: #4DF2D9; }
+    #fx-panel button { font: bold 11px ui-monospace, monospace; padding: 4px 6px; min-height: 26px; border-radius: 3px;
+                       border: 1px solid #5C4D8C; background: #21173D; color: #CCE6FF; cursor: pointer; }
+    #fx-panel button:focus-visible, #fx-panel input:focus-visible { outline: 2px solid #FFCC33; }
+    #fx-panel button.on { background: #2A7270; border-color: #4DF2D9; }
+    #fx-panel button.fire { border-color: #F2731A; color: #FFCC33; }
+    #fx-panel input[type=range] { width: 90px; accent-color: #4DF2D9; }
+    #fx-panel .row.off .name, #fx-panel .row.off .val { color: #636D81; }
+    #fx-panel .note { color: #7380A6; font-size: 11px; margin-top: 6px; }
   </style>
 </head>
 <body>
@@ -194,6 +214,131 @@
     });
     // for the headless checks: the scheme in force and the last state sent
     window.SignalOverdriveTouch = { scheme: function () { return scheme; }, last: function () { return last; } };
+  })();
+  </script>
+  <button id="fx-open" title="Effects panel (E)">EFFECTS (E)</button>
+  <div id="fx-panel" role="dialog" aria-label="Effects"></div>
+  <script>
+  // The effects panel (E, or the EFFECTS button): a toggle and an
+  // intensity per effect, solo, all on and off, the showcase, the integrity
+  // tier the effects see, and a button that fires each trigger. Every
+  // change goes to the game as a knob ("param", "fx-glitch=0.6"), or a fire
+  // ("param", "fx-fire=wall"), and into the URL, so a setup is a link. The
+  // panel's keys, clicks and taps stay in the panel: the game never sees
+  // them. Tab moves between controls, arrows set a slider, Enter or Space
+  // presses a button, E or Escape closes.
+  (function () {
+    "use strict";
+    var FX = [
+      { k: "fx-dip", name: "HORIZON DIP", max: 2, fire: "drop", label: "DROP" },
+      { k: "fx-pools", name: "LIGHT POOLS", max: 2 },
+      { k: "fx-chase", name: "RAIL CHASE", max: 1 },
+      { k: "fx-sky", name: "SKYLINE LIFE", max: 1 },
+      { k: "fx-glitch", name: "ICE GLITCH", max: 1, fire: "wall", label: "WALL HIT" },
+      { k: "fx-warp", name: "ICE WARP", max: 1, fire: "ice", label: "ICE STRIKE" },
+      { k: "fx-interf", name: "INTERFERENCE", max: 1, fire: "tier", label: "NEXT TIER" }
+    ];
+    var TIERS = [["REAL", -1], ["WORN", 70], ["DAMAGED", 45], ["FAILING", 20], ["CRITICAL", 5]];
+    var params = new URLSearchParams(location.search);
+    var num = function (k, d) { var v = parseFloat(params.get(k)); return isNaN(v) ? d : v; };
+    var state = { solo: num("fx-solo", 0), showcase: num("fx-showcase", params.has("showcase") ? 1 : 0), tier: num("fx-tier", -1) };
+    var last = {};
+    FX.forEach(function (f) { state[f.k] = num(f.k, 1); last[f.k] = state[f.k] > 0 ? state[f.k] : 1; });
+
+    var app = globalThis.SigilWebApp && globalThis.SigilWebApp.started ? globalThis.SigilWebApp : null, queue = [];
+    document.addEventListener("sigil-web-app-ready", function (e) { app = e.detail; queue.forEach(function (q) { app.dispatch(q[0], q[1]); }); queue = []; }, { once: true });
+    function send(payload) { if (app) app.dispatch("param", payload); else queue.push(["param", payload]); }
+    function fmt(v) { return String(Math.round(v * 100) / 100); }
+
+    // the URL: every non-fx parameter kept, the fx ones that differ from the defaults
+    function syncUrl() {
+      var q = new URLSearchParams(location.search);
+      Array.from(q.keys()).forEach(function (k) { if (k.indexOf("fx-") === 0 || k === "showcase") q.delete(k); });
+      FX.forEach(function (f) { if (state[f.k] !== 1) q.set(f.k, fmt(state[f.k])); });
+      if (state.solo) q.set("fx-solo", fmt(state.solo));
+      if (state.showcase) q.set("fx-showcase", "1");
+      if (state.tier >= 0) q.set("fx-tier", fmt(state.tier));
+      var s = q.toString();
+      history.replaceState(null, "", location.pathname + (s ? "?" + s.replace(/%2C/g, ",") : ""));
+    }
+    var KNOB = { solo: "fx-solo", showcase: "fx-showcase", tier: "fx-tier" };
+    function set(k, v) { state[k] = v; send((KNOB[k] || k) + "=" + fmt(v)); syncUrl(); render(); }
+
+    var panel = document.getElementById("fx-panel"), openBtn = document.getElementById("fx-open");
+    function el(tag, attrs, text) { var e = document.createElement(tag); for (var a in attrs) e.setAttribute(a, attrs[a]); if (text) e.textContent = text; return e; }
+    function button(text, cls, on) { var b = el("button", { type: "button", "class": cls || "" }, text); b.addEventListener("click", on); return b; }
+
+    function render() {
+      var focused = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.id : null;
+      panel.textContent = "";
+      panel.appendChild(el("h2", {}, "EFFECTS  (E CLOSES)"));
+      FX.forEach(function (f, i) {
+        var on = state[f.k] > 0, row = el("div", { "class": "row" + (on ? "" : " off") });
+        var t = button(on ? "ON" : "OFF", on ? "on" : "", function () {
+          if (state[f.k] > 0) { last[f.k] = state[f.k]; set(f.k, 0); } else set(f.k, last[f.k] || 1);
+        });
+        t.dataset.id = f.k + ":t"; t.setAttribute("aria-label", f.name + (on ? " on" : " off"));
+        row.appendChild(t);
+        row.appendChild(el("span", { "class": "name" }, f.name));
+        var r = el("input", { type: "range", min: "0", max: String(f.max), step: "0.1", value: String(state[f.k]), "aria-label": f.name + " intensity" });
+        r.dataset.id = f.k + ":r";
+        r.addEventListener("input", function () { var v = parseFloat(r.value); if (v > 0) last[f.k] = v; state[f.k] = v; send(f.k + "=" + fmt(v)); syncUrl(); val.textContent = fmt(v); row.className = "row" + (v > 0 ? "" : " off"); });
+        row.appendChild(r);
+        var val = el("span", { "class": "val" }, fmt(state[f.k]));
+        row.appendChild(val);
+        var s = button("SOLO", state.solo === i + 1 ? "on" : "", function () { set("solo", state.solo === i + 1 ? 0 : i + 1); });
+        s.dataset.id = f.k + ":s"; row.appendChild(s);
+        if (f.fire) {
+          var b = button(f.label, "fire", function () {
+            if (f.fire === "tier") { var k = TIERS.findIndex(function (t) { return t[1] === state.tier; }); set("tier", TIERS[(k + 1) % TIERS.length][1]); }
+            else send("fx-fire=" + f.fire);
+          });
+          b.dataset.id = f.k + ":f"; row.appendChild(b);
+        }
+        panel.appendChild(row);
+      });
+      var tiers = el("div", { "class": "row" });
+      tiers.appendChild(el("span", { "class": "name" }, "INTEGRITY SEEN"));
+      TIERS.forEach(function (t) {
+        var b = button(t[0], state.tier === t[1] ? "on" : "", function () { set("tier", t[1]); });
+        b.dataset.id = "tier:" + t[0]; tiers.appendChild(b);
+      });
+      panel.appendChild(tiers);
+      var all = el("div", { "class": "row" });
+      [["ALL ON", function () { FX.forEach(function (f) { state[f.k] = last[f.k] || 1; send(f.k + "=" + fmt(state[f.k])); }); set("solo", 0); }],
+       ["ALL OFF", function () { FX.forEach(function (f) { if (state[f.k] > 0) last[f.k] = state[f.k]; state[f.k] = 0; send(f.k + "=0"); }); set("solo", 0); }],
+       [state.showcase ? "SHOWCASE: ON" : "SHOWCASE", function () { set("showcase", state.showcase ? 0 : 1); }]].forEach(function (a, k) {
+        var b = button(a[0], k === 2 && state.showcase ? "on" : "", a[1]); b.dataset.id = "all:" + k; all.appendChild(b);
+      });
+      panel.appendChild(all);
+      panel.appendChild(el("div", { "class": "note" },
+        "The URL keeps this setup. SOLO shows one effect alone. INTEGRITY SEEN changes only what the effects see, never the race. The showcase drives on the autopilot."));
+      if (focused) { var f2 = panel.querySelector('[data-id="' + focused + '"]'); if (f2) f2.focus(); }
+    }
+
+    function open(on) {
+      panel.classList.toggle("open", on);
+      if (on) { render(); var first = panel.querySelector("button"); if (first) first.focus(); }
+      else { var c = document.getElementById("stage"); if (c) c.focus(); }
+    }
+    openBtn.addEventListener("click", function () { open(!panel.classList.contains("open")); });
+    // E toggles the panel anywhere; inside it, its keys stay its own
+    document.addEventListener("keydown", function (e) {
+      if ((e.key === "e" || e.key === "E") && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); open(!panel.classList.contains("open")); }
+    }, true);
+    [panel, openBtn].forEach(function (p) {
+      ["keydown", "keyup", "keypress"].forEach(function (n) {
+        p.addEventListener(n, function (e) {
+          if (n === "keydown" && e.key === "Escape") open(false);
+          if (e.key !== "e" && e.key !== "E") e.stopPropagation();
+        });
+      });
+      ["pointerdown", "pointerup", "touchstart", "touchmove", "touchend", "click", "mousedown"].forEach(function (n) {
+        p.addEventListener(n, function (e) { e.stopPropagation(); }, { passive: true });
+      });
+    });
+    // for the headless checks
+    window.SignalOverdriveFx = { state: function () { return JSON.parse(JSON.stringify(state)); }, open: open };
   })();
   </script>
   <!--sigil:app-->

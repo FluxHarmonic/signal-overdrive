@@ -37,7 +37,8 @@
           (signal mode7 camera))
 
   (export mode7-init! mode7-set-world! mode7-set-sky! mode7-set-look! mode7-draw-ground!
-          mode7-draw-sprite! mode7-ready? mode7-set-far! mode7-sprite-style!)
+          mode7-draw-sprite! mode7-ready? mode7-set-far! mode7-sprite-style!
+          mode7-set-fx! mode7-set-lights! MODE7-LIGHTS)
 
   (begin
     (define GROUND-VERTEX
@@ -55,6 +56,25 @@ void main() {
     ;; z on, w the far fade's start (texels per pixel). world: tile size,
     ;; map size in tiles, atlas tiles per row, the far fade's end. sky:
     ;; layer height, the three rates. Colours 0..1.
+    ;; The effects hooks (all off while fx is zero, the default):
+    ;;   fx[0]  x the horizon bend in rows (+ dips), y the tile scramble
+    ;;          0..1, z the scramble's seed, w the time in seconds
+    ;;   fx[1]  x the rails' chase step, y the chevrons' step, z the pads'
+    ;;          glow 0..1, w the kick 0..1 (windows)
+    ;;   fx[2]  x the snare 0..1 (signs), y the bar (signs change on it),
+    ;;          z the tower's violet 0..1, w the far glow 0..1
+    ;;   fx[3]  x interference 0..1, y 1 during a dropout, z flags (1 pools,
+    ;;          2 chase, 4 sky life, 8 warp, 16 interference), w lights used
+    ;;   fx[4]  the warp strip's centre (x, y) and direction (z, w), world
+    ;;   fx[5]  x its half-length, y its half-width, z strength 0..1
+    ;; lights[i]: x y a pool's centre (world texels), z its radius, w the
+    ;; colour (integer part: 0 city magenta, 1 orange, 2 cyan, 3 amber)
+    ;; plus its intensity (fractional part).
+    ;; Codes in the textures' alpha (255 - alpha; 0 plain): the atlas: 1-16
+    ;; the left rail's blocks, 17-32 the right rail's (block index mod 16),
+    ;; 33-48 a pad's chevrons (position along their period, 16 steps), 49 a
+    ;; pad's rim. The sky: 1 the tower's bands, 2-9 a window group, 10-41 a
+    ;; sign, 42 a far lit floor.
     (define GROUND-FRAGMENT
       "uniform vec4 cam;
 uniform vec4 proj;
@@ -65,6 +85,8 @@ uniform vec4 skyp;
 uniform vec4 fogc;
 uniform vec4 skytop;
 uniform vec4 skylow;
+uniform vec4 lights[16];
+uniform vec4 fx[6];
 uniform sampler2D atlas;
 uniform sampler2D tmap;
 uniform sampler2D tavg;
@@ -72,26 +94,90 @@ uniform sampler2D sky;
 in vec2 v_screen;
 out vec4 frag_color;
 
-vec3 skyline(float px, float py) {
+float hash2(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+bool flag(int b) { return (int(fx[3].z + 0.5) & b) != 0; }
+int code(float a) { return 255 - int(a * 255.0 + 0.5); }
+vec3 cityc(int k) {
+  if (k == 0) return vec3(1.0, 0.349, 0.851);
+  if (k == 1) return vec3(1.0, 0.8, 0.2);
+  if (k == 2) return vec3(0.102, 0.451, 0.851);
+  return vec3(0.714, 0.255, 0.627);
+}
+vec3 lightc(int k) {
+  if (k == 1) return vec3(0.949, 0.451, 0.102);
+  if (k == 2) return vec3(0.302, 0.949, 0.851);
+  if (k == 3) return vec3(1.0, 0.624, 0.102);
+  return vec3(1.0, 0.349, 0.851);
+}
+
+vec3 skybase(float px, float py) {
   float horizon = proj.w;
   float lh = skyp.x;
   vec3 c = mix(skylow.rgb, skytop.rgb, clamp((horizon - py) / horizon, 0.0, 1.0));
+  bool life = flag(4);
+  if (life) c = mix(c, c * 1.6 + vec3(0.03, 0.0, 0.05), fx[2].w * 0.5 * clamp(1.0 - (horizon - py) / 60.0, 0.0, 1.0));
   int w = textureSize(sky, 0).x;
+  float fw = float(w);
   for (int k = 0; k < 3; k++) {
     float rate = k == 0 ? skyp.y : (k == 1 ? skyp.z : skyp.w);
     float ly = lh - (horizon - py);
     if (ly < 0.0 || ly >= lh) continue;
-    int lx = int(floor(px + cam.w * proj.x * rate));
-    lx = ((lx % w) + w) % w;
+    float sx = floor(px + cam.w * proj.x * rate);
+    int lx = int(sx - fw * floor(sx / fw));
     vec4 s = texelFetch(sky, ivec2(lx, k * int(lh) + int(floor(ly))), 0);
-    if (s.a > 0.5) c = s.rgb;
+    if (s.a > 0.5) {
+      vec3 col = s.rgb;
+      int cd = code(s.a);
+      if (life && cd > 0) {
+        float bar = fx[2].y;
+        if (cd == 1) col = mix(col, vec3(0.702, 0.42, 1.0), fx[2].z);
+        else if (cd <= 9) {
+          if (hash2(vec2(float(cd), bar)) < 0.22) col = vec3(0.129, 0.090, 0.239);
+          else col = mix(col, vec3(1.0), 0.4 * fx[1].w);
+        } else if (cd <= 41) {
+          float id = float(cd - 10);
+          float h = hash2(vec2(id, bar));
+          if (h < 0.12) col = vec3(0.09, 0.07, 0.18);
+          else {
+            col = cityc(int(h * 97.0) % 4);
+            if (mod(id + bar, 2.0) < 0.5) col = mix(col, vec3(0.98), 0.6 * fx[2].x);
+          }
+        } else if (cd == 42) col = mix(col, vec3(0.451, 0.502, 0.651), fx[2].w);
+      }
+      c = col;
+    }
   }
+  return c;
+}
+
+// The sky, with the signal's interference (sky and HUD only, P15):
+// rows shifted, a tracking band rolling down, the red channel bleeding
+// sideways, and static during a dropout.
+vec3 skyline(float px, float py) {
+  float L = flag(16) ? fx[3].x : 0.0;
+  if (L <= 0.0) return skybase(px, py);
+  float frame = floor(fx[0].w * 30.0);
+  float row = floor(py);
+  if (fx[3].y > 0.5) {
+    float v = hash2(vec2(floor(px / 2.0), row + frame * 13.0));
+    return v > 0.82 ? vec3(0.54, 0.56, 0.63) : (v > 0.6 ? vec3(0.13, 0.11, 0.24) : vec3(0.05, 0.04, 0.10));
+  }
+  float shift = hash2(vec2(row, frame)) < 0.35 * L ? floor((hash2(vec2(frame, row)) - 0.5) * 18.0 * L) : 0.0;
+  vec3 c = skybase(px + shift, py);
+  if (L > 0.3) c.r = skybase(px + shift + 1.0 + floor(3.0 * L), py).r;
+  float band = mod(fx[0].w * 45.0, proj.w + 40.0) - 20.0;
+  float bw = 1.5 + 4.0 * L;
+  if (abs(py - band) < bw) c = mix(c, vec3(0.86, 0.88, 0.90), 0.6 * L);
+  else if (abs(py - band - bw - 1.0) < 1.0) c *= 1.0 - 0.6 * L;
+  if (hash2(vec2(floor(px), row + frame * 7.0)) < 0.07 * L) c = vec3(0.54, 0.56, 0.63);
   return c;
 }
 
 void main() {
   float px = v_screen.x;
-  float py = v_screen.y;
+  // the horizon bend: draw this row from the flat row py - B(py)
+  float bu = clamp((view.y - v_screen.y) / (view.y - proj.w), 0.0, 1.0);
+  float py = v_screen.y - fx[0].x * bu * bu;
   float f = proj.x;
   float sx = px - 0.5 * view.x;
   float sy = proj.y - py;
@@ -104,6 +190,21 @@ void main() {
   vec2 fw = vec2(sin(cam.w), -cos(cam.w));
   vec2 rt = vec2(cos(cam.w), sin(cam.w));
   vec2 g = cam.xy + t * (ra * fw + sx * rt);
+  // the warp: the ground rippled across a tracer's strip (the telegraph)
+  float wal = 0.0;
+  float wpe = 0.0;
+  bool inw = false;
+  if (flag(8) && fx[5].z > 0.0) {
+    vec2 dir = fx[4].zw;
+    vec2 nrm = vec2(-dir.y, dir.x);
+    vec2 rel = g - fx[4].xy;
+    wal = dot(rel, dir);
+    wpe = dot(rel, nrm);
+    float dist = length(vec2(max(abs(wal) - fx[5].x, 0.0), max(abs(wpe) - fx[5].y, 0.0)));
+    float fall = exp(-dist / 48.0) * fx[5].z;
+    g += nrm * (sin(wpe * 0.22 - fx[0].w * 14.0) + 0.5 * sin(wal * 0.07 + fx[0].w * 9.0)) * 7.0 * fall;
+    inw = abs(wal) <= fx[5].x && abs(wpe) <= fx[5].y;
+  }
   float tile = world.x;
   vec2 tc = floor(g / tile);
   int idx = 0;
@@ -112,14 +213,60 @@ void main() {
     idx = int(m.r * 255.0 + 0.5) + 256 * int(m.g * 255.0 + 0.5);
   }
   int per = int(world.z);
+  // the glitch's scrambled tiles: a share of the tiles show another
+  if (fx[0].y > 0.0 && hash2(tc + vec2(fx[0].z * 1.7, fx[0].z)) < fx[0].y * 0.3) {
+    ivec2 ts = textureSize(tavg, 0);
+    idx = int(hash2(tc * 1.3 + vec2(fx[0].z)) * float(ts.x * ts.y - 1));
+  }
   ivec2 cell = ivec2(idx % per, idx / per);
   ivec2 inner = ivec2(floor(g - tc * tile));
-  vec3 c = texelFetch(atlas, cell * int(tile) + inner, 0).rgb;
+  vec4 at = texelFetch(atlas, cell * int(tile) + inner, 0);
+  vec3 c = at.rgb;
+  int cd = code(at.a);
+  // the chase: the rails' lit blocks and the pads' chevrons step forward
+  if (cd > 0 && flag(2)) {
+    if (cd <= 32) {
+      bool left = cd <= 16;
+      float k = mod(float((cd - 1) % 16) - fx[1].x, 4.0);
+      vec3 hot = left ? vec3(1.0, 0.349, 0.851) : vec3(0.302, 0.949, 0.851);
+      vec3 dim = left ? vec3(0.478, 0.180, 0.439) : vec3(0.165, 0.447, 0.439);
+      c = k < 0.5 ? hot : (k < 1.5 ? mix(dim, hot, 0.5) : dim);
+    } else if (cd <= 49) {
+      if (cd <= 48) {
+        float ch = mod(float(cd - 33) * 4.5 - fx[1].y * 6.0, 18.0);
+        c = ch < 7.0 ? vec3(1.0, 0.8, 0.2) : (ch < 9.0 ? vec3(0.678, 0.329, 0.102) : vec3(0.949, 0.451, 0.102));
+      }
+      c = mix(c, vec3(1.0, 0.96, 0.85), fx[1].z);
+    }
+  }
   // texels per pixel: across (t) and along (the ground receding)
   float foot = max(t, ra * t * t * cp / cam.z);
   if (world.w > fog.w) {
     vec3 a = texelFetch(tavg, cell, 0).rgb;
     c = mix(c, a, smoothstep(fog.w, world.w, foot));
+  }
+  // the neon light pools
+  if (flag(1)) {
+    int n = int(fx[3].w + 0.5);
+    for (int i = 0; i < 16; i++) {
+      if (i >= n) break;
+      vec4 lg = lights[i];
+      vec2 d = g - lg.xy;
+      float d2 = dot(d, d);
+      if (d2 < lg.z * lg.z) {
+        float k = 1.0 - sqrt(d2) / lg.z;
+        c += lightc(int(lg.w)) * (k * k * fract(lg.w));
+      }
+    }
+  }
+  // the tracer's reticle: an amber frame and hatch over the strip
+  if (inw) {
+    float s = fx[5].z;
+    bool edge = abs(abs(wpe) - fx[5].y) < 2.5 || abs(abs(wal) - fx[5].x) < 2.5;
+    bool dash = mod(wal - fx[0].w * 160.0, 40.0) < 22.0;
+    bool hatch = mod(wal + wpe, 32.0) < 2.0;
+    if (edge && dash) c = mix(c, vec3(1.0, 0.624, 0.102), s);
+    else if (hatch) c = mix(c, vec3(1.0, 0.624, 0.102), 0.4 * s);
   }
   if (fog.z > 0.5) {
     float along = t * ra;
@@ -202,7 +349,25 @@ void main() {
                                       '(depth-test #f depth-write #f cull none))))
       (set-pipeline-uniform! *ground* 'view (v4 w h 0 0))
       (set-pipeline-uniform! *sprite* 'view (v4 w h 0 0))
-      (mode7-set-look! '()))
+      (mode7-set-look! '())
+      (mode7-set-fx! (make-list 24 0.0))
+      (mode7-set-lights! '()))
+
+    ;; The effects hooks: 24 floats, fx[0] to fx[5] (see GROUND-FRAGMENT).
+    ;; All zero draws the plain ground and sky.
+    (define (mode7-set-fx! floats)
+      (set-pipeline-uniform! *ground* 'fx (map f32 floats)))
+
+    ;; Up to MODE7-LIGHTS pools, each (x y radius colour+intensity); the
+    ;; count goes in fx[3].w.
+    (define MODE7-LIGHTS 16)
+    (define (mode7-set-lights! pools)
+      (let loop ((ps pools) (k 0) (acc '()))
+        (if (or (null? ps) (= k MODE7-LIGHTS))
+            (set-pipeline-uniform! *ground* 'lights
+                                   (append (reverse acc) (make-list (* 4 (- MODE7-LIGHTS k)) 0.0)))
+            (loop (cdr ps) (+ k 1)
+                  (append (reverse (map f32 (car ps))) acc)))))
 
     (define (nearest! tex) (set-texture-sampling! tex 'nearest 'clamp) tex)
 
