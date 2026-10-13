@@ -2,13 +2,52 @@
         (signal music song)
         (signal music conductor)
         (signal music progress)
-        (signal music clock))
+        (signal music clock)
+        (signal music transport))
 
 (define (advance c ticks)
   (let loop ((c c) (remaining ticks))
     (if (= remaining 0)
         c
         (loop (conductor-step c) (- remaining 1)))))
+
+(test-group "transport: late audio and frozen epochs"
+  (test "initial audio starts immediately without a pre-roll"
+    (let ((s (transport-start (conductor-new) 44100)))
+      (assert-equal 0 (conductor-tick (transport-start-conductor s)))
+      (assert-equal 0 (transport-start-silence s))
+      (assert-equal 0.0 (transport-start-epoch s))))
+
+  (test "late audio joins the next bar with device-rate silence"
+    (let* ((c (advance (conductor-new 'lap1) 60))
+           (s (transport-start c 48000)))
+      (assert-equal (song-bar->tick 1) (conductor-tick (transport-start-conductor s)))
+      (assert-equal 34286 (transport-start-silence s))
+      (assert-equal 1.0 (transport-start-epoch s))
+      ;; Latency belongs to the audible clock, not to pre-roll length.
+      (assert-true (< (abs (- (song-bar-seconds)
+                             (+ (transport-start-epoch s)
+                                (audible-seconds (+ (transport-start-silence s) 1680)
+                                                 0 48000 0.035 0))))
+                      0.00002))))
+
+  (test "joining at GO uses lap1 and never requests grid's expired exit"
+    (let* ((c (advance (conductor-new) 400))
+           (s (transport-start c 44100))
+           (start (transport-start-conductor s)))
+      (assert-equal 'lap1 (conductor-section start))
+      (assert-equal '(12 . 0) (conductor-position start))
+      (assert-false (conductor-next-jump start))))
+
+  (test "resume projection preserves a committed section landing"
+    (let* ((planned (conductor-plan (conductor-new 'lap1) 'lap2 3))
+           (c (advance planned 300))
+           (s (transport-start c 44100))
+           (start (transport-start-conductor s)))
+      (assert-equal 'lap2 (conductor-section start))
+      (assert-equal 3 (conductor-entry-bar start))
+      (assert-equal 5.0 (transport-start-epoch s))
+      (assert-equal 6300 (transport-start-silence s)))))
 
 (test-group "conductor: tick clock"
   (test "row time is computed from ticks without rounded accumulation"

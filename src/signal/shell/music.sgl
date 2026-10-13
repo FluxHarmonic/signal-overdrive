@@ -1,0 +1,137 @@
+;;; Device adapter for the simulation-owned song. The engine and cues
+;;; share its context but keep their own output paths. No device opens
+;;; here: the shell passes an already-open context after a user gesture.
+(define-library (signal shell music)
+  (import (sigil math)
+          (sigil list)
+          (sigil time)
+          (sigil audio sink)
+          (motif tune)
+          (signal music score)
+          (signal music conductor)
+          (signal music clock)
+          (signal music transport)
+          (signal music playback)
+          (signal music inserts))
+  (export music-start! music-frame! music-close! music-running?
+          music-audible-seconds music-depth! music-latency! music-readout)
+  (begin
+    (define PUSH 256)
+    (define *ctx* #f)
+    (define *stream* #f)
+    (define *playback* #f)
+    (define *tune* #f)
+    (define *rate* 44100)
+    (define *depth-ms* 250)
+    (define *latency* (cond-expand (wasm 0.0) (else 0.035)))
+    (define *epoch* 0.0)
+    (define *delivered* 0)
+    (define *silence* 0)
+    (define *start-conductor* #f)
+    (define *last-tick* -1)
+    (define *first-log* #f)
+    (define *underruns* 0)
+    (define *underruns-all* 0)
+    (define *cost-ms* 0.0)
+    (define *buf* (make-bytevector (* 8 PUSH) 0))
+    (define *zero* (make-bytevector (* 8 PUSH) 0))
+
+    (define (music-depth! ms)
+      (set! *depth-ms* (max 10 (min 2000 ms))))
+
+    ;; WebAudio reports outputLatency + baseLatency, in seconds.
+    (define (music-latency! seconds)
+      (set! *latency* (max 0.0 seconds)))
+
+    (define (depth-frames)
+      (exact (ceiling (* *rate* *depth-ms* 0.001))))
+
+    (define (music-running?)
+      (and *stream* *ctx* (eq? (audio-context-state *ctx*) 'running)))
+
+    (define (music-audible-seconds)
+      (and *stream*
+           (+ *epoch* (audible-seconds *delivered*
+                                      (audio-stream-depth *stream*)
+                                      *rate* *latency* 0))))
+
+    (define (music-close!)
+      (when *stream*
+        (set! *underruns* (+ *underruns* (audio-stream-underruns-sounding *stream*)))
+        (set! *underruns-all* (+ *underruns-all* (audio-stream-underruns *stream*)))
+        ;; Closing discards queued song time. Paused wall time can never
+        ;; drain or advance the new stream's epoch on resume.
+        (close-audio-stream! *stream*)
+        (set! *stream* #f))
+      (when *playback*
+        (playback-close! *playback*)
+        (set! *playback* #f)))
+
+    (define (music-start! ctx c)
+      (set! *ctx* ctx)
+      (when (and ctx (not *stream*)
+                 (eq? (audio-context-state ctx) 'running))
+        (unless *tune* (set! *tune* (read-tune-string SCORE-TUNE-TEXT)))
+        (set! *rate* (audio-context-sample-rate ctx))
+        (let ((plan (transport-start c *rate*)))
+          (set! *stream* (open-audio-stream channels: 2 rate: *rate*
+                                          buffer-frames: (max 8192 (* 2 (depth-frames)))))
+          (when *stream*
+            (guard (e (#t (music-close!) (raise e)))
+              (set! *playback* (playback-open *tune* *rate*
+                                            (transport-start-conductor plan) MUSIC-INSERTS)))
+            (set! *epoch* (transport-start-epoch plan))
+            (set! *start-conductor* (transport-start-conductor plan))
+            (set! *silence* (transport-start-silence plan))
+            (set! *delivered* 0)
+            (set! *last-tick* (conductor-tick c))
+            (set! *first-log* (car (reverse (conductor-log c))))))))
+
+    (define (music-frame! c paused?)
+      (let ((t0 (current-jiffy)))
+        ;; A restart replaces the conductor's initial log even when it
+        ;; occurs before another tick. Its tick also returns to zero.
+        (when (and *stream*
+                   (or paused?
+                       (< (conductor-tick c) *last-tick*)
+                       (not (eq? *first-log* (car (reverse (conductor-log c)))))))
+          (music-close!))
+        (unless paused? (music-start! *ctx* c))
+        (when (and (music-running?) (not paused?))
+          (let loop ()
+            (let* ((room (audio-stream-room *stream*))
+                   (need (- (depth-frames) (audio-stream-depth *stream*)))
+                   (available (min PUSH room need))
+                   (silence? (> *silence* 0))
+                   (n (if silence? (min available *silence*) available)))
+              (when (> n 0)
+                (unless silence?
+                  ;; The render head can reach the joining bar before
+                  ;; the simulation does. Use the projected start plan
+                  ;; until the simulation has caught up to that bar.
+                  (playback-pull! *playback*
+                                  (if (< (conductor-tick c) (conductor-tick *start-conductor*))
+                                      *start-conductor*
+                                      c)
+                                  *buf* 0 n))
+                (let ((accepted (push-audio-samples *stream* (if silence? *zero* *buf*) n)))
+                  ;; Room can only increase while the callback drains;
+                  ;; a short write indicates an unusable/closed stream.
+                  (unless (= accepted n)
+                    (music-close!)
+                    (error "music sink refused reserved frames" n accepted))
+                  (set! *delivered* (+ *delivered* accepted))
+                  (when silence? (set! *silence* (- *silence* accepted))))
+                (loop))))
+          (set! *last-tick* (conductor-tick c)))
+        (set! *cost-ms* (/ (* 1000.0 (- (current-jiffy) t0)) (jiffies-per-second)))))
+
+    ;; (running target-ms queued-ms sounding-underruns all-underruns cost-ms missed)
+    (define (music-readout)
+      (list (and (music-running?) #t)
+            *depth-ms*
+            (if *stream* (/ (* 1000.0 (audio-stream-depth *stream*)) *rate*) 0.0)
+            (+ *underruns* (if *stream* (audio-stream-underruns-sounding *stream*) 0))
+            (+ *underruns-all* (if *stream* (audio-stream-underruns *stream*) 0))
+            *cost-ms*
+            (if *playback* (playback-missed *playback*) 0)))))

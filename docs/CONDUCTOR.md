@@ -79,3 +79,18 @@ has passed the preceding bar's first row before handing over a jump.
 Its diagnostics record handoff and actual landing frames separately from
 the simulation's intended jump log. `test/test-playback.sgl` renders this
 path offline through seven channel inserts; it opens no audio device.
+
+`(signal shell music)` adapts this pull path to a separate 250 ms stream,
+rendered at the device's rate. It receives the engine/cue context through
+`audio-context`; it never opens a device itself. Delivered-frame accounting
+uses the sink's accepted count, and the audible clock subtracts queue
+depth and reported device latency (35 ms natively). The pure transport
+plan joins late audio on the next bar, including any intervening section
+landing, with silence before that bar. Pause discards the queue; resume
+uses a fresh stream epoch at the frozen simulation tick. Restart also
+discards the old queue, including a restart at the same tick.
+
+`test/test-music-sink.sgl` exercises the actual native ring with the
+sink's drain shim, asserting that no audio device initialized. This
+adapter is prepared separately; core pacing and resync integration are
+still outstanding.

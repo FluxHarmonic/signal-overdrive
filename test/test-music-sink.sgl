@@ -1,0 +1,74 @@
+;;; The native SPSC ring is drained by its test shim. We never call
+;;; audio-context-open/audio-setup, and assert that no device initialized.
+(import (sigil test)
+        (sigil audio)
+        (signal music conductor)
+        (signal shell music))
+
+(define RATE 44100)
+(define out (make-bytevector (* 8 RATE) 0))
+
+(define (advance c ticks)
+  (if (= ticks 0)
+      c
+      (advance (conductor-step c) (- ticks 1))))
+
+(define (near expected actual)
+  (assert-true (< (abs (- expected actual)) (/ 1.0 RATE))))
+
+(test-group "music sink: native ring without a device"
+  (test "accepted frames minus the queued ring and latency give the ear"
+    (assert-false (audio-initialized?))
+    (let ((c (conductor-new 'lap1)))
+      ;; Native context state/rate are pure shims; this sentinel does not
+      ;; initialize the device. The stream itself is an unconnected ring.
+      (music-start! 'offline-test-context c)
+      (music-frame! c #f)
+      (near 250.0 (list-ref (music-readout) 2))
+      (near -0.035 (music-audible-seconds))
+      (%audio-stream-drain-for-test out 4410 2)
+      (near 0.065 (music-audible-seconds))
+      (music-frame! (advance c 6) #f)
+      (near 0.065 (music-audible-seconds))
+      (assert-equal 0 (list-ref (music-readout) 3))
+      (music-close!))
+    (assert-false (audio-initialized?)))
+
+  (test "pause discards the ring and resume retains the frozen simulation epoch"
+    (let ((c (advance (conductor-new 'lap1) 60)))
+      (music-start! 'offline-test-context c)
+      (music-frame! c #f)
+      (music-frame! c #t)
+      (assert-false (music-running?))
+      (assert-false (music-audible-seconds))
+      (%audio-stream-drain-for-test out RATE 2)
+      (music-frame! c #f)
+      (near 0.965 (music-audible-seconds))
+      (near 250.0 (list-ref (music-readout) 2))
+      (music-close!))
+    (assert-false (audio-initialized?)))
+
+  (test "late-start pre-roll is silence and its expired grid exit is not missed"
+    (let ((c (advance (conductor-new) 400)))
+      (music-start! 'offline-test-context c)
+      (music-frame! c #f)
+      (set! out (make-bytevector (* 8 RATE) 0))
+      (%audio-stream-drain-for-test out 5000 2)
+      (let loop ((i 0))
+        (when (< i (* 8 5000))
+          (assert-equal 0 (bytevector-u8-ref out i))
+          (loop (+ i 1))))
+      (music-frame! c #f)
+      (assert-equal 0 (list-ref (music-readout) 6))
+      (music-close!))
+    (assert-false (audio-initialized?)))
+
+  (test "a fresh conductor at the same tick replaces the previous queued song"
+    (let ((c (conductor-new 'calm)))
+      (music-start! 'offline-test-context c)
+      (music-frame! c #f)
+      (%audio-stream-drain-for-test out 4410 2)
+      (music-frame! (conductor-new 'grid) #f)
+      (near -0.035 (music-audible-seconds))
+      (music-close!))
+    (assert-false (audio-initialized?))))

@@ -30,11 +30,11 @@
 ;;;     can starve them.
 
 (define-library (signal shell audio)
-  (import (sigil core)
-          (sigil audio sink)
+  (import (sigil audio sink)
           (signal sound))
 
-  (export audio-mute! audio-depth! audio-cues! audio-start! audio-frame! audio-started? audio-readout)
+  (export audio-mute! audio-depth! audio-cues! audio-start! audio-frame! audio-started? audio-readout
+          audio-context)
 
   (begin
     (define RATE 22050)
@@ -53,6 +53,7 @@
     (define (audio-depth! ms) (set! *depth-ms* (max 10 (min 2000 ms))))
     (define (audio-cues! on?) (set! *cues-on* on?))
     (define (audio-started?) (and *stream* #t))
+    (define (audio-context) *ctx*)
     (define (depth-frames) (exact (floor (/ (* *depth-ms* RATE) 1000))))
 
     (define (load-cues!)

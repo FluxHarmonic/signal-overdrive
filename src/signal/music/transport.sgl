@@ -1,0 +1,30 @@
+;;; Pure stream-start plan. A late device joins on the next simulation
+;;; bar; silence before it preserves the simulation's frozen offset.
+(define-library (signal music transport)
+  (import (sigil struct)
+          (sigil math)
+          (signal music conductor))
+  (export transport-start transport-start-conductor transport-start-epoch
+          transport-start-silence)
+  (begin
+    (define-struct stream-start
+      (conductor)
+      (epoch)
+      (silence))
+
+    (define (transport-start c rate)
+      (let* ((epoch (/ (conductor-tick c) 60.0))
+             (bar (exact (ceiling (/ epoch (song-bar-seconds)))))
+             (tick (song-bar->tick bar))
+             (start (let advance ((c c))
+                      (if (>= (conductor-tick c) tick)
+                          c
+                          (advance (conductor-step c))))))
+        (stream-start
+          conductor: start
+          epoch: epoch
+          silence: (max 0 (exact (round (* (- (* bar (song-bar-seconds)) epoch) rate)))))))
+
+    (define (transport-start-conductor s) (stream-start-conductor s))
+    (define (transport-start-epoch s) (stream-start-epoch s))
+    (define (transport-start-silence s) (stream-start-silence s))))
