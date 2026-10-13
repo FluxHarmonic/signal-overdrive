@@ -1,4 +1,5 @@
-;;; Build-time entry. Carrier can replace the tune and cues without code changes.
+;;; Build-time entry. Compiles Carrier (music/carrier/race.cts and cues.sgl) by
+;;; default; any tune and cue sheet on the contract can stand in, without code changes.
 (import (sigil process)
         (sigil fs)
         (motif tune)
@@ -10,8 +11,8 @@
       ((null? remaining) '())
       ((string=? (car remaining) "--") (cdr remaining))
       (else (find (cdr remaining))))))
-(define tune-path (if (pair? arguments) (car arguments) "music/placeholder/parts.cts"))
-(define cues-path (if (> (length arguments) 1) (cadr arguments) "music/placeholder/cues.sgl"))
+(define tune-path (if (pair? arguments) (car arguments) "music/carrier/race.cts"))
+(define cues-path (if (> (length arguments) 1) (cadr arguments) "music/carrier/cues.sgl"))
 (define output-path (if (> (length arguments) 2) (caddr arguments) "src/signal/music/score.sgl"))
 
 (define score (compile-score (read-tune-file tune-path) (read-score-cues cues-path)))

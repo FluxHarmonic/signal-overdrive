@@ -1,5 +1,9 @@
 #!/bin/sh
 # Build-time score extraction is pure Sigil; no native build or playback.
+# The race song is Carrier (music/carrier/race.cts, written by the music
+# package's `carrier race tune`). The diagnostic placeholder stays
+# selectable: CONDUCTOR_TUNE=music/placeholder/parts.cts
+# CONDUCTOR_CUES=music/placeholder/cues.sgl scripts/compile-score
 set -eu
 cd "$(dirname "$0")/.."
 CONDUCTOR_SIGIL="${CONDUCTOR_SIGIL:-$HOME/.sigil/versions/0.22.11/sigil}"
@@ -7,8 +11,8 @@ CONDUCTOR_MOTIF="${CONDUCTOR_MOTIF:-.sigil/deps/motif}"
 CONDUCTOR_DSP="${CONDUCTOR_DSP:-.sigil/deps/sigil-dsp}"
 export XDG_CACHE_HOME="${CONDUCTOR_CACHE_ROOT:-/tmp/signal-conductor-cache}"
 if [ "$#" -eq 0 ]; then
-  set -- "${CONDUCTOR_TUNE:-music/placeholder/parts.cts}" \
-    "${CONDUCTOR_CUES:-music/placeholder/cues.sgl}" "src/signal/music/score.sgl"
+  set -- "${CONDUCTOR_TUNE:-music/carrier/race.cts}" \
+    "${CONDUCTOR_CUES:-music/carrier/cues.sgl}" "src/signal/music/score.sgl"
 fi
 exec nice -n 15 "$CONDUCTOR_SIGIL" -L scripts/music/src \
   -L "$CONDUCTOR_MOTIF/src" -L "$CONDUCTOR_DSP/src" \

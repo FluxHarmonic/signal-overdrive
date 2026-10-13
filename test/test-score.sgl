@@ -5,9 +5,14 @@
         (signal music score)
         (signal music song))
 
+;; The game's song is Carrier; the diagnostic placeholder keeps the same
+;; section contract and is the fixture for the compiler's edge cases.
+(define carrier (read-tune-file "music/carrier/race.cts"))
+(define carrier-cues (read-score-cues "music/carrier/cues.sgl"))
+(define compiled (compile-score carrier carrier-cues))
 (define placeholder (read-tune-file "music/placeholder/parts.cts"))
 (define cues (read-score-cues "music/placeholder/cues.sgl"))
-(define compiled (compile-score placeholder cues))
+(define placeholder-compiled (compile-score placeholder cues))
 
 (define (onsets-at data row channel)
   (filter (lambda (entry)
@@ -42,7 +47,37 @@
     (assert-equal SCORE-ORDER-OFFSETS (score-field compiled 'order-offsets))
     (assert-equal SCORE-SECTIONS (score-field compiled 'sections))
     (assert-equal SCORE-ONSET-MASKS (score-field compiled 'onset-masks))
-    (assert-equal 2910 (length SCORE-ONSETS)))
+    (assert-equal SCORE-TUNE-TEXT (score-field compiled 'tune-text))
+    (assert-equal 'carrier SCORE-ID)
+    (assert-equal 3703 (length SCORE-ONSETS))
+    (assert-equal 2910 (length (score-field placeholder-compiled 'onsets))))
+
+  (test "Carrier keeps the placeholder's section contract"
+    (assert-equal (score-field placeholder-compiled 'sections) SCORE-SECTIONS)
+    (assert-equal (score-field placeholder-compiled 'order-offsets) SCORE-ORDER-OFFSETS))
+
+  ;; A jump lands on a section's first row and a loop returns to its
+  ;; loop's first row; voices sounding before either keep sounding unless
+  ;; that row starts or releases every channel.
+  (test "every section and loop entry row starts or releases all eight channels"
+    (for-each
+      (lambda (section)
+        (let ((from (vector-ref section 1)) (loop-from (vector-ref section 3)))
+          (for-each
+            (lambda (pos)
+              (let* ((pattern (tune-find-pattern carrier (list-ref (tune-order carrier) pos)))
+                     ;; a note (not a slide's 3xx target) or a release;
+                     ;; an effect-only cell starts and stops nothing
+                     (channels (map cell-channel
+                                    (filter (lambda (c)
+                                              (and (= 0 (cell-row c))
+                                                   (cell-note c)
+                                                   (not (and (number? (cell-note c))
+                                                             (= 3 (fx-command (cell-fx c)))))))
+                                            (tune-pattern-cells pattern)))))
+                (assert-equal '(1 2 3 4 5 6 7 8) (list-sort < channels))))
+            (if (and loop-from (> loop-from 0)) (list from (+ from loop-from)) (list from)))))
+      SCORE-SECTIONS))
 
   (test "tone portamento, vibrato and arpeggios do not fabricate onsets"
     (let* ((t (tune-set-cell placeholder 0 (make-cell 16 6 74 0 36 "310")))
@@ -61,7 +96,7 @@
       (assert-equal 2909 (length (score-field data 'onsets)))))
 
   (test "multi-bar patterns retain pitches, timing, and section-relative loops"
-    (let* ((data (compile-score (repack placeholder) cues))
+    (let* ((data (compile-score (repack carrier) carrier-cues))
            (offsets (score-field data 'order-offsets))
            (lap1 (find (lambda (entry) (eq? 'lap1 (vector-ref entry 0)))
                        (score-field data 'sections))))
