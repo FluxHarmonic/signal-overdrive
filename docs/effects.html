@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signal Overdrive: the 0.1 effects</title>
+<style>
+  body { margin: 0; background: #0D0A1A; color: #CCE6FF; font: 15px/1.5 ui-monospace, monospace; }
+  main { max-width: 1000px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { color: #FF59D9; font-size: 22px; margin: 0 0 4px; }
+  h2 { color: #4DF2D9; font-size: 17px; margin: 32px 0 6px; }
+  a { color: #FFCC33; }
+  code { color: #4DF2D9; }
+  img { width: 100%; max-width: 960px; image-rendering: pixelated; border: 1px solid #2E1C4D; display: block; margin: 8px 0; }
+  table { border-collapse: collapse; margin: 8px 0; }
+  td, th { border: 1px solid #2E1C4D; padding: 4px 8px; text-align: left; vertical-align: top; }
+  th { color: #7380A6; }
+  .dim { color: #7380A6; }
+  .swatch { display: inline-block; width: 12px; height: 12px; vertical-align: middle; margin-right: 4px; }
+</style>
+</head>
+<body>
+<main>
+<h1>Signal Overdrive: the 0.1 effects</h1>
+<p class="dim">Design §4.1's 0.1 subset, plus the colour meanings. <a href="./">Play it</a>, then press <b>E</b> (or the EFFECTS button, bottom right) for the panel.</p>
+
+<h2>The panel</h2>
+<p>Each effect has ON/OFF, an intensity slider, SOLO (that effect alone) and, where it has a trigger, a button that fires it now: DROP, WALL HIT, ICE STRIKE, NEXT TIER. INTEGRITY SEEN makes the effects behave as if the cargo were at that tier. It never touches the race. SHOWCASE cycles through every effect alone for 8 s each on the autopilot, then all of them together. Everything you set goes into the address bar, so a setup is a link you can send back ("glitch at 0.6 looked right").</p>
+<p class="dim">Keys while the panel is open: Tab moves, the arrows set a slider, Enter or Space presses, E or Escape closes. The game doesn't see them. Natively: E opens the tuning overlay at the effects, F6 solo, F7 showcase, F8 wall hit, F9 ICE strike, F10 drop, F2 next tier.</p>
+
+<h2>Horizon dip</h2>
+<p><b>Trigger:</b> the drop's first downbeat (the final lap's line); DROP fires it now. <b>Look for:</b> the far road and the skyline drop about 12 rows and spring back with a small crest, while the road under you stays put and the camera kicks. The machines ride the bent ground: their screen rows go through the same bend the shader uses.</p>
+<img src="fx/dip.gif" alt="the horizon dip">
+
+<h2>Light pools</h2>
+<p><b>Trigger:</b> always on; they swell on the kick. <b>Look for:</b> magenta city pools outside the barrier, orange pools on the boost pads (flaring on the drop), cyan along the checksum lane, and an amber glow on ICE patches. Sixteen at most, the nearest to where the camera looks.</p>
+<img src="fx/pools.gif" alt="light pools">
+
+<h2>Rail and chevron chase</h2>
+<p><b>Trigger:</b> the hats step the rails' lit blocks forward; the kick steps the pads' chevrons. <b>Look for:</b> one block in four lit on each rail, stepping in rhythm, and the pads glowing on the beat.</p>
+<img src="fx/chase.gif" alt="rail chase">
+
+<h2>Skyline life</h2>
+<p><b>Trigger:</b> the kick, the snare, the bar, the pad and TRACED. <b>Look for:</b> lit windows brightening on the kick, half the signs flashing on the snare, signs changing colour or going dark on each bar, the low sky glowing with the pad, and Gibson's tower (cyan bands, the tall one) turning violet on the final lap.</p>
+<img src="fx/sky-traced.gif" alt="skyline life while traced">
+
+<h2>ICE glitch</h2>
+<p><b>Trigger:</b> a wall hit (stronger and longer the harder the hit), entering a glitch patch, a tracer's strike; WALL HIT fires one now. <b>Look for:</b> torn bands of rows, scrambled road tiles and a split red channel, gone within 6 frames (100 ms: P15's limit for anything crossing the road), and a new one waits half a second, so a long scrape along a wall glitches at most 6 frames in every 30. A harder hit during a glitch makes it harder, not longer. The dither snaps the torn colours back into the palette.</p>
+<img src="fx/glitch.gif" alt="ICE glitch">
+
+<h2>ICE warp</h2>
+<p><b>Trigger:</b> a tracer (step 3 places them after TRACED); ICE STRIKE arms one now. On the next downbeat an amber reticle lands in your lane ahead and the road ripples along it for a bar (the telegraph); on the downbeat after, it strikes with a glitch. <b>Look for:</b> the dashed amber frame and hatch, and the ripple growing through the bar. <span class="dim">The stub's strip runs straight along your heading, so on a bend it leaves the road; the real tracers will follow the lane.</span></p>
+<img src="fx/warp.gif" alt="ICE warp">
+
+<h2>Signal interference</h2>
+<p><b>Trigger:</b> the integrity tier: WORN, DAMAGED, FAILING, CRITICAL. NEXT TIER steps through them. <b>Look for:</b> rows of the sky shifting, a tracking band rolling down, the red channel bleeding, static specks, and the HUD's top text jittering with a red ghost. Dropouts land on the song's grid: DAMAGED one 16th a bar, FAILING every other beat, CRITICAL all but the first beat. <b>Never on the road</b> (P15): the road stays readable at any integrity, and the meter itself is never touched.</p>
+<img src="fx/interf-damaged.gif" alt="interference, damaged">
+<img src="fx/interf-critical.gif" alt="interference, critical">
+
+<h2>The colour meanings (P16)</h2>
+<table>
+<tr><th>Colour</th><th>Means</th><th>Where you'll see it now</th></tr>
+<tr><td><span class="swatch" style="background:#4DF2D9"></span>cyan</td><td>your live signal</td><td>the meter (above 30), the checksum lane, your machine. The right-hand rail was cyan and is now cold blue.</td></tr>
+<tr><td><span class="swatch" style="background:#FF9F1A"></span>amber</td><td>ICE</td><td>glitch patches (were red), the tracer's reticle, the ICE banner and pop-up</td></tr>
+<tr><td><span class="swatch" style="background:#B36BFF"></span>violet</td><td>Gibson</td><td>his tower's bands while TRACED; no rival is violet any more (the delta is steel for 0.1; violet waits for Null in 0.2)</td></tr>
+<tr><td><span class="swatch" style="background:#FF5959"></span>red</td><td>traced, danger</td><td><code>TRACED.</code> on the final lap, the meter below 30 (the old meter went amber in the middle: amber is ICE's now)</td></tr>
+<tr><td><span class="swatch" style="background:#F2731A"></span>orange</td><td>speed</td><td>boost pads (their amber stripe is now dark orange), the BOOST banner, the boost flame</td></tr>
+<tr><td><span class="swatch" style="background:#FF59D9"></span>magenta</td><td>the city</td><td>neon signs (no more cyan, amber or violet signs), light pools, the left-hand rail</td></tr>
+</table>
+
+<h2>What they cost</h2>
+<p>Measured in headless Chrome 143 on this laptop's AMD Radeon 780M (integrated, RADV through ANGLE and Vulkan), at the game's 480x270:</p>
+<ul>
+<li><b>GPU:</b> every effect at once, held at its peak, adds 0.02 to 0.035 ms a frame. That's the frame-time difference with the ground drawn 256 times a frame, divided by 256. The light pools are the only one above the measurement's noise (0.014 to 0.031 ms). The rest are each under about 0.017 ms.</li>
+<li><b>CPU:</b> 0.1 to 0.25 ms a frame for the effects' state (<code>fx-ms</code> on the F3 describe line), plus picking the 16 light pools.</li>
+<li><b>60 fps:</b> both this build and the prototype run at 59.1 to 59.2 fps here, with 19 to 26 late frames in 30 s. The box is at load 12 to 14 with other builds running, and the late frames had 6 to 8 ms of game work and no collection. So "held" (P32: one late frame in a thousand) can't be judged on this machine; it gets re-measured on a quiet one before 0.1.</li>
+</ul>
+<p class="dim">The beat comes from a stub until the conductor lands: 140 BPM, a kick every beat, snare on 2 and 4, off-beat hats, sections following the laps. Turn on <code>?fps</code> or F3 to see the frame times.</p>
+</main>
+</body>
+</html>

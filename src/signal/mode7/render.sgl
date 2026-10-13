@@ -228,8 +228,8 @@ void main() {
     if (cd <= 32) {
       bool left = cd <= 16;
       float k = mod(float((cd - 1) % 16) - fx[1].x, 4.0);
-      vec3 hot = left ? vec3(1.0, 0.349, 0.851) : vec3(0.302, 0.949, 0.851);
-      vec3 dim = left ? vec3(0.478, 0.180, 0.439) : vec3(0.165, 0.447, 0.439);
+      vec3 hot = left ? vec3(1.0, 0.349, 0.851) : vec3(0.102, 0.451, 0.851);
+      vec3 dim = left ? vec3(0.478, 0.180, 0.439) : vec3(0.122, 0.227, 0.302);
       c = k < 0.5 ? hot : (k < 1.5 ? mix(dim, hot, 0.5) : dim);
     } else if (cd <= 49) {
       if (cd <= 48) {
@@ -266,7 +266,9 @@ void main() {
     bool dash = mod(wal - fx[0].w * 160.0, 40.0) < 22.0;
     bool hatch = mod(wal + wpe, 32.0) < 2.0;
     if (edge && dash) c = mix(c, vec3(1.0, 0.624, 0.102), s);
-    else if (hatch) c = mix(c, vec3(1.0, 0.624, 0.102), 0.4 * s);
+    // the hatch in full amber on every other pixel: a 40% mix snapped to an
+    // olive in the palette, and amber has to read as ICE (P16)
+    else if (hatch && s > 0.3 && mod(floor(px) + floor(v_screen.y), 2.0) < 0.5) c = vec3(1.0, 0.624, 0.102);
   }
   if (fog.z > 0.5) {
     float along = t * ra;

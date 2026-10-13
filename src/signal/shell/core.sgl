@@ -136,6 +136,7 @@
     (define *fx-fires* '())
     (define *traced-at* #f)       ; the tick the player started the final lap
     (define *fx-caption* #f)
+    (define *showcase-solo* 1)    ; the showcase's solo, worked out once a tick
     (define *fx-ms* 0.0)          ; fx-tick!'s CPU ms a frame, smoothed (in SIM)
     (define *fx-frame-ms* 0.0)
     (define FX-ORDER '(fx-dip fx-pools fx-chase fx-sky fx-glitch fx-warp fx-interf))
@@ -143,7 +144,7 @@
     (define (showcase?) (> (tuning-ref *tuning* 'fx-showcase) 0.5))
     (define (fx-solo)
       (if (showcase?)
-          (car (showcase-at (race-tick *race*) (stub-pulse (race-tick *race*) 'lap1 #f)))
+          *showcase-solo*
           (exact (round (tuning-ref *tuning* 'fx-solo)))))
     ;; an effect's intensity as the effects see it: 0 when another is solo
     (define (fx-knob key)
@@ -171,7 +172,10 @@
                (integrity (cond ((and sc (caddr sc)) (caddr sc))
                                 ((>= tier 0.0) tier)
                                 (else (machine-integrity m)))))
-          (set! *fx-fires* '())
+          (set! *fx-fires* (quote ()))
+          (when sc (set! *showcase-solo* (car sc)))
+          ;; a restart (the countdown) clears the last race's tracer and glitch
+          (when (eq? (race-phase r) (quote countdown)) (fx-clear-transients! *fx*))
           (set! *fx-caption*
                 (let ((what (cond (sc (list-ref sc 4))
                                   ((> (fx-solo) 0) (string-append "SOLO: " (vector-ref FX-NAMES (fx-solo))))
@@ -419,8 +423,11 @@
                           ;; sparks on the side of the wall it hit
                           (set! *spark* (cons 0 (if (> (machine-d (racer-machine (race-player r))) 0.0) 1 -1)))))
                       (race-events r))
-            (record-best!)
-            (ghost-tick! r was)
+            ;; the autopilot's laps (the showcase drives on it) are not the
+            ;; player's: no stored best lap, no ghost
+            (unless (or *autopilot* (showcase?))
+              (record-best!)
+              (ghost-tick! r was))
             (let ((t0 (current-jiffy)))
               (fx-tick! r)
               (set! *fx-frame-ms* (+ *fx-frame-ms* (ms-since t0))))

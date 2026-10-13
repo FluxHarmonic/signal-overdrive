@@ -55,8 +55,11 @@
     ;; scale: the pools' intensity knob.
     (define (pools-for-frame pools fx fy n level scale)
       (let* ((d2 (lambda (p) (+ (square (- (vector-ref p 0) fx)) (square (- (vector-ref p 1) fy)))))
-             (all (vector->list pools))
-             (sorted (list-sort (lambda (a b) (< (d2 a) (d2 b))) all))
+             ;; each distance once, then sort the (distance . pool) pairs
+             (pairs (let loop ((i 0) (acc '()))
+                      (if (= i (vector-length pools)) acc
+                          (loop (+ i 1) (cons (cons (d2 (vector-ref pools i)) (vector-ref pools i)) acc)))))
+             (sorted (map cdr (list-sort (lambda (a b) (< (car a) (car b))) pairs)))
              (near (let take ((xs sorted) (k 0))
                      (if (or (null? xs) (= k n)) '() (cons (car xs) (take (cdr xs) (+ k 1)))))))
         (map (lambda (p)

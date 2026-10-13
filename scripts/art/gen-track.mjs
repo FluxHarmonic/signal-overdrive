@@ -292,8 +292,9 @@ function build(name, def) {
         // left, cyan right), a dark base
         const k = ad - HW;
         const lit = (Math.floor(s / 24) & 1) === 0;
-        const hot = l.d < 0 ? C.HIGHLIGHT : C.SELECTED;
-        const dim = l.d < 0 ? C.PLUM_MID : C.TEAL;
+        // magenta (the city) left, cold blue right: not cyan, which is your signal (P16)
+        const hot = l.d < 0 ? C.HIGHLIGHT : C.COLD;
+        const dim = l.d < 0 ? C.PLUM_MID : C.WIRE_DARK;
         c = k < 2 ? C.FACE_EDGE : k < 10 ? (lit ? hot : dim) : C.BAR_A;
         if (k >= 2 && k < 10) code = 1 + (Math.floor(s / 24) % 16) + (l.d < 0 ? 0 : 16);
       } else {

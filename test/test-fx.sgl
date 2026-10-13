@@ -61,7 +61,9 @@
     (assert-equal 'lap2 (stub-section 'race 2 3 #f))
     (assert-equal 'hold (stub-section 'race 2 3 #t))
     (assert-equal 'traced (stub-section 'race 3 3 #f))
-    (assert-equal 'uplink (stub-section 'finished 3 3 #t))))
+    (assert-equal 'uplink (stub-section 'finished 3 3 #t))
+    (assert-equal 'hold (stub-section 'race 1 2 #t))
+    (assert-equal 'lap1 (stub-section 'race 1 2 #f))))
 
 (test-group "effects state"
   (test "a glitch never runs more than 6 ticks, however hard the hit"
@@ -73,11 +75,22 @@
           (assert-true (<= on GLITCH-MAX-TICKS))))
       '(20.0 300.0 5000.0)))
 
-  (test "hits on consecutive ticks restart the glitch but each run stays capped"
-    (let* ((sts (run 30 'lap1 100.0 (lambda (k) (if (<= 3 k 5) (list (cons 'wall 400.0)) '())) none))
+  (test "a scrape (a hit every tick) glitches at most 6 ticks in any 30"
+    (let* ((n 120)
+           (sts (run n 'lap1 100.0 (lambda (k) (if (<= 3 k 95) (list (cons 'wall 250.0)) '())) none))
+           (on (list->vector (map (lambda (s) (if (> (fx-glitch-now s) 0.0) 1 0)) sts)))
+           (window (lambda (from) (let loop ((k from) (c 0)) (if (or (= k n) (= k (+ from GLITCH-REST))) c (loop (+ k 1) (+ c (vector-ref on k))))))))
+      (assert-true (> (apply + (vector->list on)) 0))
+      (let loop ((from 0))
+        (when (< from n)
+          (assert-true (<= (window from) GLITCH-MAX-TICKS))
+          (loop (+ from 1))))))
+
+  (test "a harder hit during a glitch makes it harder, not longer"
+    (let* ((sts (run 30 'lap1 100.0 (lambda (k) (cond ((= k 2) (list (cons 'wall 30.0))) ((= k 3) (list (cons 'wall 600.0))) (else '()))) none))
            (on (length (filter (lambda (s) (> (fx-glitch-now s) 0.0)) sts))))
-      ;; the last hit at tick 5 runs 6 ticks: 3..10 at most
-      (assert-true (<= on (+ 2 GLITCH-MAX-TICKS)))))
+      (assert-true (<= on GLITCH-MAX-TICKS))
+      (assert-true (near? 1.0 (fx-glitch-now (list-ref sts 2)) 1e-9))))
 
   (test "a harder hit glitches harder and longer"
     (let ((count (lambda (impact)
@@ -91,11 +104,19 @@
       (assert-true (null? (filter (lambda (s) (> (fx-glitch-now s) 0.0)) sts)))))
 
   (test "the chase steps once per hat and never otherwise"
-    (let* ((n (bar->tick 2))
-           (sts (run n 'lap1 100.0 none none))
-           (hats (let loop ((t 1) (h 0)) (if (> t n) h (loop (+ t 1) (+ h (if (onset? (stub-pulse t 'lap1 #f) HATS) 1 0)))))))
-      (assert-equal 8 hats)
-      (assert-equal hats (fx-chase (list-ref sts (- n 1))))))
+    ;; to one tick before bar 2's downbeat: 8 hats but 7 kicks, so a chase
+    ;; stepping on the kick (or on every beat) comes out wrong
+    (let* ((n (- (bar->tick 2) 1))
+           (count (lambda (bit) (let loop ((t 1) (h 0)) (if (> t n) h (loop (+ t 1) (+ h (if (onset? (stub-pulse t 'lap1 #f) bit) 1 0)))))))
+           (sts (run n 'lap1 100.0 none none)))
+      (assert-equal 8 (count HATS))
+      (assert-equal 7 (count KICK))
+      (assert-equal 8 (fx-chase (list-ref sts (- n 1))))
+      ;; a kick with no hat (bar 1's downbeat) leaves the chase where it was
+      (let ((k (bar->tick 1)))
+        (assert-true (onset? (stub-pulse k 'lap1 #f) KICK))
+        (assert-false (onset? (stub-pulse k 'lap1 #f) HATS))
+        (assert-equal (fx-chase (list-ref sts (- k 2))) (fx-chase (list-ref sts (- k 1)))))))
 
   (test "the dip peaks on the drop and settles"
     (let* ((cross 250)
@@ -116,6 +137,9 @@
            (struck (let loop ((ss sts) (t 1)) (cond ((null? ss) #f) ((fx-warp-struck (car ss)) t) (else (loop (cdr ss) (+ t 1)))))))
       (assert-equal (bar->tick 1) placed)
       (assert-equal (bar->tick 2) struck)
+      ;; the ripple is off the road within 6 ticks of the strike (P15)
+      (assert-true (> (fx-warp-strength (list-ref sts (- struck 1))) 0.0))
+      (assert-false (fx-warp (list-ref sts (+ struck 5))))
       ;; the strike glitches
       (assert-true (> (fx-glitch-now (list-ref sts (- struck 1))) 0.0))
       ;; the strip lies ahead along the heading (0: up the map, -y)

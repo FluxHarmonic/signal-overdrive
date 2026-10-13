@@ -122,7 +122,9 @@
         ((finished) 'uplink)
         ((corrupt) 'results)
         (else
-         (cond ((<= lap 1) (if (>= laps 2) 'lap1 'traced))
+         ;; hold: the second half of the lap before the last, whatever the
+         ;; lap count (with 2 laps, that's lap 1's second half)
+         (cond ((and (>= laps 2) (= lap (- laps 1)) halfway? (>= lap 1)) 'hold)
+               ((<= lap 1) (if (>= laps 2) 'lap1 'traced))
                ((>= lap laps) 'traced)
-               ((and (= lap (- laps 1)) halfway?) 'hold)
                (else 'lap2)))))))

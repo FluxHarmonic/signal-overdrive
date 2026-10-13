@@ -239,7 +239,7 @@
                           (lambda ()
                             (mode7-draw-sprite! *sheet* sx y sw h 0.0 (* 7 CELL-H) PLAYER-CELL-W (* 8 CELL-H) fog fc)
                             (mode7-draw-sprite! *sheet* x y w h u0 v0 (+ u0 cw) (+ v0 CELL-H) fog fc)
-                            (when after (after (projected-x p) (projected-y p) k)))))))))
+                            (when after (after (projected-x p) (+ (projected-y p) (bend-dy (projected-y p))) k)))))))))
 
     ;; Sparks at the side of the machine that hit the wall: four 32x32
     ;; frames in row 7 from x 80, three ticks each. spark: (age . side),
@@ -426,13 +426,17 @@
     (define *hud-interf* 0.0)
     (define *hud-dropout* #f)
     (define *hud-frame* 0)
+    ;; the rows interference may touch: above HUD-BAND and above the
+    ;; horizon, even where the dip's overshoot lifts it
+    (define (hud-band) (min HUD-BAND (- (+ *horizon* (min 0.0 *dip*)) 2.0)))
     (define (h2 a b)
       (let ((x (* 43758.5453 (sin (+ (* a 12.9898) (* b 78.233))))))
         (- x (floor x))))
 
     (define (text! s vx vy hex . size)
       (let* ((k (if (pair? size) (car size) 1))
-             (L (if (< vy HUD-BAND) *hud-interf* 0.0))
+             ;; the band ends above the horizon whatever the horizon knob says
+             (L (if (< (+ vy (* 7 k)) (hud-band)) *hud-interf* 0.0))
              (r (h2 vy *hud-frame*))
              (j (cond ((<= L 0.0) 0)
                       (*hud-dropout* (exact (round (* 8.0 (- (h2 *hud-frame* vy) 0.5)))))
@@ -451,7 +455,7 @@
     ;; tracking lines rolling down through the HUD's band
     (define (hud-tracking!)
       (when (> *hud-interf* 0.0)
-        (let* ((band (min HUD-BAND (- (exact (round *horizon*)) 2)))
+        (let* ((band (exact (floor (hud-band))))
                (y (modulo (* 2 *hud-frame*) (max 1 band))))
           (rect! 0 y VIEW-W 1 "#8A8FA0")
           (when (< (+ y 1) band) (rect! 0 (+ y 1) VIEW-W 1 "#0D0A1A"))
@@ -528,7 +532,8 @@
         (hud-tracking!)
         ;; the showcase's or the solo's caption, and the panel's key
         (let ((cap (cdr (assq 'fx-caption info))))
-          (when cap (centred! cap (- VIEW-H 24) "#FFCC33")))
+          ;; above the F3 lines when they are showing
+          (when cap (centred! cap (if (cdr (assq 'fps info)) (- VIEW-H 52) (- VIEW-H 24)) "#FFCC33")))
         (when (and (cdr (assq 'fx-hint info)) (not (cdr (assq 'fps info))))
           (text! (cdr (assq 'fx-hint info)) 8 (- VIEW-H 11) "#7380A6"))
         (case phase
@@ -710,7 +715,7 @@
                                        (cdr (assq 'time info))
                                        (if *hold* ((cdr (assq 'fx-knob info)) 'fx-glitch) (cdr (assq 'glitch info)))
                                        (cdr (assq 'corrupt info))))
-          (set-pipeline-uniform! *lut-pipe* 'vp (list (* 0.5 VIEW-W) (tuning-ref tuning 'horizon) 0.0 0.0)))
+          (set-pipeline-uniform! *lut-pipe* 'vp (list (* 0.5 VIEW-W) (+ (tuning-ref tuning 'horizon) *dip*) 0.0 0.0)))
         (when dither?
           (with-3d-pass *post* #f
             (if (> (tuning-ref tuning 'lut) 0.5)

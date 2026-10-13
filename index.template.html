@@ -238,6 +238,7 @@
       { k: "fx-warp", name: "ICE WARP", max: 1, fire: "ice", label: "ICE STRIKE" },
       { k: "fx-interf", name: "INTERFERENCE", max: 1, fire: "tier", label: "NEXT TIER" }
     ];
+    var MANAGED = ["fx-dip", "fx-pools", "fx-chase", "fx-sky", "fx-glitch", "fx-warp", "fx-interf", "fx-solo", "fx-showcase", "fx-tier", "showcase"];
     var TIERS = [["REAL", -1], ["WORN", 70], ["DAMAGED", 45], ["FAILING", 20], ["CRITICAL", 5]];
     var params = new URLSearchParams(location.search);
     var num = function (k, d) { var v = parseFloat(params.get(k)); return isNaN(v) ? d : v; };
@@ -256,7 +257,9 @@
       // is not the same parameter to the game as ?mute=
       var q = location.search.replace(/^\?/, "").split("&").filter(function (s) {
         var k = s.split("=")[0];
-        return s && k.indexOf("fx-") !== 0 && k !== "showcase";
+        // only the parameters the panel manages are rewritten (fx-hold and
+        // fx-passes, say, stay as written)
+        return s && MANAGED.indexOf(k) < 0;
       });
       FX.forEach(function (f) { if (state[f.k] !== 1) q.push(f.k + "=" + fmt(state[f.k])); });
       if (state.solo) q.push("fx-solo=" + fmt(state.solo));
@@ -330,7 +333,9 @@
       if ((e.key === "e" || e.key === "E") && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); open(!panel.classList.contains("open")); }
     }, true);
     [panel, openBtn].forEach(function (p) {
-      ["keydown", "keyup", "keypress"].forEach(function (n) {
+      // keyups always reach the game: a key held when the panel opened must
+      // still be released there, or it sticks (the review's finding)
+      ["keydown", "keypress"].forEach(function (n) {
         p.addEventListener(n, function (e) {
           if (n === "keydown" && e.key === "Escape") open(false);
           if (e.key !== "e" && e.key !== "E") e.stopPropagation();

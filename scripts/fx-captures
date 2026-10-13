@@ -1,0 +1,40 @@
+#!/bin/sh
+# scripts/fx-captures [BUILD]   the effects page's captures: one short GIF
+# per effect into docs/fx/ (git-ignored: regenerate them, don't commit
+# them), from the web build (default build/web) on the GPU in headless
+# Chrome, at the game's 480x270 and shown at 2x with nearest scaling.
+# Each effect is soloed and its trigger fired from the harness (the same
+# params the panel sends), so every capture shows the effect alone.
+set -eu
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+BUILD="${1:-$REPO/build/web}"
+TMP="$(mktemp -d /tmp/fx-captures-XXXXXX)"
+DOCS="$REPO/docs/fx"
+mkdir -p "$DOCS"
+node -e '
+const seq = (name, n, gap) => { const s = []; for (let i = 0; i < n; i++) { s.push({ shot: name + "-" + String(i).padStart(2, "0") + ".png" }); if (gap) s.push({ wait: gap }); } return s; };
+const a = [{ waitLine: "phase race", ms: 30000 }, { wait: 3000 },
+  { param: "fx-solo=1" }, { wait: 600 }, { param: "fx-fire=drop" }, ...seq("dip", 24, 30),
+  { param: "fx-solo=2" }, { wait: 300 }, ...seq("pools", 20, 60),
+  { param: "fx-solo=3" }, { wait: 300 }, ...seq("chase", 20, 60),
+  { param: "fx-solo=5" }, { wait: 300 }, { param: "fx-fire=wall" }, ...seq("glitch", 12, 0),
+  { param: "fx-solo=6" }, { wait: 300 }, { param: "fx-fire=ice" }, ...seq("warp", 36, 90),
+  { param: "fx-solo=7" }, { param: "fx-tier=70" }, { wait: 900 }, ...seq("interf-worn", 8, 90),
+  { param: "fx-tier=45" }, { wait: 900 }, ...seq("interf-damaged", 12, 90),
+  { param: "fx-tier=20" }, { wait: 900 }, ...seq("interf-failing", 12, 90),
+  { param: "fx-tier=5" }, { wait: 900 }, ...seq("interf-critical", 12, 90),
+  { param: "fx-tier=-1" }, { param: "fx-solo=0" }, { wait: 1500 }, ...seq("all", 20, 80)];
+// laps=1: the final lap from the start, so TRACED (the tower violet)
+const b = [{ waitLine: "phase race", ms: 30000 }, { wait: 2500 }, { param: "fx-solo=4" }, { wait: 300 }, ...seq("sky-traced", 20, 60)];
+const fs = require("fs"); fs.writeFileSync(process.argv[1], JSON.stringify(a)); fs.writeFileSync(process.argv[2], JSON.stringify(b));
+' "$TMP/a.json" "$TMP/b.json"
+node "$REPO/scripts/fx-check.mjs" "$BUILD" "$TMP/a.json" --gpu --scale 1 --query "start&autopilot&mute&laps=9" --out "$TMP/cap" | grep -v '^shot'
+node "$REPO/scripts/fx-check.mjs" "$BUILD" "$TMP/b.json" --gpu --scale 1 --query "start&autopilot&mute&laps=1" --out "$TMP/cap" | grep -v '^shot'
+cd "$TMP/cap"
+guix shell imagemagick -- sh -c '
+for p in dip pools chase glitch warp interf-worn interf-damaged interf-failing interf-critical all sky-traced; do
+  d=8; case $p in dip|glitch) d=6 ;; esac
+  convert -delay $d -loop 0 $(ls $p-*.png | sort) -filter point -resize 200% -layers Optimize "'"$DOCS"'/$p.gif"
+done'
+ls -la "$DOCS"
+echo "frames in $TMP/cap"

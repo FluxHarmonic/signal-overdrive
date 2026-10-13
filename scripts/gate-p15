@@ -40,7 +40,8 @@ ROAD_Y=$((82 * SCALE)); ROAD_H=$((H - ROAD_Y)); SKY_H=$((70 * SCALE))
 count() {   # count A B HEIGHT Y: differing pixels in the band
   guix shell imagemagick -- sh -c "convert '$1' -crop ${W}x$3+0+$4 +repage png:- > '$OUT/a.png'; \
     convert '$2' -crop ${W}x$3+0+$4 +repage png:- > '$OUT/b.png'; \
-    compare -metric AE '$OUT/a.png' '$OUT/b.png' null: 2>&1 || true" | tail -1 | tr -dc '0-9'
+    compare -metric AE '$OUT/a.png' '$OUT/b.png' null: 2>&1 || true" | tail -1 | awk '{print $1}' |
+    grep -E '^[0-9]+$' || true   # the first token only (IM 7 adds a fraction), whole numbers only
 }
 ROAD=$(count "$OUT/on1.png" "$OUT/off.png" $ROAD_H $ROAD_Y)
 STILL=$(count "$OUT/on1.png" "$OUT/on2.png" $ROAD_H $ROAD_Y)

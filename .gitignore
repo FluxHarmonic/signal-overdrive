@@ -1,3 +1,4 @@
 build/
 .sigil/
 node_modules/
+docs/fx/*.gif

@@ -27,7 +27,7 @@
           (sigil math)
           (signal fx beat))
 
-  (export fx fx? fx-new fx-copy fx-step
+  (export fx fx? fx-new fx-copy fx-step fx-clear-transients! GLITCH-REST
           fx-tick fx-kick fx-snare fx-beat fx-flare fx-pad fx-ice fx-traced fx-chase fx-padstep
           fx-bar fx-row fx-section fx-dip-age fx-glitch-left fx-glitch-power fx-glitch-seed
           fx-warp fx-warp-age fx-warp-struck fx-interf fx-tier fx-dropout fx-drop-now
@@ -39,6 +39,8 @@
   (begin
     ;; P15's cap, in ticks (one tick a frame at 60 fps): 100 ms.
     (define GLITCH-MAX-TICKS 6)
+    ;; and a new glitch waits this long after the last one started
+    (define GLITCH-REST 30)
     ;; how far the horizon dips on the drop at intensity 1, rows
     (define DIP-ROWS 12.0)
     ;; a tracer's telegraph: one bar, downbeat to downbeat
@@ -60,7 +62,7 @@
       (dip-age default: #f mutable: #t)          ; ticks since the drop, or #f
       (drop-now default: #f mutable: #t)         ; #t on the tick the drop lands
       (glitch-left default: 0 mutable: #t) (glitch-power default: 0.0 mutable: #t)
-      (glitch-seed default: 0 mutable: #t)
+      (glitch-seed default: 0 mutable: #t) (glitch-start default: -1000 mutable: #t)
       ;; a tracer: (cx cy dx dy half-length half-width) in world texels,
       ;; armed (waiting for a downbeat), then telegraphing, then struck
       (warp default: #f mutable: #t) (warp-armed default: #f mutable: #t)
@@ -126,7 +128,8 @@
     ;; after the strike.
     (define (fx-warp-strength st)
       (cond ((not (fx-warp st)) 0.0)
-            ((fx-warp-struck st) (max 0.0 (- 1.0 (/ (fx-warp-age st) 12.0))))
+            ;; gone within 6 ticks of the strike (P15: 100 ms on the road)
+            ((fx-warp-struck st) (max 0.0 (- 1.0 (/ (fx-warp-age st) 6.0))))
             (else (+ 0.35 (* 0.65 (/ (fx-warp-age st) WARP-TELEGRAPH))))))
 
     ;; --- stepping ---------------------------------------------------------------------
@@ -135,13 +138,30 @@
 
     ;; A glitch starts, or a stronger one replaces a weaker; it never
     ;; runs more than GLITCH-MAX-TICKS.
+    ;; A glitch starts only after GLITCH-REST ticks since the last one
+    ;; started; a hit while one runs makes it harder, never longer. So a
+    ;; scrape along a wall (a hit every tick) glitches the road for at most
+    ;; GLITCH-MAX-TICKS of every GLITCH-REST (P15), where chaining 6-tick
+    ;; glitches would have covered it for the whole scrape (the review's
+    ;; finding, 2026-10-13).
     (define (start-glitch! st power)
       (let* ((p (max 0.0 (min 1.0 power)))
              (n (min GLITCH-MAX-TICKS (+ 2 (exact (round (* 4.0 p)))))))
-        (unless (and (> (fx-glitch-left st) 0) (> (fx-glitch-power st) p))
-          (set-fx-glitch-left! st n)
-          (set-fx-glitch-power! st p)
-          (set-fx-glitch-seed! st (+ 1 (fx-glitch-seed st))))))
+        (cond ((<= p 0.0) #f)
+              ((> (fx-glitch-left st) 0)
+               (set-fx-glitch-power! st (max p (fx-glitch-power st))))
+              ((< (- (fx-tick st) (fx-glitch-start st)) GLITCH-REST) #f)
+              (else
+               (set-fx-glitch-left! st n)
+               (set-fx-glitch-power! st p)
+               (set-fx-glitch-start! st (fx-tick st))
+               (set-fx-glitch-seed! st (+ 1 (fx-glitch-seed st)))))))
+
+    ;; A restart clears what belongs to the last race: a placed or armed
+    ;; tracer, a running glitch, the dip.
+    (define (fx-clear-transients! st)
+      (set-fx-warp! st #f) (set-fx-warp-armed! st #f) (set-fx-warp-struck! st #f)
+      (set-fx-glitch-left! st 0) (set-fx-dip-age! st #f))
 
     ;; One tick, in place; returns st. p: this tick's pulse; events: the
     ;; player's events this tick ('boost, 'pad, 'ice, (wall . impact));
@@ -196,7 +216,7 @@
                       (set-fx-warp-struck! st #t)
                       (set-fx-warp-age! st 0)
                       (start-glitch! st glitch-k))
-                     ((and (fx-warp-struck st) (> (fx-warp-age st) 12))
+                     ((and (fx-warp-struck st) (>= (fx-warp-age st) 6))
                       (set-fx-warp! st #f)
                       (set-fx-warp-struck! st #f)))))
         (when (<= glitch-k 0.0) (set-fx-glitch-left! st 0))
