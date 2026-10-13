@@ -27,12 +27,17 @@ nice -n 15 node scripts/drift/integration.test.mjs
 ```
 
 `reference.test.sgl` validates the intended-log contract and replayed
-positions. The native offline-render command and capture candidate are
-still being integrated; do not claim an actual-game gate from the
-synthetic checks.
+positions (`scripts/test-reference`). The implementation is the shared
+`src/signal/music/reference.sgl` module. The native command exits before
+shell boot and checks that audio stays uninitialized. Do not claim an
+actual-game gate from the synthetic checks.
 
-Once the candidate includes `--music-reference PLAN PCM FRAMES`, run
-one arm at a time from the repository root:
+`scripts/drift/build-candidate RUNDIR` builds a bounded native release and
+checks the offline command against a 7.5-second grid→lap1 render. The
+build has a 30-minute timeout and the smoke check a two-minute timeout.
+Poll RUNDIR/RESULT; it also records the source commit and logs.
+
+After that candidate passes, run one arm at a time from the repository root:
 
 ```sh
 node scripts/drift/capture.mjs /tmp/conductor-normal normal

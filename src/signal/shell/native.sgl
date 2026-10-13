@@ -13,11 +13,11 @@
 ;;; places every time), then quits. --knobs prints the knob table as markdown.
 
 (define-library (signal shell native)
-  (import (sigil core)
-          (sigil io)
+  (import (sigil io)
           (sigil process)
           (sigil string)
           (sigil time)
+          (sigil audio)
           (sigil desktop)
           (sigil desktop focus)
           (sigil graphics)
@@ -31,6 +31,7 @@
           (signal race)
           (signal scene)
           (signal track)
+          (signal music reference)
           (signal shell core))
 
   (export native-main)
@@ -95,6 +96,21 @@
 
     (define (native-main . _args)
       (let ((args (cdr (command-line))))
+        ;; Offline command: exit before booting the shell, opening its
+        ;; context, or creating a window. A null backend is not a render.
+        (let ((reference (member "--music-reference" args)))
+          (when reference
+            (unless (= (length reference) 4)
+              (error "usage: --music-reference PLAN PCM FRAMES"))
+            (when (audio-initialized?)
+              (error "offline reference must not initialize audio"))
+            (reference-render! (cadr reference) (caddr reference)
+                               (string->number (cadddr reference)))
+            (when (audio-initialized?)
+              (error "reference unexpectedly initialized audio"))
+            (display "signal-overdrive: offline reference complete; audio uninitialized")
+            (newline)
+            (exit 0)))
         (core-boot! 'desktop)
         (when (member "--knobs" args)
           (display (core-knobs-markdown))

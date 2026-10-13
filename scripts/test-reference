@@ -1,0 +1,8 @@
+#!/bin/sh
+# Pure intended-log contract checks, no device or native compilation.
+set -eu
+cd "$(dirname "$0")/.."
+export XDG_CACHE_HOME="${CONDUCTOR_CACHE_ROOT:-/tmp/signal-conductor-cache}"
+exec nice -n 15 "${CONDUCTOR_SIGIL:-$HOME/.sigil/versions/0.22.11/sigil}" \
+  -L src -L .sigil/deps eval \
+  '(begin (load "scripts/drift/reference.test.sgl") (run-tests))'

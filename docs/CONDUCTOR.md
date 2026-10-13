@@ -123,6 +123,13 @@ dated clock/cost samples. The clock timestamp is taken before drawing
 and rendering, so CPU time is not mistaken for clock drift. Intended
 landings are independent of the player's actual landing diagnostics.
 The gate renders its reference from the intended log.
+The native `--music-reference PLAN PCM FRAMES` command uses
+`(signal music reference)` and exits before shell/audio/window boot. It
+asserts that audio remains uninitialized. `scripts/drift/build-candidate`
+builds the release and checks this command on grid→lap1; the capture
+driver invokes it for each actual intended race log. All gate tools
+and tests are committed under `scripts/drift/`; no temporary copy is
+needed to reproduce them. Music cost is sampled on every traced frame.
 
 The three diagnostic arms are `--music-sabotage=depth` (omit queue depth
 from the audible reading), `immediate` (hand over planned marks at once)

@@ -1,0 +1,7 @@
+#!/bin/sh
+# Explicit offline command: no window or audio initialization.
+set -eu
+cd "$(dirname "$0")/../.."
+exec env SIGIL_AUDIO_BACKEND=null SIGIL_APP_PLATFORM=x11 DISPLAY= WAYLAND_DISPLAY= \
+  nice -n 15 scripts/dev "${CONDUCTOR_BINARY:-./build/release/bin/signal-overdrive}" \
+  --music-reference "$@"
