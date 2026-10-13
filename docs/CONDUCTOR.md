@@ -203,3 +203,44 @@ worst 60 ms and 95% correlation-coverage requirements. The latest full
 native headless race has zero sounding underruns, p95 49.01 ms drift,
 worst 111.40 ms and 59.43% coverage; no captured sabotage acceptance is
 claimed. See `scripts/drift/README.md` for evidence and reproduction.
+
+### Known native music underruns
+
+Leader 21:40 (2026-10-13) authorizes local integration with this issue
+recorded for the next audio/drift worker. The final native graphical
+race on runtime commit `3d0fbc9` completed all eight intended sections,
+the results coda and a clean Escape exit, but failed zero sounding
+music underruns: **8,414 frames at 44,100 Hz** (about 191 ms).
+Of these, **7,407 frames** (about 168 ms) were already present at title
+startup; **1,007 more** (about 23 ms) first appeared at tick 6,119,
+song time 101.983 s, phase `finished`, before the planned results landing.
+The engine remained at zero sounding underruns. The final web race on
+hardware AMD Radeon 780M/RADV had zero engine and music underruns.
+
+Conditions: private Xvfb, scale 2, software GL/llvmpipe with one rendering
+thread, CPU 5 only, nice 15, 250 ms music ring, PulseAudio forced to the
+verified `worker-null` sink (128), native device rate 44,100 Hz, and a
+machine at load roughly 11–14. No speaker or foreground display was used.
+Evidence remains in this conductor worktree under
+`build/conductor-final-native-race-retry/`: `RESULT`, `game.log`,
+`routing.json` and `verification-failed.json`. The exact corrected
+verification helper is `build/conductor-final-native-race-check.mjs`;
+its log is `build/conductor-final-native-race-retry-helper.log`.
+
+A pristine `9ac977c` master comparison used the same helper/environment.
+Its engine counter was zero at title startup and all six periodic samples
+through lap 3; the race finished, but Escape exited 139 (the older graphics
+teardown defect fixed by this branch). Master has no music stream, so this
+is not a comparison of the same music lane. No post-finish engine counter
+was emitted before its four-second coda/quit. Evidence is under
+`build/conductor-master-native-race/` (`comparison.json`, `launch.json`,
+`routing.json`, `received.json`, `game.log` and `RESULT`). Its comparison
+PASS means collection completed, not clean shutdown or a music-zero claim.
+
+The hypothesis is that main-thread presentation, allocation or collector
+stalls drain the new music lane at startup and near finish. Graphics warmup
+and pre-rendered initial PCM already precede music publication; the exact
+remaining cause has not been isolated. These native underruns and the
+separate known-RED drift gate pass to a fresh worker, who should start on
+real hardware to distinguish the environment from the product. Neither
+failure is hidden by a counter reset or weaker gate thresholds.

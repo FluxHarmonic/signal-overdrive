@@ -3,9 +3,21 @@
 **Known RED (Leader 14:58, 2026-10-13).** This is a separate opt-in
 diagnostic target; it is not part of default source tests or effects gates.
 Its thresholds and nonzero exit on a failed normal capture remain intact.
-The conductor is being prepared for integration with this failure recorded;
+Leader 21:40 authorizes local integration with this failure recorded;
 a fresh worker takes the drift investigation. No captured sabotage PASS
 has been established.
+
+**Native graphical music underruns are also a known issue.** The final
+single-CPU/nice-15/private-Xvfb/one-llvmpipe-thread race recorded 7,407
+sounding frames at title startup and 1,007 more near finish (8,414 total,
+about 191 ms at 44.1 kHz); the engine stayed at zero. The hardware-rendered
+web race had zero music and engine underruns. Master `9ac977c` has no music
+lane and its observed engine samples stayed at zero; its Escape exit was
+139, whereas conductor exited cleanly. See `docs/CONDUCTOR.md`, "Known
+native music underruns", for exact conditions, comparison limits and
+evidence paths. Start the follow-up on real hardware. This issue and drift
+remain disclosed failures; the captured normal drift gate still fails
+strictly and no thresholds have changed.
 
 `sh scripts/drift/test-candidate RUNDIR` runs the default project Sigil
 tests through the pinned CLI's linked native-dependency harness, with
