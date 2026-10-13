@@ -95,9 +95,23 @@ try {
     gc_young_threshold_max_kb: process.env.SIGIL_YOUNG_THRESHOLD_MAX || "default",
     software_rendering_threads: HEADLESS ? 0 : GL_THREADS,
     load_start: os.loadavg(), commit: execFileSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8" }).trim() }, null, 2));
+  // Own-process counters separate CPU execution from run-queue delay.
+  // schedstat uses nanoseconds and does not depend on a clock-tick rate.
+  const scheduling = [];
+  function sampleScheduling() {
+    try {
+      const [run, wait, slices] = fs.readFileSync(`/proc/${verifiedPID}/schedstat`, "utf8")
+        .trim().split(/\s+/).map(Number);
+      const sample = { wall_ms: Date.now(), run_ns: run, wait_ns: wait, slices };
+      scheduling.push(sample);
+      fs.appendFileSync(path.join(RUN, "scheduling.jsonl"), JSON.stringify(sample) + "\n");
+    } catch { /* the owned game may have exited between checkpoints */ }
+  }
+  sampleScheduling();
   let complete = false;
   for (let i = 0; i < 400; i++) {
     await sleep(1000);
+    sampleScheduling();
     if (i % 2 === 0 && !verifyRoute()) throw new Error("game Pulse stream disappeared");
     const trace = parseTrace(gameText), final = trace.jumps.find(jump => jump.mark === "results");
     if (final && trace.clocks.at(-1)?.song > final.bar * 12 / 7 + 4) { complete = true; break; }
@@ -125,6 +139,16 @@ try {
   const code = await new Promise((resolve, reject) => { reference.once("exit", resolve); reference.once("error", reject); });
   if (code !== 0) throw new Error(`offline reference failed (${code})`);
   const result = analyze(RUN);
+  if (scheduling.length > 1) {
+    const first = scheduling[0], last = scheduling.at(-1);
+    result.process_timing = {
+      elapsed_ms: last.wall_ms - first.wall_ms,
+      main_thread_cpu_ms: (last.run_ns - first.run_ns) / 1e6,
+      run_queue_wait_ms: (last.wait_ns - first.wait_ns) / 1e6,
+      time_slices: last.slices - first.slices,
+      samples: scheduling.length,
+    };
+  }
   fs.writeFileSync(path.join(RUN, "analysis.json"), JSON.stringify(result, null, 2) + "\n");
   const expected = ARM === "normal" ? result.pass : !result.pass;
   fs.writeFileSync(path.join(RUN, "RESULT"), `RESULT: ${expected ? "PASS" : "FAIL"} — ${ARM} captured gate ${result.pass ? "GREEN" : "RED"}\n`);

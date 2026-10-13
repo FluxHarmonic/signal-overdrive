@@ -15,6 +15,10 @@ monotonic clock. This isolates drawing contention and is recorded in
 metadata. Keep graphical capture evidence when comparing the two modes.
 `CONDUCTOR_GC_PROFILE=1` records the pinned runtime's collection events in
 separate game/reference JSONL files to diagnose long live-frame pauses.
+`scheduling.jsonl` samples only the owned game's kernel main-thread CPU
+and run-queue wait counters once per second. The final analysis reports
+their elapsed totals separately; collector event durations include both
+execution and scheduling delay. This sampling changes no runtime policy.
 `node scripts/drift/replay-capture.mjs SOURCE NEW_RUNDIR` re-renders only
 the intended-log reference for saved real PCM at its logged device rate.
 It requires a fresh directory, copies the capture/clock/log unchanged,
