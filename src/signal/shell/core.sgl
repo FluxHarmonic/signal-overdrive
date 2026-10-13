@@ -549,14 +549,23 @@
     ;; the gate or the card on, it is spent until the next frame (one press
     ;; must not skip the card and then the title).
     (define *start-spent* #f)
+
+    ;; A start (title or results to the countdown) begins a new song at
+    ;; conductor tick 0. The rest of that frame's ticks belong to the old
+    ;; race: running them would open the new song's music at tick 2 or 3,
+    ;; a late join that waits silent for bar 1 (1.7 s) and keeps the
+    ;; frame's setup interval. Stop there; the next frame starts the song.
     (define (step! n)
       (set! *start-spent* #f)
       (let loop ((i 0))
         (when (< i n)
+          (let ((started?
           (let* ((was (race-phase *race*))
                  (start (and (start-asked?) (not *start-spent*)))
                  (in (controls))
-                 (r (race-step *tuning* *race* in (and start (not (title-active? *title*))))))
+                 (r (race-step *tuning* *race* in (and start (not (title-active? *title*)))))
+                 (started? (and (eq? (race-phase r) (quote countdown))
+                                (not (eq? was (quote countdown))))))
             (set! *race* r)
             (when (and (eq? (race-phase r) 'countdown) (not (eq? was 'countdown)))
               (title-emit! (list 'race-start)))
@@ -596,10 +605,15 @@
             (let* ((h (machine-heading (racer-machine (race-player r))))
                    (ch (or *cam-heading* h))
                    (lag (tuning-ref *tuning* 'cam-lag)))
-              (set! *cam-heading* (if (eq? (race-phase r) 'title) h (+ ch (* (- h ch) (- 1.0 lag)))))))
+              (set! *cam-heading* (if (eq? (race-phase r) 'title) h (+ ch (* (- h ch) (- 1.0 lag))))))
+            started?)))
           (set! *flash* (max 0 (- *flash* 1)))
           (when *spark* (set! *spark* (cons (+ 1 (car *spark*)) (cdr *spark*))))
-          (loop (+ i 1)))))
+          (if started?
+              (begin
+                (set! *clock* (clock-new))
+                (set! *skip-interval* #t))
+              (loop (+ i 1)))))))
 
     ;; The player, for the touch check: what a gesture did, from the game.
     (define (core-probe)
@@ -772,6 +786,8 @@
         (music-close!)
         (set! *clock* (clock-new))
         (set! *pacing* (pacing-new))
+        ;; No ticks this frame: the new song opens at conductor tick 0.
+        (set! *skip-interval* #t)
         (say "restart"))
       (let* ((interval (if *skip-interval* 0.0 (* dt (if *skew-arm* 1.01 1.0))))
              (c (race-song *race*))

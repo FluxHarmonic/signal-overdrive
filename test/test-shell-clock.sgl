@@ -3,6 +3,7 @@
         (substratic input keys)
         (substratic store kv)
         (signal race)
+        (signal music conductor)
         (signal shell core))
 
 (set-store-root! "/tmp/signal-conductor-shell-test-store")
@@ -47,6 +48,35 @@
     (keys-end-frame! (core-keys))
     (assert-false (core-paused?))
     (assert-equal 1 (race-tick (core-race)))))
+
+(test-group "shell: a race start opens its song at tick 0"
+  ;; A start mid-frame used to run the frame's remaining ticks on the new
+  ;; song, so its music opened at tick 2 or 3: a late join, silent until bar 1.
+  (test "a start from the title ends that frame's ticks at the new song's tick 0"
+    (core-boot! (quote desktop))
+    (core-advance! (/ 1.0 60.0))
+    (core-param! "start")
+    (core-advance! 0.05)
+    (assert-equal (quote countdown) (race-phase (core-race)))
+    (assert-equal 0 (conductor-tick (race-song (core-race))))
+    ;; the next frame's interval was the old race's; then ticks resume
+    (core-advance! (/ 1.0 60.0))
+    (assert-equal 0 (conductor-tick (race-song (core-race))))
+    (core-advance! (/ 1.0 60.0))
+    (assert-equal 1 (conductor-tick (race-song (core-race)))))
+
+  (test "R restarts at the new song's tick 0 even on a long frame"
+    (core-boot! (quote desktop))
+    (core-param! "start")
+    (core-advance! (/ 1.0 60.0))
+    (let frames ((n 30))
+      (when (> n 0) (core-advance! (/ 1.0 60.0)) (frames (- n 1))))
+    (assert-true (> (conductor-tick (race-song (core-race))) 20))
+    (keys-down! (core-keys) (quote r))
+    (core-advance! 0.05)
+    (keys-up! (core-keys) (quote r))
+    (keys-end-frame! (core-keys))
+    (assert-equal 0 (conductor-tick (race-song (core-race))))))
 
 (test-group "shell: deliberate clock-skew arm"
   (test "the skew arm plants 1% even with audio muted, and none restores wall time"
