@@ -95,6 +95,7 @@
            (cmd-render (cadr args) (caddr args)
                        (if (= (length args) 4) (string->number (cadddr args)) 48000)))
           ((equal? args (list "probe")) (run-probe))
+          ((equal? args (list "sfx-check")) (check-sfx))
           ((equal? args (list "damage-check")) (check-damage-wiring) (check-clean-transparency) (for-each check-clean-transparency (list 1 2 3 4 5 6 7)) 0)
           ((and (= (length args) 2) (equal? (car args) "damage")) (render-damage-audition (cadr args)))
           ((and (>= (length args) 2) (equal? (car args) "stems"))
