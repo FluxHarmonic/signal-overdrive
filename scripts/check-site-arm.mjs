@@ -18,7 +18,8 @@
 //              of the three: only the game is isolated
 //   em-dash    no em dash in the site's own text files
 //   analytics  every HTML page in the tree, the game's page included, carries
-//              David's Plausible snippet with signaloverdrive.net's script ID
+//              David's Plausible snippet in its gated form (the script tag is
+//              added only on signaloverdrive.net) with the site's script ID,
 //              exactly once, in <head>, and no other site's
 //                (scripts/plausible-check.mjs, shared with the other game sites)
 // In headless Chrome (muted, into the worker-null sink), with plausible.io
@@ -37,26 +38,35 @@
 //   phone      at 390 CSS px (a phone, emulated), / and the 404 have no
 //              horizontal scroll, and the logo and PLAY 0.1 fit on screen
 //   404        a missing page shows the 404's number and a link home
-//   analytics  / and the 404 each load the script and send a pageview for
-//              signaloverdrive.net that the stub accepts (202, seen by the
-//              page), and so does the game's page while it stays isolated
+//   local      every leg above ran at the loopback host, as a private preview
+//              does: nothing asked plausible.io for anything, no script ran
 //   privacy    the landing's footer has the privacy line and its link
+//   analytics  at https://signaloverdrive.net (the stub serves the tree there),
+//              /, the 404 and the game's page each load the script and send a
+//              pageview for signaloverdrive.net that comes back 202, and the
+//              game's page stays cross-origin isolated with it
+//   coep       the same game page, given a plausible.io script without CORP,
+//              blocks it and stays isolated (COEP is really judging it)
+//   analytics-down  plausible.io refused: / renders and the game starts,
+//              isolated, with no error but the refused requests
 //   isolation  /<game>/ is crossOriginIsolated with a working SharedArrayBuffer,
 //              its document answered with COOP, COEP and CORP, and the game
 //              itself reports its audio ring as "worklet-sab" (the bridge's
 //              SharedArrayBuffer path). The control: / is NOT isolated and
 //              has no SharedArrayBuffer, so the probe can tell the two apart.
 //   console    no console error, exception or failed request on /, the 404 or
-//              the game
+//              the game, at either host
 // Exit 0 green, 1 red, 2 setup failed (the line starts SETUP-FAILED).
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
-import { auditTree, plausibleStub, PRIVACY } from "./plausible-check.mjs";
+import { auditTree, plausibleStub, isPlausibleFailure, PRIVACY } from "./plausible-check.mjs";
 
 const PLAUSIBLE_ID = "pa-GCzY0KZPnFuB1DEsbPead";
 const PLAUSIBLE_DOMAIN = "signaloverdrive.net";
+// the site at its real hostname: the stub answers it from the local server
+const REAL = `https://${PLAUSIBLE_DOMAIN}`;
 const EM = /—|&mdash;|&#8212;|&#x2014;/i;
 const ISOLATION = { "cross-origin-opener-policy": "same-origin", "cross-origin-embedder-policy": "require-corp", "cross-origin-resource-policy": "same-origin" };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -122,16 +132,18 @@ const text = (p) => fs.readFileSync(path.join(DIR, p), "utf8");
 }
 
 // ---- analytics (no browser) ------------------------------------------------------------
-let gameTagged = false;
 {
-  const { pages, problems } = auditTree(DIR, PLAUSIBLE_ID);
+  // every page carries the gated snippet: the script tag is added only on
+  // signaloverdrive.net, so a private preview, a local run or any other copy
+  // of the site sends nothing
+  const all = auditTree(DIR, PLAUSIBLE_ID).pages;
+  const { pages, problems } = auditTree(DIR, PLAUSIBLE_ID, { gated: all, host: PLAUSIBLE_DOMAIN });
   // a floor: the pages that must be there, so an empty walk is no pass
   const must = ["index.html", "404.html", `${SLUG}/index.html`];
   const absent = must.filter((p) => !pages.includes(p));
   if (absent.length) problems.push(`pages missing from the walk: ${absent.join(", ")}`);
-  gameTagged = !problems.some((p) => p.startsWith(`${SLUG}/index.html`));
   problems.length ? bad("analytics", problems.slice(0, 6).join("; "))
-    : ok("analytics", `David's snippet with ${PLAUSIBLE_ID} (${PLAUSIBLE_DOMAIN}) once, in <head>, on all ${pages.length} HTML pages: ${pages.join(", ")}`);
+    : ok("analytics", `David's snippet, gated to ${PLAUSIBLE_DOMAIN}, with ${PLAUSIBLE_ID} once, in <head>, on all ${pages.length} HTML pages: ${pages.join(", ")}`);
 }
 
 // ---- the browser -------------------------------------------------------------------------
@@ -187,7 +199,7 @@ const send = (method, params = {}) => new Promise((res, rej) => { const id = ++m
 await send("Page.enable"); await send("Runtime.enable"); await send("Network.enable"); await send("Log.enable");
 await send("Network.setCacheDisabled", { cacheDisabled: true });
 // plausible.io, stood in for: no leg reaches the internet
-stub = await plausibleStub(send, { mode: "stub" });
+stub = await plausibleStub(send, { mode: "stub", sites: { [REAL]: BASE } });
 const evalJS = async (expr) => {
   const r = await send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true });
   if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 300));
@@ -204,19 +216,13 @@ const badRequests = (list) => { const g = new Set(list.filter(good).map((r) => r
 const MISSING = "/no-such-page";
 const expected404 = (line) => line.endsWith(` ${BASE}${MISSING}`) && /status of 404/.test(line);
 const fmtReq = (r) => `${(r.url || "(no url)").replace(BASE, "")} ${r.status ?? ""}${r.failed ?? ""}`;
-// what each page's analytics saw: its URL -> the event statuses it got back
-const seen = new Map();
-const notePlausible = async () => {
-  const got = await waitFor(() => evalJS("window.__plausibleStub && window.__plausibleStub.length ? JSON.stringify([location.href, window.__plausibleStub]) : null"), 5000);
-  if (got) { const [u, st] = JSON.parse(got); seen.set(u, st); }
-};
 const visit = async (p, { fonts = true } = {}) => {
   await send("Page.navigate", { url: BASE + p });
   const r = await waitFor(() => evalJS(fonts ? "document.readyState === 'complete' && document.fonts.status === 'loaded'" : "document.readyState === 'complete'"), 15000);
-  await notePlausible();
   return r;
 };
 const errorsAt = {};
+const READY = /signal-overdrive: ready/;
 const errorsSince = (e0, n0) => [...consoleErrors.slice(e0).filter((l) => !expected404(l)),
   ...badRequests(netSince(n0).filter((r) => !(r.status === 404 && r.url === BASE + MISSING))).map((r) => `request ${fmtReq(r)}`)];
 const note = (p, e0, n0) => { errorsAt[p] = errorsSince(e0, n0); };
@@ -407,22 +413,15 @@ try {
       : ok("isolation", `/${SLUG}/ is crossOriginIsolated with a working SharedArrayBuffer (document: COOP ${doc.headers["cross-origin-opener-policy"]}, COEP ${doc.headers["cross-origin-embedder-policy"]}, CORP ${doc.headers["cross-origin-resource-policy"]}); the game's audio ring is ${mode}; the control / is not isolated and has no SharedArrayBuffer`);
   }
 
-  // ---- analytics in the browser ------------------------------------------------------------
+  // ---- local: the loopback host asks plausible.io for nothing ------------------------------
+  // every leg above ran at BASE (127.0.0.1), not signaloverdrive.net, as the
+  // review host does; the gated snippet must not have loaded the script there
   {
-    const detail = [];
-    const want = [`${BASE}/`, `${BASE}/no-such-page`, ...(gameTagged ? [`${BASE}/${SLUG}/`] : [])];
-    for (const u of want) {
-      const st = seen.get(u);
-      if (!st) detail.push(`${u.replace(BASE, "") || "/"}: no pageview reached the stub`);
-      else if (!st.includes(202)) detail.push(`${u.replace(BASE, "")}: the stub answered ${st.join(", ")}`);
-    }
-    const events = stub.events.filter((e) => e.body && e.body.d === PLAUSIBLE_DOMAIN);
-    if (!events.length) detail.push(`no event for ${PLAUSIBLE_DOMAIN} reached the stub`);
-    const others = stub.events.filter((e) => !(e.body && e.body.d === PLAUSIBLE_DOMAIN));
-    if (others.length) detail.push(`${others.length} events for another domain`);
-    detail.length ? bad("analytics", detail.join("; "))
-      : ok("analytics", `${want.map((u) => u.replace(BASE, "") || "/").join(", ")} each sent a pageview for ${PLAUSIBLE_DOMAIN} the stub accepted (202)${gameTagged ? `, the game's page while isolated` : ""}; ${events.length} events in all`);
-    if (!gameTagged) bad("analytics", `/${SLUG}/ was not checked in the browser: its page has no snippet (the analytics leg above names it)`);
+    const pl = [...net.values()].filter((r) => /^https:\/\/plausible\.io\//.test(r.url || ""));
+    const loaded = await evalJS("!!(window.plausible && window.plausible.l)").catch(() => null);
+    pl.length || stub.scripts.length || stub.events.length || loaded !== false
+      ? bad("local", `at ${BASE}: ${pl.length} requests to plausible.io (${pl.slice(0, 3).map((r) => r.url).join(", ")}), ${stub.scripts.length} script and ${stub.events.length} event requests at the stub; the script ${loaded === false ? "did not run" : "ran or could not be asked"}`)
+      : ok("local", `/, ${MISSING}, /${SLUG}/ at ${BASE} (not ${PLAUSIBLE_DOMAIN}, as on a private preview): no request to plausible.io, no script`);
   }
 
   // ---- privacy ----------------------------------------------------------------------------
@@ -431,6 +430,85 @@ try {
     const f = await evalJS(`(() => { const p = [...document.querySelectorAll("footer p")].find((x) => x.textContent.includes("Plausible")); return p ? { text: p.textContent.trim(), href: (p.querySelector("a") || {}).href } : null; })()`);
     f && f.text === PRIVACY && f.href === "https://plausible.io/data-policy" ? ok("privacy", `the footer says "${PRIVACY}" and links the data policy`)
       : bad("privacy", f ? `the footer line is "${f.text}" linking ${f.href}` : "no privacy line in the footer");
+  }
+
+  // ---- analytics: at https://signaloverdrive.net, through the stub ---------------------------
+  {
+    const detail = [], got = [];
+    for (const p of ["/", MISSING, `/${SLUG}/`]) {
+      const e0 = consoleErrors.length, l0 = consoleLines.length, ev0 = stub.events.length;
+      await send("Page.navigate", { url: REAL + p });
+      await waitFor(() => evalJS("document.readyState === 'complete'"), 15000);
+      if (p === `/${SLUG}/` && !(await waitFor(async () => consoleLines.slice(l0).some((l) => READY.test(l)), 60000))) detail.push(`${p}: the game never said ready at ${REAL}`);
+      const st = await waitFor(() => evalJS("window.__plausibleStub && window.__plausibleStub.length ? JSON.stringify({ href: location.href, st: window.__plausibleStub, coi: self.crossOriginIsolated }) : null"), 8000)
+        .then((v) => v && JSON.parse(v));
+      const evs = stub.events.slice(ev0).filter((e) => e.body && e.body.n === "pageview" && e.body.u === REAL + p && e.body.d === PLAUSIBLE_DOMAIN);
+      if (!st) detail.push(`${p}: no event status came back to the page (the script did not run, or its POST failed)`);
+      else if (!st.st.includes(202)) detail.push(`${p}: the page got ${JSON.stringify(st.st)}, not 202`);
+      else if (st.href !== REAL + p) detail.push(`${p}: the status came from ${st.href}, not ${REAL + p}`);
+      if (!evs.length) detail.push(`${p}: the stub received no pageview for ${REAL + p}`);
+      if (p === `/${SLUG}/` && (!st || st.coi !== true)) detail.push(`${p} is not cross-origin isolated with the analytics loaded (${st && st.coi})`);
+      // the missing page's own 404 is the point, not an error
+      if (p === MISSING) for (let i = consoleErrors.length - 1; i >= e0; i--) if (/status of 404/.test(consoleErrors[i]) && consoleErrors[i].endsWith(REAL + MISSING)) consoleErrors.splice(i, 1);
+      errorsAt[`${p} at ${PLAUSIBLE_DOMAIN}`] = consoleErrors.slice(e0);
+      if (st) got.push(p);
+    }
+    const wrongScript = stub.scripts.filter((sc) => sc.id !== PLAUSIBLE_ID);
+    if (wrongScript.length) detail.push(`scripts requested for other IDs: ${[...new Set(wrongScript.map((sc) => sc.id))].join(", ")}`);
+    const wrongDomain = stub.events.filter((e) => !e.body || e.body.d !== PLAUSIBLE_DOMAIN);
+    if (wrongDomain.length) detail.push(`${wrongDomain.length} event(s) not for ${PLAUSIBLE_DOMAIN}: ${JSON.stringify(wrongDomain[0].body).slice(0, 120)}`);
+    detail.length ? bad("analytics", detail.slice(0, 6).join("; "))
+      : ok("analytics", `at ${REAL}: ${got.join(", ")} each loaded the script and sent a pageview for ${PLAUSIBLE_DOMAIN} that came back 202; /${SLUG}/ cross-origin isolated with it (${stub.scripts.length} script requests, ${stub.events.length} events)`);
+  }
+
+  // ---- coep: the game's page really judges plausible.io's CORP --------------------------------
+  // (Harkfell's leg: without it, "isolated with the script loaded" cannot tell
+  // "COEP passed the script" from "COEP never looked")
+  {
+    const detail = [];
+    stub.setMode("nocorp");
+    const s0 = stub.scripts.length, ev0 = stub.events.length, c0 = consoleErrors.length, l0 = consoleLines.length;
+    await send("Page.navigate", { url: `${REAL}/${SLUG}/` });
+    if (!(await waitFor(async () => consoleLines.slice(l0).some((l) => READY.test(l)), 60000))) detail.push(`/${SLUG}/: the game never said ready`);
+    await sleep(3000);
+    const st = await evalJS("JSON.stringify({ st: window.__plausibleStub || null, coi: self.crossOriginIsolated, l: !!(window.plausible && window.plausible.l) })").then(JSON.parse).catch(() => null);
+    if (stub.scripts.length === s0) detail.push("the script was never requested (the leg judged nothing)");
+    if (!st || st.coi !== true) detail.push(`/${SLUG}/ is not cross-origin isolated (${st && st.coi})`);
+    else if (st.l || st.st || stub.events.length !== ev0) detail.push(`a plausible.io script without CORP ran on the isolated page (events ${stub.events.length - ev0}, status ${JSON.stringify(st.st)})`);
+    // the block is this leg's doing: its console line is not an error of the site's
+    for (let i = consoleErrors.length - 1; i >= c0; i--) if (/ERR_BLOCKED_BY_RESPONSE\.NotSameOriginAfterDefaultedToSameOriginByCoep https:\/\/plausible\.io\/\S+$/.test(consoleErrors[i])) consoleErrors.splice(i, 1);
+    errorsAt[`/${SLUG}/ at ${PLAUSIBLE_DOMAIN}, plausible.io without CORP`] = consoleErrors.slice(c0);
+    stub.setMode("stub");
+    detail.length ? bad("coep", detail.join("; "))
+      : ok("coep", `/${SLUG}/ at ${PLAUSIBLE_DOMAIN} asked for a plausible.io script sent without CORP, COEP blocked it, and the page stayed isolated`);
+  }
+
+  // ---- analytics-down: plausible.io unreachable ------------------------------------------------
+  {
+    stub.setMode("down");
+    const detail = [];
+    const f0 = stub.failed.length;
+    for (const p of ["/", `/${SLUG}/`]) {
+      const e0 = consoleErrors.length, l0 = consoleLines.length;
+      await send("Page.navigate", { url: REAL + p });
+      await waitFor(() => evalJS("document.readyState === 'complete'"), 15000);
+      if (p === "/") {
+        const alt = await evalJS("(document.querySelector('h1 img') || {}).alt || null").catch(() => null);
+        if (alt !== "Signal Overdrive") detail.push(`/: the landing did not render (h1 ${JSON.stringify(alt)})`);
+      } else {
+        if (!(await waitFor(async () => consoleLines.slice(l0).some((l) => READY.test(l)), 60000))) detail.push(`${p}: the game never said ready with plausible.io unreachable`);
+        const iso = await evalJS("self.crossOriginIsolated").catch(() => null);
+        if (iso !== true) detail.push(`${p} is not cross-origin isolated (${iso})`);
+      }
+      await sleep(1000);
+      const errs = consoleErrors.slice(e0).filter((l) => !isPlausibleFailure(l));
+      if (errs.length) detail.push(`${p}: errors besides the refused plausible.io requests: ${errs.slice(0, 2).join(" | ").slice(0, 200)}`);
+    }
+    // the positive control: the refusal happened, so the leg tested something
+    if (stub.failed.length === f0) detail.push("no plausible.io request was refused (the leg tested nothing)");
+    stub.setMode("stub");
+    detail.length ? bad("analytics-down", detail.join("; "))
+      : ok("analytics-down", `with plausible.io refused (${stub.failed.length - f0} requests), / renders and /${SLUG}/ starts, isolated, with no other error`);
   }
 
   // ---- console -----------------------------------------------------------------------------
