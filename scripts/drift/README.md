@@ -23,6 +23,9 @@ The analyzer correlates 3 kHz amplitude envelopes, with 1.5-second windows
 at each beat across the full race. It dates each reference window from the
 simulation's clock trace, requires at least 95% matching coverage and
 judges absolute errors: p95 at most 30 ms and worst at most 60 ms.
+After a wide acquisition, it follows the previous correlated lag within
+250 ms, as INTERCEPT does, to avoid aliases from repeated beats. Absolute
+errors are still measured against the simulation clock, including offsets.
 The capture clock dates sample zero from its earliest byte-count bound;
 reported errors include the capture's own startup/buffering latency.
 

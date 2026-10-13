@@ -148,24 +148,32 @@ export function analyze(run) {
     if (!a || !b || song < a.song || b.song <= a.song) return null;
     return a.wall + (b.wall - a.wall) * (song - a.song) / (b.song - a.song);
   }
-  const rows = [], halfWindow = 0.75, searchSeconds = 4.0;
+  const rows = [], halfWindow = 0.75;
+  let trackedOffset = null;
   const end = Math.min(ref.seconds - 2 * halfWindow, clocks.at(-1).song - halfWindow);
   for (let song = 2; song < end; song += 60 / 140) {
     const wall = wallAt(song);
     if (wall === null) continue;
     const expected = (wall - start) / 1000;
-    const from = Math.max(0, Math.floor((expected - searchSeconds) * ENVELOPE_RATE));
-    const to = Math.min(cap.values.length, Math.ceil((expected + 2 * halfWindow + searchSeconds) * ENVELOPE_RATE));
+    // INTERCEPT follows the last correlated lag after acquisition. A
+    // fresh wide search at every beat aliases repeated musical phrases.
+    // Tracking changes the search, never the absolute error or verdict.
+    const searchSeconds = trackedOffset === null ? 4.0 : 0.25;
+    const center = expected + (trackedOffset ?? 0);
+    const from = Math.max(0, Math.floor((center - searchSeconds) * ENVELOPE_RATE));
+    const to = Math.min(cap.values.length, Math.ceil((center + 2 * halfWindow + searchSeconds) * ENVELOPE_RATE));
     const refFrom = Math.round(song * ENVELOPE_RATE), length = Math.round(2 * halfWindow * ENVELOPE_RATE);
     if (to - from < length) { rows.push({ song, norm: 0, reason: "capture too short" }); continue; }
     const peak = correlate(ref.values.subarray(refFrom, refFrom + length), cap.values.subarray(from, to));
     const heard = start + (from + peak.lag) / ENVELOPE_RATE * 1000;
     rows.push({ song, norm: peak.norm, error_ms: wall - heard });
+    if (peak.norm >= 0.5) trackedOffset = (heard - wall) / 1000;
   }
   const good = rows.filter(r => r.norm >= 0.5 && Number.isFinite(r.error_ms));
   const verdict = assess(good.map(r => r.error_ms), good.length / rows.length);
   const costs = clocks.map(c => +c.metrics["music-ms"]).filter(Number.isFinite);
   return { ...verdict, windows: rows.length, correlated: good.length, capture_rms: cap.rms,
+    correlation_search: "4 s acquisition, then 250 ms around last correlated lag",
     capture_start_ms: start, capture_clock_spread_ms: Math.max(...bounds) - start,
     insert_cost_ms: { samples: costs.length, p50: percentile(costs, 0.5), p95: percentile(costs, 0.95), worst: Math.max(...costs) },
     intended_jumps: trace.jumps, rows };
