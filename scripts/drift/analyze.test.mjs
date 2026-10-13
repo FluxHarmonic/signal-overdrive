@@ -59,7 +59,10 @@ assert.equal(trace.clocks[0].metrics["music-ms"], "1.2");
   const clocks = [];
   for (let song = 0; song <= 100; song += 0.1) clocks.push({ song, metrics: { resyncs: String(Math.floor(song / 6)) } });
   assert.ok(armSignature("immediate", { rows: rows(s => s < 6.86 ? 10 : 1725) }, clocks).matched);
+  // the displacement may be a different whole number of bars later on
+  assert.ok(armSignature("immediate", { rows: rows(s => s < 6.86 ? 10 : s < 50 ? 1725 : -1700) }, clocks).matched);
   assert.ok(!armSignature("immediate", { rows: rows(() => 10) }, clocks).matched);
+  assert.ok(!armSignature("immediate", { rows: rows(() => 860) }, clocks).matched);
   assert.ok(armSignature("depth", { rows: rows(() => -240) }, clocks).matched);
   assert.ok(!armSignature("depth", { rows: rows(() => 1700) }, clocks).matched);
   // 1% fast: the error falls 10 ms a second, and each resync (every 6 s) resets it.
