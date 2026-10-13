@@ -56,8 +56,10 @@
     (define (log-lerp i i0 v0 i1 v1)
       (exp (lerp i i0 (log v0) i1 (log v1))))
 
-    ;; -> list of (ch name value); every damage param on every channel, so
-    ;; any state can be reached from any other by one call
+    ;; -> list of (ch name value): every damage param on every channel EXCEPT
+    ;; the lead's gate (ch 6 gain), which lead-gate-events owns. A caller that
+    ;; moves the lead out of a gated tier between gate events (healing from
+    ;; CRITICAL mid-bar, say) must reopen the gate itself, as render-repair does.
     (define (params-for i boost?)
       (let* ((tier (tier-of i))
              (rank (cdr (assq tier '((clean . 0) (worn . 1) (damaged . 2) (failing . 3) (critical . 4) (corrupt . 4)))))
@@ -111,12 +113,15 @@
                     (error "damage: set refused" s)))
                 sets))
 
-    ;; a gain ramp in 6 steps over 3 ms from a to b, starting at time s
+    ;; a gain ramp from a to b: 6 steps 0.5 ms apart, reaching b 3 ms after s.
+    ;; Sub-pull timing: the audition splits pulls at each step. The game pulls
+    ;; whole blocks and motif applies sets and ramps only between pulls, so at
+    ;; 512-frame pulls these become one step (and click); see the task note.
     (define (gain-ramp p ch s a b)
       (map (lambda (k)
-             (let ((v (+ a (* (- b a) (/ (+ k 1) 6.0)))))
+             (let ((v (+ a (* (- b a) (/ k 6.0)))))
                (cons (+ (frame s) (* k 24)) (lambda () (player-set-insert-param! p ch 'gain v)))))
-           '(0 1 2 3 4 5)))
+           (quote (1 2 3 4 5 6))))
 
     ;; lead silences for bars [b0, b1) at tier; each silence ramps down 3 ms
     ;; before its 16th and back up 3 ms before its end

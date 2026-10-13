@@ -114,13 +114,16 @@
                          (else loud))))
              notes)))
 
-    (define (ticks-bar at accent soft)
+    ;; skip: 16ths left to another tick (the roll, the open tick)
+    (define (ticks-bar at accent soft . skip)
       (let loop ((i 0) (acc '()))
         (if (> i 15) (reverse acc)
             (loop (+ i 1)
-                  (cons (ev 3 (+ at i) 0.5 (midi 'C 8) I-TICK
-                            (if (memv i '(0 3 6 8 11 14)) accent soft))
-                        acc)))))
+                  (if (and (pair? skip) (memv i (car skip)))
+                      acc
+                      (cons (ev 3 (+ at i) 0.5 (midi 'C 8) I-TICK
+                                (if (memv i '(0 3 6 8 11 14)) accent soft))
+                            acc))))))
 
     ;; a 32nd roll on the last beat (a turnaround), ticks only
     (define (tick-roll at)
@@ -169,7 +172,7 @@
                    (four (modulo b 4))
                    (evs (append
                          (bass-bar at r nr (if (< b 4) 34 38))
-                         (ticks-bar at (if (< b 4) 24 28) (if (< b 4) 10 13))
+                         (ticks-bar at (if (< b 4) 24 28) (if (< b 4) 10 13) (if (= b 15) '(12 13 14 15) '()))
                          (kick at (if (= four 3) '(0 6 8 14) '(0 6 8)) 44)
                          (if (>= b 4) (clap at '(4 12) 36) '())
                          (if (>= b 4)
@@ -183,7 +186,7 @@
     ;; lap2: the chorus, 8 bars, all of it loops. The call (bars 1, 5) now
     ;; gets its partial answer (bars 3, 7), one note short of home; bar 4
     ;; and bar 8 are where the D would be. The arp enters; the kick pushes
-    ;; on the 11th 16th; stabs hold longer on the downbeat.
+    ;; on the last 16th of beat 3; stabs hold longer on the downbeat.
     ;; ------------------------------------------------------------
     (define (lap2-bars start)
       (let loop ((b 0) (acc '()))
@@ -197,7 +200,7 @@
                    (four (modulo b 4))
                    (evs (append
                          (bass-bar at r nr 40)
-                         (ticks-bar at 30 14)
+                         (ticks-bar at 30 14 (if (= four 3) '(14) '()))
                          (if (= four 3) (list (ev 3 (+ at 14) 1 (midi 'C 8) I-TICK-OPEN 26)) '())
                          (kick at (if (= four 3) '(0 6 8 11 14) '(0 6 8 11)) 46)
                          (clap at (if (= four 3) '(4 12 15) '(4 12)) 38)
@@ -213,6 +216,9 @@
     ;; Events -> cells -> .cts
     ;; ------------------------------------------------------------
     (define (row-of x) (exact (round (* 2 x))))
+    ;; a note's end rounds down, so a note shorter than its grid step
+    ;; (the arp's 0.75) releases before the next onset instead of running on
+    (define (end-row-of x) (exact (floor (* 2 x))))
 
     ;; cells: list of (row channel note inst vol); a note-off goes where a
     ;; note ends unless another note on its channel starts there
@@ -222,7 +228,7 @@
                          events))
              (offs (filter (lambda (x) x)
                            (map (lambda (e)
-                                  (let ((end (row-of (+ (ev-start e) (ev-len e)))))
+                                  (let ((end (end-row-of (+ (ev-start e) (ev-len e)))))
                                     (and (not (member (cons (ev-ch e) end) onsets))
                                          (list end (ev-ch e) "===" 0 0))))
                                 events))))
@@ -232,12 +238,23 @@
       (string-append "(" (number->string (cadr c)) " \"" (caddr c) "\" "
                      (number->string (cadddr c)) " " (number->string (list-ref c 4)) " \"000\")"))
 
-    ;; dedupe (later wins is not wanted: two cells in one slot is an error)
+    ;; one cell per (row, channel): a note beats a note-off there, two
+    ;; note-offs are one, and two notes are a composing error (it raises:
+    ;; the first version dropped 8 notes here without a word)
     (define (uniq-cells cells)
-      (let loop ((cs cells) (seen '()) (acc '()))
-        (cond ((null? cs) (reverse acc))
-              ((member (list (car (car cs)) (cadr (car cs))) seen) (loop (cdr cs) seen acc))
-              (else (loop (cdr cs) (cons (list (car (car cs)) (cadr (car cs))) seen) (cons (car cs) acc))))))
+      (let* ((key (lambda (c) (list (car c) (cadr c))))
+             (off? (lambda (c) (equal? (caddr c) "===")))
+             (notes (filter (lambda (c) (not (off? c))) cells))
+             (offs (filter off? cells)))
+        (let check ((ns notes) (seen '()))
+          (unless (null? ns)
+            (when (member (key (car ns)) seen)
+              (error "score: two notes in one slot (row, channel)" (key (car ns))))
+            (check (cdr ns) (cons (key (car ns)) seen))))
+        (let loop ((os offs) (seen (map key notes)) (acc (reverse notes)))
+          (cond ((null? os) (reverse acc))
+                ((member (key (car os)) seen) (loop (cdr os) seen acc))
+                (else (loop (cdr os) (cons (key (car os)) seen) (cons (car os) acc)))))))
 
     (define (pattern-text id rows cells)
       (let* ((sorted (list-sort (lambda (a b) (or (< (car a) (car b))

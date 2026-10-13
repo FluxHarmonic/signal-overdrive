@@ -138,7 +138,7 @@
                    (pre-a (sec 0.3)) (post-a (sec (+ T0 0.1))) (n (sec 0.6))
                    (pre (effective-bits x pre-a n SR 440.0))
                    (post (effective-bits x post-a n SR 440.0))
-                   (ok (and (>= pre 14.0) (< (abs (- post b)) 0.5))))
+                   (ok (and (>= pre 15.0) (< (abs (- post b)) 0.5))))
               (arm! (string-append "bits " (number->string b) (if set? "" ", set skipped"))
                     ok (not set?)
                     (string-append "effective bits before " (fx pre 2) ", after " (fx post 2)
@@ -197,14 +197,55 @@
                                             '(0 1 2 3 4 5 6 7 8 9)))
                                 " dB down"))))
        '(#t #f))
+      ;; the low-pass is two Butterworth stages sharing `cutoff`; each stage
+      ;; is soundpipe's bilinear butlp, |H|^2 = 1 / (1 + (tan(pi f/sr) /
+      ;; tan(pi fc/sr))^4), so a 4 kHz sine under a 2 kHz cutoff falls by
+      ;; 2 x 10 log10(1 + r^4) dB: 25.2. One stage alone would read 12.6.
       (for-each
        (lambda (set?)
-         (let* ((x (run (bass-insert (sine-source 2000.0 0.5)) '(cutoff gain) (if set? '((1.0 cutoff 200.0)) '()) 1.5))
+         (let* ((f 4000.0) (fc 2000.0)
+                (r (/ (tan (/ (* 3.141592653589793 f) SR)) (tan (/ (* 3.141592653589793 fc) SR))))
+                (want (* 2 10.0 (/ (log (+ 1.0 (* r r r r))) (log 10.0))))
+                (x (run (bass-insert (sine-source f 0.5)) '(cutoff gain) (if set? (list (list 1.0 'cutoff fc)) '()) 1.5))
                 (pre (rms x (sec 0.4) (sec 0.5))) (post (rms x (sec 1.1) (sec 0.3)))
                 (drop (- (db (* pre pre)) (db (max (* post post) 1e-40)))))
-           (arm! (string-append "cutoff 200 Hz takes 2 kHz down >= 40 dB" (if set? "" ", set skipped"))
-                 (>= drop 40.0) (not set?) (string-append (fx drop 1) " dB down"))))
+           (arm! (string-append "cutoff 2 kHz takes 4 kHz down " (fx want 1) " dB (+-1)" (if set? "" ", set skipped"))
+                 (< (abs (- drop want)) 1.0) (not set?) (string-append (fx drop 2) " dB down"))))
        '(#t #f)))
+
+    ;; ------------------------------------------------------------
+    ;; Timing: a set lands on the sample it names. The lead's gain goes to 0
+    ;; at an odd frame (not a pull boundary); the render is compared with one
+    ;; whose set is skipped, and the first differing sample must be that
+    ;; frame. The control judges a set made 256 frames late against the
+    ;; same frame, so it must go red.
+    ;; ------------------------------------------------------------
+    (define (probe-timing)
+      (say "timing (lead insert gain)")
+      (let* ((at (+ SR 137))
+             (render (lambda (frame-of-set)
+                       (let ((p (open-tune-player (read-tune-string PROBE-TUNE) SR loop: #t
+                                                  inserts: (list (cons 1 (lead-insert (sine-source 880.0 0.5)))))))
+                         (let ((r (render-player p SR
+                                                 (if frame-of-set
+                                                     (list (cons frame-of-set (lambda () (player-set-insert-param! p 1 'gain 0.0))))
+                                                     '())
+                                                 (+ at 4096))))
+                           (player-close! p)
+                           (bv->mid (car r) (cdr r))))))
+             (base (render #f))
+             (first-diff (lambda (x)
+                           (let loop ((k 0))
+                             (cond ((>= k (vector-length x)) #f)
+                                   ((> (abs (- (vector-ref x k) (vector-ref base k))) 1e-9) k)
+                                   (else (loop (+ k 1)))))))
+             (on-time (first-diff (render at)))
+             (late (first-diff (render (+ at 256)))))
+        (arm! "a set lands on the frame it names" (and on-time (= on-time at)) #f
+              (string-append "set at frame " (number->string at) ", first differing sample "
+                             (if on-time (number->string on-time) "none")))
+        (arm! "a set 256 frames late, judged against the same frame" (and late (= late at)) #t
+              (string-append "first differing sample " (if late (number->string late) "none")))))
 
     (define (run-probe)
       (say "insert probe: motif's live player at " (number->string SR) " Hz, sets by player-set-insert-param! mid-render")
@@ -212,6 +253,7 @@
       (probe-bits)
       (probe-rate-div)
       (probe-gain-and-cutoff)
+      (probe-timing)
       (let* ((rs (reverse results))
              (probes (filter (lambda (r) (not (caddr r))) rs))
              (controls (filter caddr rs))
