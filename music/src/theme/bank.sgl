@@ -66,8 +66,9 @@
        " layers: ((chip-hat crush-bits: 10 decay: 0.6 hp: 5000 metal: 0.8 noise: 0.2 octave: 0 volume: 0.35)))\n"
        "  )\n"))
 
-    ;; Carrier's bus, with the compressor's makeup at 0.85 (-1.4 dB): the
-    ;; theme is denser than Carrier, and this keeps its peaks near -2 dBFS
-    ;; so the game's cues have room on top (measured on round 1's renders)
+    ;; Carrier's bus, with the compressor's makeup at -0.5 dB where
+    ;; Carrier's is +1 (makeup is in dB, not a linear gain): the theme is
+    ;; denser than Carrier, and this keeps its peaks near -2 dBFS so the
+    ;; game's cues have room on top (measured on round 1's renders)
     (define (bus-text)
-      "  (bus reverb: zitarev size: 0.8 damp: 0.55 mix: 0.3 comp: on threshold: -12 ratio: 3 attack: 8 release: 110 makeup: 0.85)\n")))
+      "  (bus reverb: zitarev size: 0.8 damp: 0.55 mix: 0.3 comp: on threshold: -12 ratio: 3 attack: 8 release: 110 makeup: -0.5)\n")))
