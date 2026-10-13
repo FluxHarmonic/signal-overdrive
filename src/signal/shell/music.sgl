@@ -153,7 +153,8 @@
               (pull (+ offset n)))))
         samples))
 
-    (define (music-frame! c paused? (keys: (clock-fraction 0.0)))
+    (define (music-frame! c paused?
+                          (keys: (clock-fraction 0.0) (frame-jiffy #f)))
       (let ((t0 (current-jiffy)))
         ;; A restart replaces the conductor's initial log even when it
         ;; occurs before another tick. Its tick also returns to zero.
@@ -180,8 +181,13 @@
                         (boundary (min available boundary))
                         (else available))))
               (when (and (> available 0) boundary (= boundary 0))
-                (let* ((ahead (+ (/ (audio-stream-depth *stream*) (* 1.0 *rate*))
-                                 *latency* clock-fraction))
+                ;; Conductor state is dated at frame entry; depth is
+                ;; sampled now. Include intervening simulation/refill
+                ;; work so callback consumption cannot bias the seek.
+                (let* ((elapsed (/ (- (current-jiffy) (or frame-jiffy t0))
+                                   (* 1.0 (jiffies-per-second))))
+                       (ahead (+ (/ (audio-stream-depth *stream*) (* 1.0 *rate*))
+                                 *latency* clock-fraction elapsed))
                        (target (transport-render-target c ahead))
                        (frame (playback-resync! *playback* target)))
                   (set! *epoch-changes*

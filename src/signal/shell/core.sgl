@@ -64,6 +64,7 @@
     (define *music-trace-first* #f)
     (define *music-trace-log* '())
     (define *frame-wall* 0.0)
+    (define *frame-jiffy* 0)
     (define *frame-ear* #f)
     (define *skew-arm* #f)
 
@@ -650,6 +651,7 @@
     ;; Advance a frame without drawing. Headless checks exercise this
     ;; same input, pacing and fixed-tick path as both graphical shells.
     (define (core-advance! dt)
+      (set! *frame-jiffy* (current-jiffy))
       (set! *frame-wall* (* 1000.0 (current-second)))
       (when (pressed? 'f5)
         (set! *paused* (not *paused*))
@@ -738,7 +740,8 @@
     (define (service-audio!)
       (let ((m (racer-machine (race-player *race*))) (t0 (current-jiffy)))
         (music-frame! (race-song *race*) (core-paused?)
-                      clock-fraction: (clock-acc *clock*))
+                      clock-fraction: (clock-acc *clock*)
+                      frame-jiffy: *frame-jiffy*)
         (unless (= *music-generation* (music-generation))
           (set! *music-generation* (music-generation))
           (when (= 0 (conductor-tick (race-song *race*)))
