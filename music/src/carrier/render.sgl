@@ -1,0 +1,83 @@
+;;; (carrier render) - Offline renders through motif's live player
+;;;
+;;; Every render goes through `open-tune-player` and `player-pull!`, the
+;;; path the game plays, never through a separate offline renderer. A
+;;; schedule of (frame . thunk) runs each thunk exactly at its frame: the
+;;; pull is split there, so a parameter set lands on the sample it names.
+;;;
+;;;   (render-player p sr schedule max-frames) -> f32 stereo bytevector
+;;;       pulls in BLOCK frames until the player ends (or max-frames)
+;;;   (write-wav16 path bv frames sr gain)   16-bit PCM, scaled by gain
+;;;   (bv->mid bv frames) -> vector of (L+R)/2 flonums
+
+(define-library (carrier render)
+  (import (sigil core) (sigil io) (sigil list) (motif tune player))
+  (export render-player write-wav16 bv->mid bv->channel BLOCK)
+  (begin
+    (define BLOCK 512)
+
+    (define (render-player p sr schedule max-frames)
+      (let ((out (make-bytevector (* 8 max-frames) 0))
+            (sched (list-sort (lambda (a b) (< (car a) (car b))) schedule)))
+        (let loop ((i 0) (sched sched))
+          (let* ((sched (let run ((s sched))
+                          (if (and (pair? s) (<= (car (car s)) i))
+                              (begin ((cdr (car s))) (run (cdr s)))
+                              s)))
+                 (limit (if (pair? sched) (min (car (car sched)) max-frames) max-frames))
+                 (n (min BLOCK (- limit i))))
+            (if (or (>= i max-frames) (<= n 0))
+                (if (>= i max-frames) (cons out i) (loop i sched))
+                (if (player-pull! p out (* 8 i) n)
+                    (loop (+ i n) sched)
+                    (cons out i)))))))
+
+    (define (clip x) (if (> x 1.0) 1.0 (if (< x -1.0) -1.0 x)))
+
+    (define (u32! bv off v)
+      (bytevector-u8-set! bv off (modulo v 256))
+      (bytevector-u8-set! bv (+ off 1) (modulo (quotient v 256) 256))
+      (bytevector-u8-set! bv (+ off 2) (modulo (quotient v 65536) 256))
+      (bytevector-u8-set! bv (+ off 3) (modulo (quotient v 16777216) 256)))
+    (define (u16! bv off v)
+      (bytevector-u8-set! bv off (modulo v 256))
+      (bytevector-u8-set! bv (+ off 1) (modulo (quotient v 256) 256)))
+    (define (ascii! bv off s)
+      (let loop ((i 0)) (when (< i (string-length s))
+                          (bytevector-u8-set! bv (+ off i) (char->integer (string-ref s i)))
+                          (loop (+ i 1)))))
+
+    (define (write-wav16 path bv frames sr gain)
+      (let* ((data (* 4 frames))
+             (w (make-bytevector (+ 44 data) 0)))
+        (ascii! w 0 "RIFF") (u32! w 4 (+ 36 data)) (ascii! w 8 "WAVE")
+        (ascii! w 12 "fmt ") (u32! w 16 16) (u16! w 20 1) (u16! w 22 2)
+        (u32! w 24 sr) (u32! w 28 (* sr 4)) (u16! w 32 4) (u16! w 34 16)
+        (ascii! w 36 "data") (u32! w 40 data)
+        (let loop ((i 0))
+          (when (< i (* 2 frames))
+            (let* ((x (clip (* gain (bytevector-ieee-single-ref bv (* 4 i) 'little))))
+                   (s (exact (round (* x 32767.0))))
+                   (u (if (< s 0) (+ s 65536) s)))
+              (u16! w (+ 44 (* 2 i)) u))
+            (loop (+ i 1))))
+        (let ((port (open-binary-output-file path)))
+          (write-bytevector w port)
+          (close-output-port port))))
+
+    (define (bv->mid bv frames)
+      (let ((v (make-vector frames 0.0)))
+        (let loop ((k 0))
+          (when (< k frames)
+            (vector-set! v k (* 0.5 (+ (bytevector-ieee-single-ref bv (* 8 k) 'little)
+                                       (bytevector-ieee-single-ref bv (+ 4 (* 8 k)) 'little))))
+            (loop (+ k 1))))
+        v))
+
+    (define (bv->channel bv frames ch)
+      (let ((v (make-vector frames 0.0)))
+        (let loop ((k 0))
+          (when (< k frames)
+            (vector-set! v k (bytevector-ieee-single-ref bv (+ (* 4 ch) (* 8 k)) 'little))
+            (loop (+ k 1))))
+        v))))

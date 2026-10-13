@@ -1,0 +1,284 @@
+;;; (carrier score) - Carrier, the 0.1 song of Signal Overdrive (§3.7)
+;;;
+;;; The score is written here as note events, one list per channel, and
+;;; compiled to a canonical motif tune (.cts). Positions and lengths are in
+;;; sixteenths from the start of the arrangement (a bar is 16; the tune's
+;;; grid is speed 3, meter (8 4): 32 rows a bar, a sixteenth is 2 rows).
+;;;
+;;; Proposition: a two-bar signal motif in a hollow FM lead calls out over
+;;; a gritty bass that never stops moving. The call's rhythm is 3+3+2
+;;; sixteenths, then a held anchor tone: D A C | B . . A | G . . .
+;;; Its answer has the same rhythm with the contour turned over,
+;;; A F G | E . . . and is missing its last note: the D that would bring it
+;;; home. All race the answer is withheld (lap 1) or partial (lap 2); only
+;;; the uplink plays it with the D. The ticks accent the call's 3+3+2, so
+;;; the motif's rhythm is in the kit even where the lead is silent.
+;;;
+;;; Key D Dorian; the G major chord (the raised sixth, B) is the hope.
+;;;
+;;;   (audition-tune) -> the 32-bar audition: lap1 (16 bars) into lap2
+;;;                      (8 bars) played twice
+;;;   (score->cts-string events bars) -> .cts text for a list of events
+
+(define-library (carrier score)
+  (import (sigil core) (sigil string) (sigil list) (motif tune))
+  (export audition-tune audition-bars lap1-bars lap2-bars
+          instruments-text bus-text CALL ANSWER)
+  (begin
+    ;; ------------------------------------------------------------
+    ;; Pitches
+    ;; ------------------------------------------------------------
+    (define NAMES '#("C-" "C#" "D-" "D#" "E-" "F-" "F#" "G-" "G#" "A-" "A#" "B-"))
+    (define (pitch->name m)
+      (string-append (vector-ref NAMES (modulo m 12)) (number->string (- (quotient m 12) 1))))
+    ;; midi numbers: C-4 is 60
+    (define (midi letter octave)
+      (+ (* 12 (+ octave 1))
+         (cdr (assq letter '((C . 0) (D . 2) (E . 4) (F . 5) (G . 7) (A . 9) (B . 11) (Eb . 3) (Bb . 10) (Fs . 6))))))
+
+    ;; ------------------------------------------------------------
+    ;; Instruments (P8's channel layout)
+    ;; ------------------------------------------------------------
+    (define I-KICK 1) (define I-CLAP 2) (define I-TICK 3) (define I-TICK-OPEN 4)
+    (define I-BASS 5) (define I-MINOR 6) (define I-MAJOR 7) (define I-LEAD 8)
+    (define I-ARP 9)
+
+    (define (instruments-text)
+      (string-append
+       "  (instruments\n"
+       ;; 1: a short sine thud with a click on top (the fm index is the click)
+       "    (instrument id: 1 name: \"thud\" patch: (chip-kick decay: 0.17 drive: 0.6 index: 1.3 sweep: 2.6 sweep-decay: 0.018) volume: 46 pan: 0)\n"
+       ;; 2: a dry, tight clap with a metallic tick layered on its attack
+       "    (instrument id: 2 name: \"dry-clap\" patch: (chip-clap cutoff: 5600 decay: 0.045 gain: 0.85 hp: 1200 spacing: 0.006) volume: 36 send: 0.03 pan: 0"
+       " layers: ((chip-hat crush-bits: 12 decay: 0.018 hp: 6500 metal: 0.7 noise: 0.1 octave: 0 volume: 0.45)))\n"
+       ;; 3, 4: closed clicks on the 16ths, and a longer one for turnarounds
+       "    (instrument id: 3 name: \"tick\" patch: (chip-hat crush-bits: 14 decay: 0.022 hp: 5600 metal: 0.4 noise: 0.18) volume: 20 pan: 0.2)\n"
+       "    (instrument id: 4 name: \"tick-open\" patch: (chip-hat crush-bits: 14 decay: 0.09 hp: 5600 metal: 0.35 noise: 0.2) volume: 18 pan: 0.2)\n"
+       ;; 5: the gritty FM bass, its upper harmonics above the engine
+       "    (instrument id: 5 name: \"carrier-bass\" patch: (fm4-grit-bass amp-attack: 0.002 amp-decay: 0.14 amp-release: 0.03 amp-sustain: 0.6 attack-index: 4.8 crush-bits: 12 drive: 1.1 index: 1.6 index-decay: 0.11) volume: 40 gain: 0.62 pan: 0)\n"
+       ;; 6, 7: chord stabs, minor and major (layers are the chord's intervals)
+       "    (instrument id: 6 name: \"minor-stab\" patch: (fm4-stab cutoff: 1150 decay: 0.24 index: 0.5 release: 0.14) volume: 24 send: 0.16 pan: -0.3"
+       " layers: ((fm4-stab cutoff: 1000 decay: 0.3 index: 0.4 ratio: 1.1892071 release: 0.14 octave: 0 volume: 0.55) (fm4-stab cutoff: 950 decay: 0.3 index: 0.4 ratio: 1.4983071 release: 0.14 octave: 0 volume: 0.4)))\n"
+       "    (instrument id: 7 name: \"major-stab\" patch: (fm4-stab cutoff: 1150 decay: 0.24 index: 0.5 release: 0.14) volume: 24 send: 0.16 pan: -0.3"
+       " layers: ((fm4-stab cutoff: 1000 decay: 0.3 index: 0.4 ratio: 1.259921 release: 0.14 octave: 0 volume: 0.55) (fm4-stab cutoff: 950 decay: 0.3 index: 0.4 ratio: 1.4983071 release: 0.14 octave: 0 volume: 0.4)))\n"
+       ;; 8: the lead. Carrier 1:1 with a 2:1 modulator (odd harmonics: hollow),
+       ;; and a 3.5:1 operator that pings for 40 ms (the metal on the onset).
+       ;; No unison and no chorus: detune is damage, so clean is in tune.
+       "    (instrument id: 8 name: \"signal\" patch: (fm4-lead alg: 2 amp-attack: 0.003 amp-decay: 0.45 amp-release: 0.22 amp-sustain: 0.72 chorus-mix: 0 fb: 0.15 index: 1.7"
+       " op1: (1 1 0.002 0.35 0.75 0.15) op2: (2 0.55 0.002 0.3 0.35 0.15) op3: (2 0.35 0.002 0.12 0.2 0.1) op4: (3.5 0.45 0.001 0.04 0 0.05) unison: 1 vel-depth: 0.35) volume: 42 gain: 0.5 send: 0.36 pan: 0.04)\n"
+       ;; 9: the chip arpeggio, a narrow pulse
+       "    (instrument id: 9 name: \"chip-arp\" patch: (chip-pulse attack: 0.002 crush-bits: 10 decay: 0.09 osc-amp: 0.45 release: 0.04 sustain: 0.25 unison: 1 width: 0.25) volume: 22 gain: 0.6 send: 0.1 pan: 0.34))\n"))
+
+    (define (bus-text)
+      "  (bus reverb: zitarev size: 0.8 damp: 0.55 mix: 0.3 comp: on threshold: -12 ratio: 3 attack: 8 release: 110 makeup: 1)\n")
+
+    ;; ------------------------------------------------------------
+    ;; Events: #(channel start len midi inst vol), start and len in 16ths
+    ;; ------------------------------------------------------------
+    (define (ev ch start len m inst vol) (vector ch start len m inst vol))
+    (define (ev-ch e) (vector-ref e 0)) (define (ev-start e) (vector-ref e 1))
+    (define (ev-len e) (vector-ref e 2)) (define (ev-midi e) (vector-ref e 3))
+    (define (ev-inst e) (vector-ref e 4)) (define (ev-vol e) (vector-ref e 5))
+
+    ;; the motif, relative to a bar start: (pos len letter octave vol)
+    (define CALL '((0 3 D 5 46) (3 3 A 5 42) (6 2 C 6 44) (8 6 B 5 48) (14 2 A 5 40)
+                   (16 10 G 5 44)))
+    (define ANSWER '((0 3 A 5 46) (3 3 F 5 42) (6 2 G 5 44) (8 8 E 5 46)))
+
+    (define (phrase at notes)
+      (map (lambda (n) (ev 6 (+ at (car n)) (cadr n) (midi (caddr n) (cadddr n)) I-LEAD (list-ref n 4)))
+           notes))
+
+    ;; chords: (root-letter . quality) with the root at octave 4 for stabs
+    (define LAP1-CHORDS '((D . m) (D . m) (G . M) (C . M) (D . m) (D . m) (F . M) (A . m)
+                          (D . m) (D . m) (G . M) (C . M) (D . m) (D . m) (F . M) (A . m)))
+    (define LAP2-CHORDS '((F . M) (G . M) (A . m) (A . m) (F . M) (G . M) (D . m) (C . M)))
+
+    ;; bass register: roots from A1 up to G2
+    (define (bass-root letter)
+      (let ((m (midi letter 2))) (if (> m (midi 'G 2)) (- m 12) m)))
+
+    ;; one bar of 16th bass on root r; the last two 16ths lead to next-r.
+    ;; Octave jumps fall on the 3+3+2 accents (0, 3, 6, 8, 11, 14).
+    (define (bass-bar at r next-r loud)
+      (let* ((same (= r next-r))
+             (n14 (if same (+ r 12) r))
+             (n15 (if same (+ r 10) (if (> next-r r) (- next-r 2) (+ next-r 2))))
+             (notes (list (cons 0 r) (cons 1 r) (cons 2 r) (cons 3 (+ r 12)) (cons 4 r) (cons 5 r)
+                          (cons 6 (+ r 12)) (cons 7 r) (cons 8 r) (cons 9 r) (cons 10 r)
+                          (cons 11 (+ r 12)) (cons 12 r) (cons 13 r) (cons 14 n14) (cons 15 n15))))
+        (map (lambda (p)
+               (ev 4 (+ at (car p)) 1 (cdr p) I-BASS
+                   (cond ((memv (car p) '(0 8)) (+ loud 6))
+                         ((memv (car p) '(3 6 11 14)) (+ loud 3))
+                         (else loud))))
+             notes)))
+
+    (define (ticks-bar at accent soft)
+      (let loop ((i 0) (acc '()))
+        (if (> i 15) (reverse acc)
+            (loop (+ i 1)
+                  (cons (ev 3 (+ at i) 0.5 (midi 'C 8) I-TICK
+                            (if (memv i '(0 3 6 8 11 14)) accent soft))
+                        acc)))))
+
+    ;; a 32nd roll on the last beat (a turnaround), ticks only
+    (define (tick-roll at)
+      (let loop ((k 0) (acc '()))
+        (if (>= k 8) (reverse acc)
+            (loop (+ k 1) (cons (ev 3 (+ at 12 (* k 0.5)) 0.5 (midi 'C 8) I-TICK (+ 12 (* 2 k))) acc)))))
+
+    (define (kick at positions vol)
+      (map (lambda (p) (ev 1 (+ at p) 1 (midi 'D 2) I-KICK vol)) positions))
+    (define (clap at positions vol)
+      (map (lambda (p) (ev 2 (+ at p) 1 (midi 'Fs 3) I-CLAP vol)) positions))
+
+    ;; chord stab: root at octave 4 (C4 .. B4)
+    (define (stab at pos len chord vol)
+      (ev 5 (+ at pos) len (midi (car chord) 4) (if (eq? (cdr chord) 'm) I-MINOR I-MAJOR) vol))
+
+    ;; the chip arp: root, third, fifth, octave, up, four times a bar
+    (define (arp-bar at chord vol)
+      (let* ((r (midi (car chord) 4))
+             (tones (list r (+ r (if (eq? (cdr chord) 'm) 3 4)) (+ r 7) (+ r 12))))
+        (let loop ((i 0) (acc '()))
+          (if (> i 15) (reverse acc)
+              (loop (+ i 1)
+                    (cons (ev 7 (+ at i) 0.75 (list-ref tones (modulo i 4)) I-ARP
+                              (if (= 0 (modulo i 4)) (+ vol 4) vol))
+                          acc))))))
+
+    (define (letter-of c) (car c))
+
+    ;; ------------------------------------------------------------
+    ;; lap1: the verse, 16 bars, the loop is bars 9 to 16.
+    ;; Bars 1-4: kick, ticks, bass and the call; bars 5-8 add the clap and
+    ;; stabs; bars 9-16 are the full verse. The call sounds at bars 1, 5, 9
+    ;; and 13; the two bars after each are the withheld answer: silence in
+    ;; the lead, the reverb's tail and the band.
+    ;; ------------------------------------------------------------
+    (define (lap1-bars start)
+      (let loop ((b 0) (acc '()))
+        (if (>= b 16)
+            acc
+            (let* ((at (+ start (* 16 b)))
+                   (c (list-ref LAP1-CHORDS b))
+                   (next (list-ref LAP1-CHORDS (modulo (+ b 1) 16)))
+                   (r (bass-root (letter-of c)))
+                   (nr (bass-root (letter-of next)))
+                   (four (modulo b 4))
+                   (evs (append
+                         (bass-bar at r nr (if (< b 4) 34 38))
+                         (ticks-bar at (if (< b 4) 24 28) (if (< b 4) 10 13))
+                         (kick at (if (= four 3) '(0 6 8 14) '(0 6 8)) 44)
+                         (if (>= b 4) (clap at '(4 12) 36) '())
+                         (if (>= b 4)
+                             (list (stab at 6 2 c 30) (stab at 14 1 c 22))
+                             '())
+                         (if (= four 0) (phrase at CALL) '())
+                         (if (= b 15) (tick-roll at) '()))))
+              (loop (+ b 1) (append acc evs))))))
+
+    ;; ------------------------------------------------------------
+    ;; lap2: the chorus, 8 bars, all of it loops. The call (bars 1, 5) now
+    ;; gets its partial answer (bars 3, 7), one note short of home; bar 4
+    ;; and bar 8 are where the D would be. The arp enters; the kick pushes
+    ;; on the 11th 16th; stabs hold longer on the downbeat.
+    ;; ------------------------------------------------------------
+    (define (lap2-bars start)
+      (let loop ((b 0) (acc '()))
+        (if (>= b 8)
+            acc
+            (let* ((at (+ start (* 16 b)))
+                   (c (list-ref LAP2-CHORDS b))
+                   (next (list-ref LAP2-CHORDS (modulo (+ b 1) 8)))
+                   (r (bass-root (letter-of c)))
+                   (nr (bass-root (letter-of next)))
+                   (four (modulo b 4))
+                   (evs (append
+                         (bass-bar at r nr 40)
+                         (ticks-bar at 30 14)
+                         (if (= four 3) (list (ev 3 (+ at 14) 1 (midi 'C 8) I-TICK-OPEN 26)) '())
+                         (kick at (if (= four 3) '(0 6 8 11 14) '(0 6 8 11)) 46)
+                         (clap at (if (= four 3) '(4 12 15) '(4 12)) 38)
+                         (list (stab at 0 4 c 30) (stab at 6 2 c 26)
+                               (stab at 14 2 next 24))
+                         (arp-bar at c 26)
+                         (cond ((= four 0) (phrase at CALL))
+                               ((= four 2) (phrase at ANSWER))
+                               (else '())))))
+              (loop (+ b 1) (append acc evs))))))
+
+    ;; ------------------------------------------------------------
+    ;; Events -> cells -> .cts
+    ;; ------------------------------------------------------------
+    (define (row-of x) (exact (round (* 2 x))))
+
+    ;; cells: list of (row channel note inst vol); a note-off goes where a
+    ;; note ends unless another note on its channel starts there
+    (define (events->cells events)
+      (let* ((onsets (map (lambda (e) (cons (ev-ch e) (row-of (ev-start e)))) events))
+             (notes (map (lambda (e) (list (row-of (ev-start e)) (ev-ch e) (pitch->name (ev-midi e)) (ev-inst e) (ev-vol e)))
+                         events))
+             (offs (filter (lambda (x) x)
+                           (map (lambda (e)
+                                  (let ((end (row-of (+ (ev-start e) (ev-len e)))))
+                                    (and (not (member (cons (ev-ch e) end) onsets))
+                                         (list end (ev-ch e) "===" 0 0))))
+                                events))))
+        (append notes offs)))
+
+    (define (cell->string c)
+      (string-append "(" (number->string (cadr c)) " \"" (caddr c) "\" "
+                     (number->string (cadddr c)) " " (number->string (list-ref c 4)) " \"000\")"))
+
+    ;; dedupe (later wins is not wanted: two cells in one slot is an error)
+    (define (uniq-cells cells)
+      (let loop ((cs cells) (seen '()) (acc '()))
+        (cond ((null? cs) (reverse acc))
+              ((member (list (car (car cs)) (cadr (car cs))) seen) (loop (cdr cs) seen acc))
+              (else (loop (cdr cs) (cons (list (car (car cs)) (cadr (car cs))) seen) (cons (car cs) acc))))))
+
+    (define (pattern-text id rows cells)
+      (let* ((sorted (list-sort (lambda (a b) (or (< (car a) (car b))
+                                                   (and (= (car a) (car b)) (< (cadr a) (cadr b)))))
+                                cells))
+             (by-row (let loop ((cs sorted) (acc '()))
+                       (cond ((null? cs) (reverse acc))
+                             ((and (pair? acc) (= (car (car acc)) (car (car cs))))
+                              (loop (cdr cs) (cons (cons (car (car acc)) (append (cdr (car acc)) (list (car cs)))) (cdr acc))))
+                             (else (loop (cdr cs) (cons (list (car (car cs)) (car cs)) acc)))))))
+        (string-append
+         "    (pattern id: " (number->string id) " rows: " (number->string rows) "\n"
+         (apply string-append
+                (map (lambda (r)
+                       (string-append "      (row " (number->string (car r))
+                                      (apply string-append (map (lambda (c) (string-append " " (cell->string c))) (cdr r)))
+                                      ")\n"))
+                     by-row))
+         "    )\n")))
+
+    ;; One pattern per bar (32 rows); the order plays them in sequence.
+    (define (events->tune-text name events nbars)
+      (let* ((cells (uniq-cells (events->cells events)))
+             (in-bar (lambda (b) (filter (lambda (c) (and (>= (car c) (* 32 b)) (< (car c) (* 32 (+ b 1))))) cells)))
+             (shift (lambda (b cs) (map (lambda (c) (cons (- (car c) (* 32 b)) (cdr c))) cs))))
+        (string-append
+         "(tune version: 1 name: \"" name "\" tempo: 140 speed: 3 channels: 8 meter: (8 4)\n"
+         (bus-text)
+         (instruments-text)
+         "  (patterns\n"
+         (let loop ((b 0) (acc ""))
+           (if (>= b nbars) acc
+               (loop (+ b 1) (string-append acc (pattern-text b 32 (shift b (in-bar b)))))))
+         "  )\n"
+         "  (order"
+         (let loop ((b 0) (acc "")) (if (>= b nbars) acc (loop (+ b 1) (string-append acc " " (number->string b)))))
+         "))\n")))
+
+    ;; the 32-bar audition: lap1 (bars 1-16), lap2 (17-24), lap2 again (25-32)
+    (define (audition-bars)
+      (append (lap1-bars 0) (lap2-bars (* 16 16)) (lap2-bars (* 16 24))))
+
+    (define (audition-tune)
+      (read-tune-string (events->tune-text "Carrier (audition)" (audition-bars) 32)))))
