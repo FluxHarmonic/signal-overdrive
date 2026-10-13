@@ -3,7 +3,8 @@
         (signal music conductor)
         (signal music progress)
         (signal music clock)
-        (signal music transport))
+        (signal music transport)
+        (substratic time clock))
 
 (define (advance c ticks)
   (let loop ((c c) (remaining ticks))
@@ -216,4 +217,36 @@
     (assert-equal 0.0 (pacing-dt (pace-frame (pacing-new) 1.0 0.0 4.0 #t #t 0)))
     (let ((p (pace-frame (pacing-new) 1.0 0.0 4.0 #f #f 0)))
       (assert-equal 1.0 (pacing-dt p))
-      (assert-equal #f (pacing-resync? p)))))
+      (assert-equal #f (pacing-resync? p))))
+
+  ;; A collection stalled the frame while the song kept playing from its
+  ;; ring. With Substratic's six ticks, every frame past 100 ms threw
+  ;; simulation time away and left the race behind the ear.
+  (test "at six ticks the capped advance is Substratic's clock, drop for drop"
+    (for-each
+      (lambda (acc0)
+        (for-each
+          (lambda (dt)
+            (let* ((c (clock-advance (clock-new) acc0))
+                   (a (clock-advance c dt))
+                   (b (clock-advance-capped c dt MAX-STEPS-PER-FRAME)))
+              (assert-equal (clock-steps a) (clock-steps b))
+              (assert-equal (clock-ticks a) (clock-ticks b))
+              (assert-equal (clock-acc a) (clock-acc b))
+              (assert-equal (clock-dropped a) (clock-dropped b))))
+          (list 0.0 0.004 (/ 1.0 60.0) 0.05 0.0833 0.0999 0.1 0.12 0.25 2.0)))
+      (list 0.0 0.009 0.0166)))
+
+  (test "a 120 ms stall with the song playing loses no simulation time"
+    (let* ((c (clock-advance (clock-new) 0.01))
+           (six (clock-advance c 0.12))
+           (caught (clock-advance-capped c 0.12 CATCH-UP-STEPS)))
+      (assert-true (> (clock-dropped six) 0.01))
+      (assert-equal 7 (clock-steps caught))
+      (assert-equal 0.0 (clock-dropped caught))
+      (assert-true (< (abs (- (+ (* 7 SIM-STEP) (clock-acc caught)) 0.13)) 1e-9))))
+
+  (test "past the ring's depth the remainder still drops"
+    (let ((c (clock-advance-capped (clock-new) 0.4 CATCH-UP-STEPS)))
+      (assert-equal 15 (clock-steps c))
+      (assert-true (< (abs (- (clock-dropped c) 0.15)) 1e-9)))))

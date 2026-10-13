@@ -2,15 +2,49 @@
 ;;; resyncs; this module never moves a simulation or opens a device.
 (define-library (signal music clock)
   (import (sigil struct)
-          (sigil math))
+          (sigil math)
+          (substratic time clock))
   (export audible-seconds pacing pacing-new pace-frame
           pacing-dt pacing-gap pacing-resync? pacing-last-resync-bar
-          jump-handoff-window)
+          jump-handoff-window clock-advance-capped CATCH-UP-STEPS)
   (begin
     ;; Delivered and queued are DEVICE frames, not Motif render frames.
     ;; Paused frames are frames explicitly inserted as silence on pause.
     (define (audible-seconds delivered queued device-rate latency paused)
       (- (/ (- delivered queued paused) (* 1.0 device-rate)) latency))
+
+    ;; While the song plays from its ring, a single long frame (a
+    ;; collection, a slow present) must not cost the race simulation time:
+    ;; the audio keeps playing through it, so time the fixed clock drops
+    ;; becomes a gap the 2% nudge needs seconds to close. Catch up to the
+    ;; ring's depth (250 ms, 15 ticks) instead of Substratic's six.
+    ;; Longer stalls drain the ring anyway and still drop and resync.
+    (define CATCH-UP-STEPS 15)
+
+    ;; Substratic's clock-advance with the per-frame cap as an argument:
+    ;; the same drain, the same drop at the cap. At MAX-STEPS-PER-FRAME it
+    ;; returns exactly what clock-advance does.
+    (define (clock-advance-capped c dt max-steps)
+      (let ((dt (max 0.0 dt)))
+        (let loop ((acc (+ (clock-acc c) dt))
+                   (steps 0))
+          (cond ((>= steps max-steps)
+                 (clock c
+                        acc: 0.0
+                        ticks: (+ (clock-ticks c) steps)
+                        steps: steps
+                        dropped: (+ (clock-dropped c) acc)
+                        alpha: 0.0
+                        dt: dt))
+                ((>= acc SIM-STEP)
+                 (loop (- acc SIM-STEP) (+ steps 1)))
+                (else
+                 (clock c
+                        acc: acc
+                        ticks: (+ (clock-ticks c) steps)
+                        steps: steps
+                        alpha: (/ acc SIM-STEP)
+                        dt: dt))))))
 
     (define-struct pacing
       (dt default: 0.0)

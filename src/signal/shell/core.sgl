@@ -775,10 +775,13 @@
         (say "restart"))
       (let* ((interval (if *skip-interval* 0.0 (* dt (if *skew-arm* 1.01 1.0))))
              (c (race-song *race*))
+             ;; With the song playing, a long frame catches up to the
+             ;; ring's depth; without it, Substratic's six-tick cap.
+             (cap (if (music-running?) CATCH-UP-STEPS MAX-STEPS-PER-FRAME))
              ;; The ear is sampled at this frame's time. Compare it to
              ;; the simulation this interval would produce, respecting
-             ;; Substratic's six-tick cap rather than hiding stalls.
-             (candidate (clock-advance *clock* (if (core-paused?) 0.0 interval)))
+             ;; the stall cap rather than hiding stalls.
+             (candidate (clock-advance-capped *clock* (if (core-paused?) 0.0 interval) cap))
              (sim (+ (/ (+ (conductor-tick c) (clock-steps candidate)) 60.0)
                      (clock-acc candidate)))
              (ear (music-audible-seconds)))
@@ -789,10 +792,11 @@
         (when (pacing-resync? *pacing*)
           (set! *resync-requests* (+ *resync-requests* 1))
           (music-request-resync!))
-        (set! *clock* (clock-advance *clock*
-                                   (if (and *skew-arm* (not (core-paused?)))
-                                       interval
-                                       (pacing-dt *pacing*)))))
+        (set! *clock* (clock-advance-capped *clock*
+                                            (if (and *skew-arm* (not (core-paused?)))
+                                                interval
+                                                (pacing-dt *pacing*))
+                                            cap)))
       (let ((t0 (current-jiffy)))
         (set! *fx-frame-ms* 0.0)
         (step! (clock-steps *clock*))
