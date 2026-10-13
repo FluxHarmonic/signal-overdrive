@@ -25,6 +25,17 @@ const MUSIC_ONLY = MIX === "music";
 // The capture sink must be a null sink with no loopback to any device,
 // used by nothing else during the run (worker-null is shared by sessions).
 const SINK = process.env.CONDUCTOR_SINK || "worker-null";
+// PulseAudio reports a stream that is not linked to any sink yet with
+// PA_INVALID_INDEX. While it is also corked it plays nowhere: wait for the
+// link (at most 2 s) rather than treat it as a stray route.
+const UNLINKED = 4294967295;
+const unlinkedSince = new Map();
+function unlinked(input) {
+  if (Number(input.sink) !== UNLINKED || input.corked !== true) { unlinkedSince.delete(input.index); return false; }
+  if (!unlinkedSince.has(input.index)) unlinkedSince.set(input.index, Date.now());
+  if (Date.now() - unlinkedSince.get(input.index) > 2000) throw new Error(`stream ${input.index} not linked to any sink after 2 s`);
+  return true;
+}
 const BIN = path.resolve(process.env.CONDUCTOR_BINARY || path.join(ROOT, "build/release/bin/signal-overdrive"));
 if (!fs.existsSync(BIN)) throw new Error("no release binary");
 fs.mkdirSync(RUN, { recursive: true });
@@ -95,6 +106,7 @@ try {
     // Every observation, from the stream's first appearance on.
     for (const input of ours) fs.appendFileSync(path.join(RUN, "routing.jsonl"), JSON.stringify({ wall_ms: Date.now(),
       index: input.index, sink: input.sink, sink_name: sinkName(input.sink), corked: input.corked ?? null }) + "\n");
+    if (ours.some(unlinked)) return false;
     const stray = ours.find(input => String(input.sink) !== nullSink[0]);
     if (stray) throw new Error(`game stream ${stray.index} on sink ${stray.sink} (${sinkName(stray.sink)}), not ${SINK}`);
     verifiedPID = ours[0].properties["application.process.id"];
