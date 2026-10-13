@@ -64,9 +64,19 @@
           (set! *shots* (cdr *shots*))
           (when (null? *shots*) (request-quit)))))
 
+    ;; Cleanup must run inside the game coroutine, while GLFW still owns
+    ;; a current GL context. VM texture finalizers run after the window
+    ;; closes and must see an already-shut-down graphics subsystem.
     (define (loop scaler quit-after)
+      (let ((run (race-loop scaler quit-after)))
+        (lambda ()
+          (gfx-setup)
+          (run)
+          (core-focus! #f)
+          (gfx-shutdown))))
+
+    (define (race-loop scaler quit-after)
       (lambda ()
-        (gfx-setup)
         (set-viewport #f)
         (set-letterbox-color 0.0 0.0 0.0)
         (scene-init! (map (lambda (t)
