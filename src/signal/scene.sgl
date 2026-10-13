@@ -707,7 +707,8 @@
           (let passes ((k (exact (round (tuning-ref tuning 'fx-passes)))))
             (mode7-draw-ground! c)
             (when (> k 1) (passes (- k 1))))
-          (draw-machines! c tuning r cam-heading (cdr (assq 'spark info)) (cdr (assq 'ghost info))))
+          (when (cdr (assq 'sprites info))
+            (draw-machines! c tuning r cam-heading (cdr (assq 'spark info)) (cdr (assq 'ghost info)))))
         ;; the frame's effects, for the lookup pass
         (let ((v (min 1.0 (/ (machine-speed m) (handling-ref tuning 'top)))))
           (set-pipeline-uniform! *lut-pipe* 'fx

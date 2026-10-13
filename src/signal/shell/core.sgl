@@ -267,6 +267,9 @@
             ((string=? kv "fps") (set! *fps-on* #t))
             ;; no HUD: clean captures, and the P15 gate's static frame
             ((string=? kv "nohud") (set! *no-hud* #t))
+            ;; no machines or gate: the P15 gate's frame must not move, and the
+            ;; thrusters flicker even on the title
+            ((string=? kv "nosprites") (set! *no-sprites* #t))
             ((string=? kv "mute") (audio-mute!))
             ((string=? kv "hitchlog") (set! *hitch-print* #t))
             ((string=? kv "cues=0") (audio-cues! #f))
@@ -479,6 +482,7 @@
     ;; Frames per second, smoothed, for the F3 readout (?fps shows it from the start).
     (define *fps-on* #f)
     (define *no-hud* #f)
+    (define *no-sprites* #f)
     (define *fps* 60.0)
     (define *frame-ms* 16.7)
     (define *sim-ms* 0.0)        ; the race's steps this frame, CPU
@@ -578,6 +582,7 @@
                                                         (- (race-tick *race*) *traced-at*)))
                           (cons (quote fx-hint) (if (eq? *platform* (quote web)) #f "E EFFECTS  F6 SOLO  F7 SHOWCASE"))
                           (cons (quote hud) (not *no-hud*))
+                          (cons (quote sprites) (not *no-sprites*))
                           (cons 'corrupt *corrupt*)
                           (cons 'popups *popups*)
                           (cons 'ghost (ghost-now *race*))
