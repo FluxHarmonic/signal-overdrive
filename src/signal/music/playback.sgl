@@ -9,12 +9,13 @@
           (signal music clock))
   (export playback-open playback-pull! playback-close! playback-player
           playback-origin-frame playback-walker-frame playback-log playback-missed
-          playback-set-region!)
+          playback-set-region! playback-bar-distance playback-resync!
+          playback-rendered playback-can-resync?)
   (begin
     (define-struct playback
       (player)
       (rate)
-      (origin-frame)
+      (origin-frame mutable: #t)
       (mode default: 'planned)
       (requested default: #f mutable: #t)
       (landed default: #f mutable: #t)
@@ -50,6 +51,48 @@
       (let ((timeline (player-timeline (playback-player b))))
         (+ (playback-origin-frame b)
            (if (pair? timeline) (vector-ref (car timeline) 2) 0))))
+
+    (define (playback-rendered b)
+      (player-rendered (playback-player b)))
+
+    (define (playback-can-resync? b)
+      (not (player-pending-mark (playback-player b))))
+
+    ;; A future bar line already walked within LOOKAHEAD. Split the pull
+    ;; there so player-jump! cuts at that sample rather than mid-block.
+    (define (playback-bar-distance b)
+      (let ((rendered (playback-rendered b)))
+        (let find ((rows (player-timeline (playback-player b))) (distance #f))
+          (if (null? rows)
+              distance
+              (let* ((r (car rows))
+                     (sample (vector-ref r 2)))
+                (if (< sample rendered)
+                    distance
+                    (find (cdr rows)
+                          (if (= 0 (modulo (vector-ref r 1) SONG-ROWS-PER-BAR))
+                              (if distance (min distance (- sample rendered)) (- sample rendered))
+                              distance))))))))
+
+    (define (playback-resync! b target)
+      ;; player-jump! retains a pending mark. Let any queued mark land
+      ;; first; then all resets use public APIs and cannot leave it stale.
+      (unless (playback-can-resync? b)
+        (error "resync must wait for the pending Motif mark"))
+      (let* ((p (playback-player b))
+             (position (conductor-position target))
+             (frame (exact (round (* (tick->song-row (conductor-tick target))
+                                    (/ (* 2.5 SONG-TICKS-PER-ROW) SONG-BPM)
+                                    (playback-rate b))))))
+        (playback-set-region! b (conductor-section target))
+        (player-jump! p (car position) (cdr position))
+        (set-playback-origin-frame! b (- frame (playback-rendered b)))
+        (set-playback-requested! b #f)
+        (set-playback-log! b
+          (cons (vector 'resync (conductor-section target) (conductor-bar target)
+                        frame (playback-rendered b))
+                (playback-log b)))
+        frame))
 
     (define (request-jump! b c)
       (let ((plan (conductor-next-jump c)))

@@ -3,9 +3,10 @@
 (define-library (signal music transport)
   (import (sigil struct)
           (sigil math)
+          (signal music song)
           (signal music conductor))
   (export transport-start transport-start-conductor transport-start-epoch
-          transport-start-silence)
+          transport-start-silence transport-render-target)
   (begin
     (define-struct stream-start
       (conductor)
@@ -24,6 +25,25 @@
           conductor: start
           epoch: epoch
           silence: (max 0 (exact (round (* (- (* bar (song-bar-seconds)) epoch) rate)))))))
+
+    ;; Project existing, committed simulation decisions to the instant
+    ;; the next rendered sample will be heard. A row seek rounds to the
+    ;; nearest tracker row, bounding its quantization error to half a row.
+    (define (transport-render-target c seconds-ahead)
+      (let* ((row-seconds (/ (* 2.5 SONG-TICKS-PER-ROW) SONG-BPM))
+             (row (exact (round (/ (+ (/ (conductor-tick c) 60.0)
+                                     (max 0.0 seconds-ahead))
+                                  row-seconds))))
+             (tick (exact (ceiling (/ (* row 60 5 SONG-TICKS-PER-ROW)
+                                     (* SONG-BPM 2))))))
+        (if (< tick (conductor-tick c))
+            ;; A nearest row just behind now cannot cross a section
+            ;; boundary; the current section and committed plan apply.
+            (conductor c tick: tick)
+            (let advance ((c c))
+              (if (>= (conductor-tick c) tick)
+                  c
+                  (advance (conductor-step c)))))))
 
     (define (transport-start-conductor s) (stream-start-conductor s))
     (define (transport-start-epoch s) (stream-start-epoch s))

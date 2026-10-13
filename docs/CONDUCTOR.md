@@ -100,8 +100,18 @@ reports WebAudio output+base latency every 500 ms. The native shell polls
 `(sigil desktop focus)` after each event poll and clears held keys while
 unfocused. Its small C addition queries GLFW's current application window;
 it creates no window or audio device and can move into the shared desktop
-library independently. Actual bar-boundary resync remains outstanding;
-the readout currently reports resync requests, not completed actions.
+library independently.
+
+When the clock requests resync, the music pull splits at an exact bar
+sample already in the walker's timeline. A pending Motif mark lands first,
+because `player-jump!` retains pending marks. The seek uses the conductor
+projected to the queue's future audible time, rounded to the nearest
+tracker row, and restores the cue loop. The simulation never changes.
+The stream's clock epoch changes only when the corrected sample reaches
+the ear, after queue depth and device latency. Resyncs execute at most
+once per simulation bar; diagnostics distinguish requests and completions.
+`test/test-resync.sgl` checks exact pull splitting, pending-mark safety,
+later planned landings and delayed audible epochs without a device.
 
 `core-advance!` is the same input/pacing/tick path used by each graphical
 frame, exposed without drawing for headless checks. The muted

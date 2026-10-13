@@ -518,6 +518,7 @@
                        " music-missed " (number->string (list-ref m 6))
                        " clock-gap-ms " (r1 (* 1000.0 (pacing-gap *pacing*)))
                        " resync-requests " (number->string *resync-requests*)
+                       " resyncs " (number->string (list-ref m 7))
                        " dropped-ms " (r1 (* 1000.0 (clock-dropped *clock*))))))
 
     ;; The knob table as markdown, for the README (native --knobs).
@@ -638,7 +639,8 @@
         (set! *pacing* (pace-frame *pacing* interval sim (or ear sim)
                                  (music-running?) (core-paused?) (conductor-bar c)))
         (when (pacing-resync? *pacing*)
-          (set! *resync-requests* (+ *resync-requests* 1)))
+          (set! *resync-requests* (+ *resync-requests* 1))
+          (music-request-resync!))
         (set! *clock* (clock-advance *clock* (pacing-dt *pacing*))))
       (let ((t0 (current-jiffy)))
         (set! *fx-frame-ms* 0.0)

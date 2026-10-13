@@ -14,7 +14,8 @@
           (signal music playback)
           (signal music inserts))
   (export music-start! music-frame! music-close! music-running?
-          music-audible-seconds music-depth! music-latency! music-readout)
+          music-audible-seconds music-depth! music-latency! music-readout
+          music-request-resync! music-log)
   (begin
     (define PUSH 256)
     (define *ctx* #f)
@@ -25,6 +26,10 @@
     (define *depth-ms* 250)
     (define *latency* (cond-expand (wasm 0.0) (else 0.035)))
     (define *epoch* 0.0)
+    (define *epoch-changes* '())
+    (define *resync-pending* #f)
+    (define *resyncs* 0)
+    (define *last-resync-bar* -1)
     (define *delivered* 0)
     (define *silence* 0)
     (define *start-conductor* #f)
@@ -51,9 +56,24 @@
 
     (define (music-audible-seconds)
       (and *stream*
-           (+ *epoch* (audible-seconds *delivered*
-                                      (audio-stream-depth *stream*)
-                                      *rate* *latency* 0))))
+           (let ((heard (* *rate* (audible-seconds *delivered*
+                                                  (audio-stream-depth *stream*)
+                                                  *rate* *latency* 0))))
+             ;; A seek changes time when its first corrected sample
+             ;; reaches the ear, after the queue and device latency.
+             (let apply-epochs ()
+               (when (and (pair? *epoch-changes*)
+                          (>= heard (caar *epoch-changes*)))
+                 (set! *epoch* (cdar *epoch-changes*))
+                 (set! *epoch-changes* (cdr *epoch-changes*))
+                 (apply-epochs)))
+             (+ *epoch* (/ heard *rate*)))))
+
+    (define (music-request-resync!)
+      (when *stream* (set! *resync-pending* #t)))
+
+    (define (music-log)
+      (if *playback* (reverse (playback-log *playback*)) '()))
 
     (define (music-close!)
       (when *stream*
@@ -65,7 +85,9 @@
         (set! *stream* #f))
       (when *playback*
         (playback-close! *playback*)
-        (set! *playback* #f)))
+        (set! *playback* #f))
+      (set! *resync-pending* #f)
+      (set! *epoch-changes* '()))
 
     (define (music-start! ctx c)
       (set! *ctx* ctx)
@@ -81,6 +103,7 @@
               (set! *playback* (playback-open *tune* *rate*
                                             (transport-start-conductor plan) MUSIC-INSERTS)))
             (set! *epoch* (transport-start-epoch plan))
+            (set! *last-resync-bar* -1)
             (set! *start-conductor* (transport-start-conductor plan))
             (set! *silence* (transport-start-silence plan))
             (set! *delivered* 0)
@@ -103,7 +126,25 @@
                    (need (- (depth-frames) (audio-stream-depth *stream*)))
                    (available (min PUSH room need))
                    (silence? (> *silence* 0))
-                   (n (if silence? (min available *silence*) available)))
+                   (seek? (and *resync-pending* (not silence?)
+                               (not (= *last-resync-bar* (conductor-bar c)))
+                               (playback-can-resync? *playback*)))
+                   (boundary (and seek? (playback-bar-distance *playback*)))
+                   (n (cond
+                        (silence? (min available *silence*))
+                        (boundary (min available boundary))
+                        (else available))))
+              (when (and (> available 0) boundary (= boundary 0))
+                (let* ((ahead (+ (/ (audio-stream-depth *stream*) (* 1.0 *rate*)) *latency*))
+                       (target (transport-render-target c ahead))
+                       (frame (playback-resync! *playback* target)))
+                  (set! *epoch-changes*
+                    (append *epoch-changes* (list (cons *delivered* (/ (- frame *delivered*) (* 1.0 *rate*))))))
+                  (set! *start-conductor* target)
+                  (set! *resync-pending* #f)
+                  (set! *last-resync-bar* (conductor-bar c))
+                  (set! *resyncs* (+ *resyncs* 1)))
+                (loop))
               (when (> n 0)
                 (unless silence?
                   ;; The render head can reach the joining bar before
@@ -126,7 +167,7 @@
           (set! *last-tick* (conductor-tick c)))
         (set! *cost-ms* (/ (* 1000.0 (- (current-jiffy) t0)) (jiffies-per-second)))))
 
-    ;; (running target-ms queued-ms sounding-underruns all-underruns cost-ms missed)
+    ;; (running target-ms queued-ms sounding-underruns all-underruns cost-ms missed resyncs pending?)
     (define (music-readout)
       (list (and (music-running?) #t)
             *depth-ms*
@@ -134,4 +175,5 @@
             (+ *underruns* (if *stream* (audio-stream-underruns-sounding *stream*) 0))
             (+ *underruns-all* (if *stream* (audio-stream-underruns *stream*) 0))
             *cost-ms*
-            (if *playback* (playback-missed *playback*) 0)))))
+            (if *playback* (playback-missed *playback*) 0)
+            *resyncs* *resync-pending*))))

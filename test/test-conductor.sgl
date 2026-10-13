@@ -49,6 +49,27 @@
       (assert-equal 5.0 (transport-start-epoch s))
       (assert-equal 6300 (transport-start-silence s)))))
 
+(test-group "transport: resync projection"
+  (test "the projected render row stays within half a row of the intended ear time"
+    (let loop ((tick 0))
+      (when (< tick 7200)
+        (let* ((c (conductor (conductor-new 'lap1) tick: tick))
+               (ahead 0.285)
+               (target (transport-render-target c ahead))
+               (row-time (* (tick->song-row (conductor-tick target)) (/ (song-bar-seconds) 32)))
+               (intended (+ (/ tick 60.0) ahead)))
+          (assert-true (<= (abs (- row-time intended)) (/ (song-bar-seconds) 64))))
+        (loop (+ tick 7)))))
+
+  (test "projection crosses the committed mark while the original simulation stays unchanged"
+    (let* ((c (advance (conductor-plan (conductor-new 'lap1) 'lap2 3) 300))
+           (target (transport-render-target c 0.285)))
+      (assert-equal 'lap2 (conductor-section target))
+      (assert-equal 3 (conductor-entry-bar target))
+      (assert-equal 'lap1 (conductor-section c))
+      (assert-equal 300 (conductor-tick c))
+      (assert-true (conductor-pending c)))))
+
 (test-group "conductor: tick clock"
   (test "row time is computed from ticks without rounded accumulation"
     (assert-equal 0 (tick->song-row 3))
