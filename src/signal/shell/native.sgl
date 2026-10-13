@@ -86,8 +86,10 @@
                           TRACKS)
                      (texture "sky.png") (texture "machines.png")
                      (list (cons 'embers (texture "lut-embers.png")) (cons 'crash (texture "lut-crash.png"))))
-        ;; Device/streams start after window and texture initialization,
-        ;; so the first queued music cannot drain during graphics setup.
+        ;; Exercise deferred shader/draw setup before publishing music.
+        ;; This zero-dt frame cannot advance the simulation or open audio.
+        (core-frame! 0.0 (frame-width) (frame-height) #t)
+        ;; Device/streams start after window, textures and first drawing.
         (core-audio-start!)
         (let ((t0 (current-second)))
           (let frame ((n 0))

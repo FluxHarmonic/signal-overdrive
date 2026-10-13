@@ -109,6 +109,13 @@ plan joins late audio on the next bar, including any intervening section
 landing, with silence before that bar. Pause discards the queue; resume
 uses a fresh stream epoch at the frozen simulation tick. Restart also
 discards the old queue, including a restart at the same tick.
+Initial PCM is prepared in 256-frame pulls before a stream is opened,
+then published in one accepted push. A fresh tick-zero stream discards
+its initialization interval and fixed-clock remainder, so setup time is
+not counted as progress in the new song. Native drawing is warmed once
+at zero dt before audio starts. Subsequent audio service runs before
+drawing; resync projection includes the fixed clock's fractional tick.
+This fraction is used for audio timing only, without drawing interpolation.
 
 `test/test-music-sink.sgl` exercises the actual native ring with the
 sink's drain shim, asserting that no audio device initialized. The

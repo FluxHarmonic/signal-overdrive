@@ -56,6 +56,7 @@
     (define *clock* (clock-new))
     (define *pacing* (pacing-new))
     (define *paused* #f)
+    (define *music-generation* 0)
     (define *focused* #t)
     (define *skip-interval* #f)
     (define *resync-requests* 0)
@@ -282,6 +283,7 @@
       (set! *skip-interval* #f)
       (set! *resync-requests* 0)
       (music-close!)
+      (set! *music-generation* (music-generation))
       (audio-pause! #f)
       (set-store-app! GAME-NAME)
       (set-store-prefix! "signal-overdrive:")
@@ -694,6 +696,7 @@
 
     (define (core-frame! dt win-w win-h integer-only)
       (core-advance! dt)
+      (service-audio!)
       (let ((t0 (current-jiffy)))
        (scene-frame! *tuning* *race* (or *cam-heading* 0.0)
                     (list (cons 'best *best*)
@@ -729,17 +732,31 @@
     ;; The host supplies measured wall intervals, exactly as core-frame!.
     (define (core-headless-frame! dt)
       (core-advance! dt)
+      (service-audio!)
       (finish-frame!))
 
-    (define (finish-frame!)
+    (define (service-audio!)
       (let ((m (racer-machine (race-player *race*))) (t0 (current-jiffy)))
-        (music-frame! (race-song *race*) (core-paused?))
+        (music-frame! (race-song *race*) (core-paused?)
+                      clock-fraction: (clock-acc *clock*))
+        (unless (= *music-generation* (music-generation))
+          (set! *music-generation* (music-generation))
+          (when (= 0 (conductor-tick (race-song *race*)))
+            ;; Reset player construction/fill precedes the new song's
+            ;; first interval. Do not count that setup as racing time.
+            (set! *clock* (clock-new))
+            (set! *pacing* (pacing-new))
+            (set! *skip-interval* #t)
+            ;; The frame-start reading belonged to the old stream.
+            (set! *frame-ear* #f)))
         (audio-frame! (if (memq (race-phase *race*) '(title countdown)) 0.0
                           (/ (machine-speed m) (handling-ref *tuning* 'top)))
                       (if (eq? (race-phase *race*) 'race) *last-throttle* 0.0)
                       (> (machine-boost m) 0.0)
                       *frame-events*)
-        (set! *audio-ms* (ease *audio-ms* (ms-since t0))))
+        (set! *audio-ms* (ease *audio-ms* (ms-since t0)))))
+
+    (define (finish-frame!)
       (music-trace!)
       (set! *frame-events* '())
       (keys-end-frame! *keys*)

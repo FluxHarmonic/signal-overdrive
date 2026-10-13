@@ -15,11 +15,12 @@
           (signal music inserts))
   (export music-start! music-frame! music-close! music-running?
           music-audible-seconds music-depth! music-latency! music-readout
-          music-request-resync! music-log music-sabotage!)
+          music-request-resync! music-log music-sabotage! music-generation)
   (begin
     (define PUSH 256)
     (define *ctx* #f)
     (define *stream* #f)
+    (define *generation* 0)
     (define *playback* #f)
     (define *tune* #f)
     (define *rate* 44100)
@@ -60,6 +61,8 @@
 
     (define (music-running?)
       (and *stream* *ctx* (eq? (audio-context-state *ctx*) 'running)))
+
+    (define (music-generation) *generation*)
 
     (define (music-audible-seconds)
       (and *stream*
@@ -108,23 +111,49 @@
           (set! *playback* (playback-open *tune* *rate*
                                         (transport-start-conductor plan) MUSIC-INSERTS
                                         mode: *handoff-mode*))
-          (set! *stream*
-            (guard (e (#t (music-close!) (raise e)))
-              (open-audio-stream channels: 2 rate: *rate*
-                                 buffer-frames: (max 8192 (* 2 (depth-frames))))))
-          (unless *stream*
-            (playback-close! *playback*)
-            (set! *playback* #f))
-          (when *stream*
-            (set! *epoch* (transport-start-epoch plan))
-            (set! *last-resync-bar* -1)
-            (set! *start-conductor* (transport-start-conductor plan))
-            (set! *silence* (transport-start-silence plan))
-            (set! *delivered* 0)
-            (set! *last-tick* (conductor-tick c))
-            (set! *first-log* (car (reverse (conductor-log c))))))))
+          (set! *epoch* (transport-start-epoch plan))
+          (set! *last-resync-bar* -1)
+          (set! *start-conductor* (transport-start-conductor plan))
+          (set! *silence* (transport-start-silence plan))
+          (set! *delivered* 0)
+          (set! *last-tick* (conductor-tick c))
+          (set! *first-log* (car (reverse (conductor-log c))))
+          (guard (e (#t (music-close!) (raise e)))
+            (let* ((frames (depth-frames))
+                   (samples (prime-playback! c frames)))
+              (set! *stream*
+                (open-audio-stream channels: 2 rate: *rate*
+                                   buffer-frames: (max 8192 (* 2 frames))))
+              (if *stream*
+                  (let ((accepted (push-audio-samples *stream* samples frames)))
+                    (unless (= accepted frames)
+                      (error "music sink refused initial queue" frames accepted))
+                    (set! *delivered* accepted)
+                    (set! *generation* (+ *generation* 1)))
+                  (begin
+                    (playback-close! *playback*)
+                    (set! *playback* #f))))))))
 
-    (define (music-frame! c paused?)
+    ;; Prepare the initial queue with no published stream. Silence stays
+    ;; zero-filled; normal pulls retain the same 256-frame handoff checks.
+    (define (prime-playback! c frames)
+      (let ((samples (make-bytevector (* 8 frames) 0)))
+        (let pull ((offset 0))
+          (when (< offset frames)
+            (let* ((silence? (> *silence* 0))
+                   (n (min PUSH (- frames offset)
+                           (if silence? *silence* PUSH))))
+              (if silence?
+                  (set! *silence* (- *silence* n))
+                  (playback-pull! *playback*
+                                  (if (< (conductor-tick c) (conductor-tick *start-conductor*))
+                                      *start-conductor*
+                                      c)
+                                  samples (* 8 offset) n))
+              (pull (+ offset n)))))
+        samples))
+
+    (define (music-frame! c paused? (keys: (clock-fraction 0.0)))
       (let ((t0 (current-jiffy)))
         ;; A restart replaces the conductor's initial log even when it
         ;; occurs before another tick. Its tick also returns to zero.
@@ -151,7 +180,8 @@
                         (boundary (min available boundary))
                         (else available))))
               (when (and (> available 0) boundary (= boundary 0))
-                (let* ((ahead (+ (/ (audio-stream-depth *stream*) (* 1.0 *rate*)) *latency*))
+                (let* ((ahead (+ (/ (audio-stream-depth *stream*) (* 1.0 *rate*))
+                                 *latency* clock-fraction))
                        (target (transport-render-target c ahead))
                        (frame (playback-resync! *playback* target)))
                   (set! *epoch-changes*
