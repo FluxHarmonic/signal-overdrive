@@ -15,6 +15,9 @@ const GL_THREADS = process.env.CONDUCTOR_GL_THREADS || "1";
 if (!["1", "2"].includes(GL_THREADS)) throw new Error("at most two software-rendering threads");
 const HEADLESS = process.env.CONDUCTOR_HEADLESS === "1";
 const GC_PROFILE = process.env.CONDUCTOR_GC_PROFILE === "1";
+// Diagnostic only: the engine silent and no one-shots, music alone in the
+// capture. The gate's verdict is defined on the normal mix.
+const MUSIC_ONLY = process.env.CONDUCTOR_MUSIC_ONLY === "1";
 const BIN = path.resolve(process.env.CONDUCTOR_BINARY || path.join(ROOT, "build/release/bin/signal-overdrive"));
 if (!fs.existsSync(BIN)) throw new Error("no release binary");
 fs.mkdirSync(RUN, { recursive: true });
@@ -55,6 +58,7 @@ try {
   if (capture.exitCode !== null) throw new Error("parec failed to open the verified monitor");
   game = launch(path.join(ROOT, "scripts/dev"), [BIN, "--start", "--autopilot", "--track=loop", "--musiclog",
     ...(HEADLESS ? ["--music-headless"] : []),
+    ...(MUSIC_ONLY ? ["--sfx=0"] : []),
     `--music-sabotage=${ARM === "normal" ? "none" : ARM}`, "--quit-after", "400"],
     { env, stdio: ["ignore", "pipe", "pipe"] });
   function gameOutput(bytes) { fs.writeSync(logFD, bytes); gameText += bytes; }
@@ -90,7 +94,7 @@ try {
     execFileSync(xdotool, ["windowfocus", "--sync", windowID], { env, timeout: 5000 });
   }
   fs.writeFileSync(path.join(RUN, "meta.json"), JSON.stringify({ arm: ARM, binary: BIN, display: env.DISPLAY,
-    game_pid: verifiedPID, null_sink: nullSink[0], cpu, headless_race: HEADLESS, gc_profile: GC_PROFILE,
+    game_pid: verifiedPID, null_sink: nullSink[0], cpu, niceness: pool.niceness, headless_race: HEADLESS, music_only: MUSIC_ONLY, gc_profile: GC_PROFILE,
     gc_young_threshold_kb: process.env.SIGIL_YOUNG_THRESHOLD || "default",
     gc_young_threshold_max_kb: process.env.SIGIL_YOUNG_THRESHOLD_MAX || "default",
     software_rendering_threads: HEADLESS ? 0 : GL_THREADS,

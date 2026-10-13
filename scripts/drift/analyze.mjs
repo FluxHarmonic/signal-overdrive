@@ -102,6 +102,27 @@ function envelope(file, format, rate = RATE) {
   return { values: result, seconds: frames / rate, rms: Math.sqrt(squareSum / samples) };
 }
 
+// Runs of exact digital silence (both channels 0) of at least minMs, in
+// [fromS, toS) of an s16 48 kHz capture. During a race the engine always
+// sounds, so such a run is the output device dropping out: time the game's
+// audible clock (frames its callback consumed) never sees.
+export function silentRuns(file, fromS, toS, minMs = 5) {
+  const bytes = fs.readFileSync(file);
+  const frames = Math.floor(bytes.length / 4);
+  const first = Math.max(0, Math.floor(fromS * RATE)), last = Math.min(frames, Math.ceil(toS * RATE));
+  let run = 0, count = 0, total = 0, longest = 0;
+  for (let i = first; i <= last; i++) {
+    const zero = i < last && bytes.readInt16LE(i * 4) === 0 && bytes.readInt16LE(i * 4 + 2) === 0;
+    if (zero) run++;
+    else if (run) {
+      const ms = run / RATE * 1000;
+      if (ms >= minMs) { count++; total += ms; longest = Math.max(longest, ms); }
+      run = 0;
+    }
+  }
+  return { min_ms: minMs, count, total_ms: Math.round(total), longest_ms: Math.round(longest) };
+}
+
 export function percentile(values, fraction) {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * fraction) - 1)];
@@ -154,6 +175,8 @@ export function analyze(run) {
     if (!a || !b || song < a.song || b.song <= a.song) return null;
     return a.wall + (b.wall - a.wall) * (song - a.song) / (b.song - a.song);
   }
+  // Before the window loop: wallAt only walks forward.
+  const raceFrom = wallAt(2);
   const rows = [], halfWindow = 0.75;
   let trackedOffset = null;
   const end = Math.min(ref.seconds - 2 * halfWindow, clocks.at(-1).song - halfWindow);
@@ -178,10 +201,15 @@ export function analyze(run) {
   const good = rows.filter(r => r.norm >= 0.5 && Number.isFinite(r.error_ms));
   const verdict = assess(good.map(r => r.error_ms), good.length / rows.length);
   const costs = clocks.map(c => +c.metrics["music-ms"]).filter(Number.isFinite);
+  // Diagnostic only; the verdict above does not read it.
+  const raceTo = clocks.at(-1).wall;
+  const dropouts = raceFrom === null ? null
+    : silentRuns(path.join(run, "capture.pcm"), (raceFrom - start) / 1000, (raceTo - start) / 1000);
   return { ...verdict, windows: rows.length, correlated: good.length, capture_rms: cap.rms,
     reference_sample_rate: referenceRate, reference_rms: ref.rms,
     correlation_search: "4 s acquisition, then 250 ms around last correlated lag",
     capture_start_ms: start, capture_clock_spread_ms: Math.max(...bounds) - start,
+    device_dropouts: dropouts,
     insert_cost_ms: { samples: costs.length, p50: percentile(costs, 0.5), p95: percentile(costs, 0.95), worst: Math.max(...costs) },
     intended_jumps: trace.jumps, rows };
 }

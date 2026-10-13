@@ -21,14 +21,21 @@ export function localProcesses(root) {
     .match(/^Cpus_allowed_list:\s*([\d,-]+)/m)?.[1];
   if (!allowed) throw new Error("no allowed CPU");
   const ranges = allowed.split(",").map(part => part.split("-").map(Number));
+  // CONDUCTOR_CPU_LIST=any leaves placement to the scheduler, as a game
+  // runs for a player; the default pins one allowed CPU for busy hosts.
   const cpu = process.env.CONDUCTOR_CPU_LIST || String(ranges[0][0]);
-  const requested = cpu.split(",").map(Number);
-  if (!/^\d+(,\d+)?$/.test(cpu) || requested.some(value =>
-    !Number.isInteger(value) || !ranges.some(([lo, hi = lo]) => value >= lo && value <= hi)))
-    throw new Error("test CPU list must contain at most two allowed CPUs");
+  const pinned = cpu !== "any";
+  const requested = pinned ? cpu.split(",").map(Number) : [];
+  if (pinned && (!/^\d+(,\d+)?$/.test(cpu) || requested.some(value =>
+    !Number.isInteger(value) || !ranges.some(([lo, hi = lo]) => value >= lo && value <= hi))))
+    throw new Error("test CPU list must contain at most two allowed CPUs, or be any");
+  // CONDUCTOR_NICE=0 runs at a player's normal priority; default 15.
+  const niceness = process.env.CONDUCTOR_NICE ?? "15";
+  if (!/^(1?\d)$/.test(niceness) || Number(niceness) > 19) throw new Error("CONDUCTOR_NICE must be 0..19");
   const children = new Set();
   function launch(command, args, options = {}) {
-    const child = spawn("taskset", ["-c", cpu, "nice", "-n", "15", command, ...args],
+    const prefix = [...(pinned ? ["taskset", "-c", cpu] : []), "nice", "-n", niceness];
+    const child = spawn(prefix[0], [...prefix.slice(1), command, ...args],
       { cwd: root, detached: true, ...options });
     children.add(child);
     child.on("exit", () => children.delete(child));
@@ -46,7 +53,7 @@ export function localProcesses(root) {
       child.stderr?.removeAllListeners("data");
     }
   }
-  return { cpu, children, launch, stop, cleanup };
+  return { cpu, niceness: Number(niceness), children, launch, stop, cleanup };
 }
 
 export async function privateDisplay(pool, run) {
