@@ -840,6 +840,7 @@
                           (cons 'restart-line (if (eq? *platform* 'web) "ENTER OR TAP TO RUN IT AGAIN" "ENTER TO RUN IT AGAIN"))
                           (cons 'overlay *overlay*)
                           (cons 'paused (core-paused?))
+                          (cons 'motion (if *reduce-motion* 'reduce 'full))
                           (cons 'fps (and *fps-on* (list *fps* *frame-ms* *sim-ms* *draw-ms*)))
                           (cons 'instruments (and *fps-on* (list *history* *hist-i* (history-max) *hitch-count*
                                                                  *audio-mode* (audio-readout) *audio-ms*))))

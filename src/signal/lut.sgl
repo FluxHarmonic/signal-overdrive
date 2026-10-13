@@ -27,8 +27,9 @@
     ;; time in seconds, z the glitch 0..1 (rows torn sideways and the
     ;; channels split: a wall hit, ICE), w corruption 0..1 (the glitch at
     ;; full and the picture going red: corrupt cargo). vp: the vanishing
-    ;; point (x, y), rows from the top, and z how far the frame has faded
-    ;; to black, 0..1 (the title's fades).
+    ;; point (x, y), rows from the top, z how far the frame has faded to
+    ;; black, 0..1 (the title's fades), and w 1 for reduced motion: no
+    ;; tearing, the glitch's or corruption's (corruption's red stays).
     (define LUT-FRAGMENT
       "uniform vec4 params;
 uniform vec4 opts;
@@ -43,7 +44,7 @@ void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
   int yt = opts.x > 0.5 ? int(params.w) - 1 - p.y : p.y;
   // the glitch: bands of rows torn sideways, the red channel split off
-  float g = max(fx.z, fx.w);
+  float g = vp.w > 0.5 ? 0.0 : max(fx.z, fx.w);
   vec4 texel;
   if (g > 0.01) {
     float band = floor(float(yt) / 3.0);

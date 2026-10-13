@@ -56,6 +56,13 @@ pop-ups say why. At zero the cargo is corrupt.</li>
 for 1.4 s.</li>
 <li>A sense of speed: the view widens and pulls back as you go faster, with
 streaks from the horizon and a punch when you boost.</li>
+<li>Reduced motion (the browser's preference, or <code>?motion=reduce</code>): the
+signal's effects keep their meaning in colour and the HUD, and nothing
+tears, ripples, rolls or flickers. A wall hit or ICE shows in the meter's
+flash and the pop-ups, with no glitch; corrupt cargo turns the picture
+red without tearing it; a tracer's amber reticle stands still on the road,
+with no ripple; low integrity's interference keeps its red bleed in the
+sky and the HUD, standing still. <code>scripts/gate-motion</code> checks it.</li>
 <li>Placeholder sound, synthesized: an engine that follows your speed, a boost
 whoosh, a wall scrape. On the web it starts at your first key or tap.</li>
 <li>The best lap's ghost, see-through, from your second lap on (per track, for
@@ -181,7 +188,8 @@ it on the grid.</p>
 <code>?audiodepth=MS</code> (the engine sound's queue, default 250), <code>?cues=0</code> (the one-shot sounds in
 the stream instead of as cues, the old way), <code>?hitchlog</code> (every frame over 33 ms to the console),
 <code>?touch=zones|drag|stick</code>, <code>?autopilot</code> (the player drives the racing line),
-<code>?start</code> (skip the title), <code>?fps</code> (the F3 readout from the start).</p>
+<code>?start</code> (skip the title), <code>?fps</code> (the F3 readout from the start),
+<code>?motion=reduce|full</code> (reduced motion, else the browser's preference).</p>
 <p>The knobs, from <code>signal-overdrive --knobs</code> (units are world texels, seconds and radians; a texel is about 25 cm, so 560 texels/s is 504 km/h):</p>
 <table>
 <thead>

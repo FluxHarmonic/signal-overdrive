@@ -165,6 +165,18 @@
     ;; shell's effective intensity per effect (0 when off or not the solo).
     ;; hold: fx-hold, every transient effect pinned at its peak (for costs)
     (define *hold* #f)
+    ;; Reduced motion (the player's preference): the P15 family keeps its
+    ;; meaning in colour and the HUD, and nothing in it tears, ripples,
+    ;; rolls or flickers. The glitch (torn rows, a split channel, scrambled
+    ;; road tiles) and corruption's tear show nothing: the scramble is
+    ;; zeroed here, and the post pass drops all tearing for its vp.w. The
+    ;; hit is in the meter's flash and the pop-ups, corruption in its red.
+    ;; The warp keeps its amber reticle, standing still, with no ripple. The
+    ;; interference keeps its colour bleed, standing still: no row shifts,
+    ;; rolling band, static or dropouts in the sky, no jitter, flicker or
+    ;; tracking lines in the HUD. The meter is never touched either way.
+    ;; scripts/gate-motion checks it in the browser.
+    (define *calm* #f)
     (define (fx-uniforms! r c st knob hold)
       (let* ((on (lambda (k) (> (knob k) 0.0)))
              (sky (knob 'fx-sky))
@@ -185,12 +197,13 @@
                     (and hold (list (+ (cam-x c) (* 600.0 (sin h))) (- (cam-y c) (* 600.0 (cos h))) (sin h) (- (cos h)) 460.0 34.0))))
              (wv (lambda (k d) (if w (list-ref w k) d)))
              (flags (+ (if (on 'fx-pools) 1 0) (if (on 'fx-chase) 2 0) (if (on 'fx-sky) 4 0)
-                       (if (on 'fx-warp) 8 0) (if (on 'fx-interf) 16 0))))
+                       (if (on 'fx-warp) 8 0) (if (on 'fx-interf) 16 0) (if *calm* 32 0))))
         (set! *hold* hold)
         (set! *dip* (if hold (* DIP-ROWS (knob (quote fx-dip))) (fx-dip-rows st (knob (quote fx-dip)))))
         (mode7-set-lights! lights)
         (mode7-set-fx!
-         (list *dip* (if hold (knob (quote fx-glitch)) (fx-glitch-now st)) (modulo (fx-glitch-seed st) 97) (/ (fx-tick st) 60.0)
+         (list *dip* (cond (*calm* 0.0) (hold (knob (quote fx-glitch))) (else (fx-glitch-now st)))
+               (modulo (fx-glitch-seed st) 97) (/ (fx-tick st) 60.0)
                (modulo (fx-chase st) 16) (modulo (fx-padstep st) 12)
                (* (knob 'fx-chase) (min 1.0 (+ (* 0.35 (fx-beat st)) (* 0.6 (fx-flare st)))))
                (* sky (fx-kick st))
@@ -420,8 +433,9 @@
     ;; The signal's interference on the HUD (P15: the HUD and the sky
     ;; only): text in the top band (above HUD-BAND, which is sky) jitters
     ;; sideways, bleeds a red copy, and during a dropout tears further and
-    ;; flickers. The meter is never touched: it's the one reading a
-    ;; struggling player needs.
+    ;; flickers. With reduced motion (*calm*) only the red copy stays, and
+    ;; the tracking lines go. The meter is never touched: it's the one
+    ;; reading a struggling player needs.
     (define HUD-BAND 58)
     (define *hud-interf* 0.0)
     (define *hud-dropout* #f)
@@ -438,12 +452,12 @@
              ;; the band ends above the horizon whatever the horizon knob says
              (L (if (< (+ vy (* 7 k)) (hud-band)) *hud-interf* 0.0))
              (r (h2 vy *hud-frame*))
-             (j (cond ((<= L 0.0) 0)
+             (j (cond ((or (<= L 0.0) *calm*) 0)
                       (*hud-dropout* (exact (round (* 8.0 (- (h2 *hud-frame* vy) 0.5)))))
                       ((< r (* 0.35 L)) (exact (round (* 6.0 L (- (h2 *hud-frame* vy) 0.5)))))
                       (else 0)))
              (vx (+ vx j)))
-        (unless (and *hud-dropout* (< r 0.45))
+        (unless (and *hud-dropout* (not *calm*) (< r 0.45))
           (when (> L 0.3)
             (rgb "#CC3340")
             (glyphs! s (hx (+ vx 1 (exact (round (* 2.0 L))))) (hy vy) (* k (hs))))
@@ -454,7 +468,7 @@
 
     ;; tracking lines rolling down through the HUD's band
     (define (hud-tracking!)
-      (when (> *hud-interf* 0.0)
+      (when (and (> *hud-interf* 0.0) (not *calm*))
         (let* ((band (exact (floor (hud-band))))
                (y (modulo (* 2 *hud-frame*) (max 1 band))))
           (rect! 0 y VIEW-W 1 "#8A8FA0")
@@ -685,7 +699,8 @@
       (mode7-set-far! (tuning-ref tuning 'far-end)))
 
     ;; info: (best . ticks) (flash . frames) (start-line . text)
-    ;; (restart-line . text) (overlay . selected-row-or-#f); and, all
+    ;; (restart-line . text) (overlay . selected-row-or-#f) (motion . reduce
+    ;; or full: the player's preference, see *calm*); and, all
     ;; optional, the title's: camera (one to use instead of the race's),
     ;; fade (0..1 toward black), draw-ground (called with the camera after
     ;; the ground, before the machines), draw-3d (a thunk drawn over the
@@ -705,6 +720,7 @@
              (f (view-fit win-w win-h VIEW-W VIEW-H integer-only: integer-only)))
         (set! *fit* f)
         (set! *horizon* (tuning-ref tuning 'horizon))
+        (set! *calm* (eq? (info-get info 'motion) 'reduce))
         (let ((st (cdr (assq 'fx info))))
           (fx-uniforms! r c st (cdr (assq 'fx-knob info)) (> (tuning-ref tuning 'fx-hold) 0.5))
           (set! *hud-interf* (* (if (> ((cdr (assq 'fx-knob info)) 'fx-interf) 0.0) 1.0 0.0) (fx-interf st)))
@@ -730,7 +746,8 @@
                                        (cdr (assq 'time info))
                                        (if *hold* ((cdr (assq 'fx-knob info)) 'fx-glitch) (cdr (assq 'glitch info)))
                                        (cdr (assq 'corrupt info))))
-          (set-pipeline-uniform! *lut-pipe* 'vp (list (* 0.5 VIEW-W) (+ (tuning-ref tuning 'horizon) *dip*) (or (info-get info 'fade) 0.0) 0.0)))
+          (set-pipeline-uniform! *lut-pipe* 'vp (list (* 0.5 VIEW-W) (+ (tuning-ref tuning 'horizon) *dip*) (or (info-get info 'fade) 0.0)
+                                                      (if *calm* 1.0 0.0))))
         (when dither?
           (with-3d-pass *post* #f
             (if (> (tuning-ref tuning 'lut) 0.5)

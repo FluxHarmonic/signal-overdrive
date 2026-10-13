@@ -50,6 +50,13 @@ through the Flux Harmonic palette and Bayer dither pass.
   for 1.4 s.
 - A sense of speed: the view widens and pulls back as you go faster, with
   streaks from the horizon and a punch when you boost.
+- Reduced motion (the browser's preference, or `?motion=reduce`): the
+  signal's effects keep their meaning in colour and the HUD, and nothing
+  tears, ripples, rolls or flickers. A wall hit or ICE shows in the meter's
+  flash and the pop-ups, with no glitch; corrupt cargo turns the picture
+  red without tearing it; a tracer's amber reticle stands still on the road,
+  with no ripple; low integrity's interference keeps its red bleed in the
+  sky and the HUD, standing still. `scripts/gate-motion` checks it.
 - Placeholder sound, synthesized: an engine that follows your speed, a boost
   whoosh, a wall scrape. On the web it starts at your first key or tap.
 - The best lap's ghost, see-through, from your second lap on (per track, for
@@ -125,7 +132,8 @@ Other parameters: `?track=oval|loop` (the same as `track=0|1`), `?mute`,
 `?audiodepth=MS` (the engine sound's queue, default 250), `?cues=0` (the one-shot sounds in
 the stream instead of as cues, the old way), `?hitchlog` (every frame over 33 ms to the console),
 `?touch=zones|drag|stick`, `?autopilot` (the player drives the racing line),
-`?start` (skip the title), `?fps` (the F3 readout from the start).
+`?start` (skip the title), `?fps` (the F3 readout from the start),
+`?motion=reduce|full` (reduced motion, else the browser's preference).
 
 The knobs, from `signal-overdrive --knobs` (units are world texels, seconds and radians; a texel is about 25 cm, so 560 texels/s is 504 km/h):
 

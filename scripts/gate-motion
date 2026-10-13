@@ -1,0 +1,103 @@
+#!/bin/sh
+# scripts/gate-motion [BUILD]   Reduced motion (the browser's
+# prefers-reduced-motion, or ?motion=reduce): the P15 family keeps its
+# meaning in colour and the HUD, but nothing in it tears, ripples, rolls
+# or flickers.
+#   glitch  (a wall hit, ICE: torn rows, a split channel, scrambled road
+#           tiles) shows nothing at all; the HUD's meter flash and popups
+#           carry the hit
+#   warp    (a tracer's telegraph) keeps its amber reticle, standing
+#           still: no ripple in the road, no marching dashes
+#   interf  (integrity's interference, sky and HUD only) keeps its colour
+#           bleed, standing still: no row shifts, rolling band, static,
+#           dropouts, jittering text or tracking lines
+#
+# How: the web build (default build/web) on the race's title phase with
+# the title screen off (?title=0), where the camera and the road do not
+# move, with no machines (?nosprites: their thrusters flicker), each
+# effect alone (?fx-solo=N). The glitch and the warp are pinned at their
+# peak (?fx-hold=1); the interference runs at CRITICAL (?fx-tier=5), its
+# dropouts and all, with the HUD shown. Per effect, two page loads, one
+# with ?motion=reduce and one with ?motion=full (the control: the gate
+# must see motion when there is some), each capturing ON1, ON2 700 ms
+# later, and OFF with the effect's knob at 0. Then, by pixel count
+# (ImageMagick compare -metric AE) over the effect's region (the whole
+# frame; for the interference the rows above the horizon, to row 70):
+#   reduce  ON1 against ON2 must be 0 (still); ON1 against OFF must be at
+#           least CUE pixels (the colour is there), or for the glitch
+#           exactly 0 (nothing shows)
+#   full    ON1 against ON2 (ON1 against OFF for the glitch) must be over
+#           0, or the gate cannot see motion (SETUP-FAILED)
+# Prints GREEN, RED or SETUP-FAILED with the counts, and exits 0, 1 or 2.
+# Renders on the GPU when GPU=1 (default), SwiftShader with GPU=0.
+# MOTION_OUT names a fresh directory for the captures (default: a new
+# /tmp/gate-motion-XXXXXX).
+set -eu
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+BUILD="${1:-$REPO/build/web}"
+if [ -n "${MOTION_OUT:-}" ]; then
+  OUT="$MOTION_OUT"
+  [ ! -e "$OUT" ] || { echo "SETUP-FAILED: MOTION_OUT must be a fresh directory"; exit 2; }
+  mkdir -p "$OUT"
+else
+  OUT="$(mktemp -d /tmp/gate-motion-XXXXXX)"
+fi
+SCALE=2
+CUE=200
+W=$((480 * SCALE)); H=$((270 * SCALE)); SKY_H=$((70 * SCALE))
+GPUFLAG=""; [ "${GPU:-1}" = 1 ] && GPUFLAG="--gpu"
+count() {   # count A B HEIGHT Y: differing pixels in the band
+  guix shell imagemagick -- sh -c "convert '$1' -crop ${W}x$3+0+$4 +repage png:- > '$OUT/a.png'; \
+    convert '$2' -crop ${W}x$3+0+$4 +repage png:- > '$OUT/b.png'; \
+    compare -metric AE '$OUT/a.png' '$OUT/b.png' null: 2>&1 || true" | tail -1 | awk '{print $1}' |
+    grep -E '^[0-9]+$' || true
+}
+# capture NAME MOTION KNOB QUERY: on1, on2 and off into $OUT/NAME-MOTION/
+capture() {
+  d="$OUT/$1-$2"; mkdir -p "$d"
+  cat > "$d/steps.json" <<EOF
+[{"wait": 2500}, {"shot": "on1.png"}, {"wait": 700}, {"shot": "on2.png"},
+ {"param": "$3=0"}, {"wait": 1500}, {"shot": "off.png"}]
+EOF
+  if ! node "$REPO/scripts/fx-check.mjs" "$BUILD" "$d/steps.json" $GPUFLAG --scale $SCALE \
+       --query "mute&title=0&nosprites&motion=$2&$4" --out "$d" > "$d/run.log" 2>&1; then
+    echo "SETUP-FAILED: the $1 capture ($2) did not run cleanly; $d/run.log:"; cat "$d/run.log"; exit 2
+  fi
+  for f in on1 on2 off; do [ -s "$d/$f.png" ] || { echo "SETUP-FAILED: no $1-$2 $f.png"; exit 2; }; done
+}
+capture glitch reduce fx-glitch "nohud&fx-solo=5&fx-hold=1"
+capture glitch full   fx-glitch "nohud&fx-solo=5&fx-hold=1"
+capture warp   reduce fx-warp   "nohud&fx-solo=6&fx-hold=1"
+capture warp   full   fx-warp   "nohud&fx-solo=6&fx-hold=1"
+capture interf reduce fx-interf "fx-solo=7&fx-tier=5"
+capture interf full   fx-interf "fx-solo=7&fx-tier=5"
+grep -h -E "^renderer:" "$OUT/glitch-reduce/run.log" | head -1 || true
+
+G_SHOW=$(count "$OUT/glitch-reduce/on1.png" "$OUT/glitch-reduce/off.png" $H 0)
+G_STILL=$(count "$OUT/glitch-reduce/on1.png" "$OUT/glitch-reduce/on2.png" $H 0)
+G_CTRL=$(count "$OUT/glitch-full/on1.png" "$OUT/glitch-full/off.png" $H 0)
+W_STILL=$(count "$OUT/warp-reduce/on1.png" "$OUT/warp-reduce/on2.png" $H 0)
+W_CUE=$(count "$OUT/warp-reduce/on1.png" "$OUT/warp-reduce/off.png" $H 0)
+W_CTRL=$(count "$OUT/warp-full/on1.png" "$OUT/warp-full/on2.png" $H 0)
+I_STILL=$(count "$OUT/interf-reduce/on1.png" "$OUT/interf-reduce/on2.png" $SKY_H 0)
+I_CUE=$(count "$OUT/interf-reduce/on1.png" "$OUT/interf-reduce/off.png" $SKY_H 0)
+I_CTRL=$(count "$OUT/interf-full/on1.png" "$OUT/interf-full/on2.png" $SKY_H 0)
+echo "glitch: shown $G_SHOW still $G_STILL (full: $G_CTRL)"
+echo "warp:   still $W_STILL cue $W_CUE (full: moved $W_CTRL)"
+echo "interf: still $I_STILL cue $I_CUE (full: moved $I_CTRL)"
+echo "(pixels at scale $SCALE; captures in $OUT)"
+for v in "$G_SHOW" "$G_STILL" "$G_CTRL" "$W_STILL" "$W_CUE" "$W_CTRL" "$I_STILL" "$I_CUE" "$I_CTRL"; do
+  [ -n "$v" ] || { echo "SETUP-FAILED: a count is empty (is ImageMagick reachable?)"; exit 2; }
+done
+if [ "$G_CTRL" -eq 0 ] || [ "$W_CTRL" -eq 0 ] || [ "$I_CTRL" -eq 0 ]; then
+  echo "SETUP-FAILED: with full motion an effect did not move or show; the gate cannot see motion"; exit 2
+fi
+red=""
+[ "$G_SHOW" -eq 0 ] || red="$red; the glitch still shows ($G_SHOW px)"
+[ "$G_STILL" -eq 0 ] || red="$red; the glitch's frame moves ($G_STILL px)"
+[ "$W_STILL" -eq 0 ] || red="$red; the warp moves ($W_STILL px)"
+[ "$W_CUE" -ge $CUE ] || red="$red; the warp's reticle is gone ($W_CUE px)"
+[ "$I_STILL" -eq 0 ] || red="$red; the interference moves ($I_STILL px)"
+[ "$I_CUE" -ge $CUE ] || red="$red; the interference's colour is gone ($I_CUE px)"
+if [ -n "$red" ]; then echo "RED: with reduced motion${red#;}"; exit 1; fi
+echo "GREEN: with reduced motion the glitch shows nothing, and the warp's reticle and the interference's colour stand still"
