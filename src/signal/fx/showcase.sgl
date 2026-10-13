@@ -11,8 +11,7 @@
 ;;;   caption  what the HUD says
 
 (define-library (signal fx showcase)
-  (import (sigil core)
-          (signal fx beat))
+  (import (signal fx beat))
 
   (export showcase-at SHOWCASE-SEGMENT FX-NAMES)
 

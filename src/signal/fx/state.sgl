@@ -22,8 +22,7 @@
 ;;; Each has an intensity knob, fx-NAME, 0 (off) to 1 (default) or more.
 
 (define-library (signal fx state)
-  (import (sigil core)
-          (sigil struct)
+  (import (sigil struct)
           (sigil math)
           (signal fx beat))
 

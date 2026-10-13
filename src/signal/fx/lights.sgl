@@ -13,8 +13,7 @@
 ;;; lane or ice, which says which pulse drives it.
 
 (define-library (signal fx lights)
-  (import (sigil core)
-          (sigil math)
+  (import (sigil math)
           (sigil list)
           (signal track))
 

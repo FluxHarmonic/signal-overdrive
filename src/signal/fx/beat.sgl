@@ -33,8 +33,6 @@
 ;;; with c = (race-song r). Nothing else in the effects changes.
 
 (define-library (signal fx beat)
-  (import (sigil core))
-
   (export make-pulse pulse? pulse-with-section pulse-section pulse-bar pulse-row pulse-onsets pulse-drop pulse-energy
           ROWS-PER-BEAT ROWS-PER-BAR KICK SNARE HATS PAD ARP ICE
           onset? tick->row tick->bar bar->tick new-row? section-energy
