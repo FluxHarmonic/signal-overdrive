@@ -2,11 +2,9 @@
    The colors are the CORRUPT logo's, which are the game's (its embers
    palette): magenta #ff59d9, orange #ff9f1a, the greys #dbe0e6 and #8a8fa0,
    and cyan #4df2d9 only as the hairline of the logo's channel split, on a
-   neutral near-black. Two themes, picked with ?theme=a (the default) or
-   ?theme=b by the script at the top of each page: A leads with magenta
-   (links, PLAY, focus, headings) and keeps orange for heat (the coming-soon
-   badge, hover and active, the section markers); B swaps the two. Body text
-   is 6:1 or better on the ground in both. The face is JetBrains Mono (OFL
+   neutral near-black. Magenta leads (links, GET IN, focus, headings) and
+   orange is the heat (the coming-soon badge, hover and active, the section
+   markers). Body text is 6:1 or better on the ground. The face is JetBrains Mono (OFL
    1.1, fonts/OFL.txt), the subset the other Flux Harmonic game sites serve,
    so the sites read as siblings. */
 @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("/fonts/JetBrainsMono-Regular.woff2") format("woff2"); }
@@ -22,14 +20,12 @@
   --magenta: #ff59d9;
   --orange: #ff9f1a;
   --cyan: #4df2d9;
-  --accent: var(--magenta);   /* theme A: magenta leads */
+  --accent: var(--magenta);   /* magenta leads */
   --heat: var(--orange);      /* and orange is the heat */
   --echo: var(--cyan);        /* the logo's channel split, as a hairline */
   --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
   color-scheme: dark;
 }
-/* theme B: orange leads, magenta is the heat */
-html[data-theme="b"] { --accent: var(--orange); --heat: var(--magenta); }
 
 * { box-sizing: border-box; }
 html { background: var(--dark); }
@@ -96,8 +92,9 @@ h1.logo img {
 .pitch { margin-top: 2.5rem; }
 .pitch p, .music p { margin: 0 0 1em; }
 
-/* PLAY 0.1: not out yet, so a disabled button, not a link. When 0.1 ships
-   it becomes <a href="/drive/"> with the .play a rules below. */
+/* GET IN: not out yet, so a disabled button, not a link. When the game
+   ships it becomes <a href="/drive/"> with the .play a rules below. No
+   version number goes in the page's copy. */
 .play { text-align: center; margin: 2.5rem 0 3rem; }
 .play a, .play button {
   display: inline-block;

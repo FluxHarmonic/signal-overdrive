@@ -39,7 +39,7 @@
 //   logo       the wordmark steps through its glitch frames by itself, and
 //              under prefers-reduced-motion stays /logo.png for a whole
 //              glitch cycle (the glitch is the positive control)
-//   play       PLAY 0.1 is a disabled button that says so, a click on it goes
+//   play       GET IN is a disabled button that says so, a click on it goes
 //              nowhere, the page says it is coming soon, and nothing on the
 //              landing links the game's path yet
 //   carousel   the pictures change by themselves (the caption silent while they
@@ -47,11 +47,11 @@
 //              stops the rotation, keyboard focus on a dot pauses it, one
 //              shows at a time, and under prefers-reduced-motion nothing
 //              changes by itself
-//   theme      ?theme=a (the default) and ?theme=b set the page's theme on /
-//              and the 404, the two differ, and every text role meets 4.5:1
-//              (3:1 for large text) against the background behind it
-//   phone      at 390 CSS px (a phone, emulated), / (both themes) and the 404 have no
-//              horizontal scroll, and the logo and PLAY 0.1 fit on screen
+//   contrast   every text role on / and the 404 meets 4.5:1 (3:1 for large
+//              text) against the background behind it
+//   version    no version number in the title, meta or rendered copy
+//   phone      at 390 CSS px (a phone, emulated), / and the 404 have no
+//              horizontal scroll, and the logo and GET IN fit on screen
 //   404        a missing page shows the 404's number and a link home, and the
 //              same 404, styled, under the game's path
 //   local      every leg above ran at the loopback host, as a private preview
@@ -406,7 +406,7 @@ try {
     if (!p.button) detail.push("no PLAY button in .play");
     else {
       if (!p.disabled) detail.push("PLAY is not disabled");
-      if (p.text !== "PLAY 0.1") detail.push(`the button says "${p.text}"`);
+      if (p.text !== "GET IN") detail.push(`the button says "${p.text}"`);
     }
     if (p.anchor) detail.push(".play holds a link");
     if (!/coming soon/i.test(p.how)) detail.push(`the line under it says "${p.how}"`);
@@ -420,7 +420,7 @@ try {
       const after = await evalJS("location.href");
       if (after !== before) detail.push(`a click on PLAY went to ${after}`);
     }
-    detail.length ? bad("play", detail.join("; ")) : ok("play", `PLAY 0.1 is a disabled button, a click stays on /, "${p.how.trim()}", and nothing links /${SLUG}/ yet`);
+    detail.length ? bad("play", detail.join("; ")) : ok("play", `GET IN is a disabled button, a click stays on /, "${p.how.trim()}", and nothing links /${SLUG}/ yet`);
   }
 
   // ---- carousel ----------------------------------------------------------------------------
@@ -487,7 +487,7 @@ try {
   {
     const detail = [], got = [];
     await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-    for (const p of ["/", "/?theme=b", MISSING]) {
+    for (const p of ["/", MISSING]) {
       await visit(p);
       await sleep(300);
       const m = await evalJS(`(() => { const d = document.documentElement;
@@ -500,17 +500,18 @@ try {
       if (m.screen !== 390) detail.push(`${p}: the screen is ${m.screen} px, not the emulated 390 (the leg measured nothing)`);
       else if (m.vw > 390) detail.push(`${p} forced a ${m.vw} px layout on a 390 px phone (something is wider than the screen)`);
       if (m.sw > m.vw) detail.push(`${p} is ${m.sw} px wide on a ${m.vw} px screen`);
-      for (const [k, b] of [["PLAY 0.1", m.play], ["the logo", m.logo]]) if (b && (b[0] < 0 || b[1] > m.vw)) detail.push(`${p}: ${k} spans ${b[0]}..${b[1]} px on a ${m.vw} px screen`);
+      for (const [k, b] of [["GET IN", m.play], ["the logo", m.logo]]) if (b && (b[0] < 0 || b[1] > m.vw)) detail.push(`${p}: ${k} spans ${b[0]}..${b[1]} px on a ${m.vw} px screen`);
       if (p === "/" && (!m.play || !m.logo)) detail.push("/: no PLAY button or logo to measure");
     }
     await send("Emulation.clearDeviceMetricsOverride");
-    detail.length ? bad("phone", detail.join("; ")) : ok("phone", `no horizontal scroll at 390 px: ${got.join(", ")} (content/viewport px); the logo and PLAY 0.1 on screen`);
+    detail.length ? bad("phone", detail.join("; ")) : ok("phone", `no horizontal scroll at 390 px: ${got.join(", ")} (content/viewport px); the logo and GET IN on screen`);
   }
   note("/ (landing, play, carousel, phone)", L0[0], L0[1]);
 
-  // ---- theme: A and B, each readable -------------------------------------------------------
-  // every text role against the background actually behind it: 4.5:1, or 3:1
-  // for large text (24 px, or 18.66 px bold); the two themes really differ
+  // ---- contrast: every text role readable ------------------------------------------------
+  // each role against the background actually behind it: 4.5:1, or 3:1 for
+  // large text (24 px, or 18.66 px bold); a floor on the roles measured, so a
+  // page whose selectors all missed is no pass
   {
     const detail = [], got = [];
     const measure = `(() => {
@@ -524,20 +525,32 @@ try {
         const fg = rgb(cs.color).c, bg = bgOf(e), L1 = lum(fg), L2 = lum(bg);
         out.push({ sel, ratio: (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05), need: px >= 24 || (bold && px >= 18.66) ? 3 : 4.5, color: cs.color });
       }
-      return { theme: document.documentElement.dataset.theme || null, h2: (document.querySelector("h2, h1.name") ? getComputedStyle(document.querySelector("h2, h1.name")).color : null), out };
+      return { out };
     })()`;
-    const seen = {};
-    for (const [p, want] of [["/", "a"], ["/?theme=a", "a"], ["/?theme=b", "b"], [`${MISSING}?theme=b`, "b"], [MISSING, "a"]]) {
+    for (const [p, floor] of [["/", 12], [MISSING, 3]]) {
       await visit(p);
       const m = await evalJS(measure);
-      if (m.theme !== want) detail.push(`${p}: data-theme is ${m.theme} (want ${want})`);
+      if (m.out.length < floor) detail.push(`${p}: ${m.out.length} text roles measured (want at least ${floor})`);
       for (const r of m.out) if (!(r.ratio >= r.need)) detail.push(`${p} ${r.sel}: ${r.ratio.toFixed(2)}:1 (want ${r.need})`);
-      if (p === "/?theme=a" || p === "/?theme=b") seen[want] = m.h2;
       got.push(`${p} ${m.out.length} roles, lowest ${Math.min(...m.out.map((r) => r.ratio)).toFixed(1)}:1`);
     }
-    if (!seen.a || seen.a === seen.b) detail.push(`the headings are ${seen.a} in A and ${seen.b} in B: the themes do not differ`);
-    detail.length ? bad("theme", detail.slice(0, 6).join("; "))
-      : ok("theme", `A by default and with ?theme=a, B with ?theme=b (headings ${seen.a} and ${seen.b}); every text role readable: ${got.join("; ")}`);
+    detail.length ? bad("contrast", detail.slice(0, 6).join("; ")) : ok("contrast", `every text role readable: ${got.join("; ")}`);
+  }
+
+  // ---- version: no release number in the copy ---------------------------------------------
+  // the page names no version (GET IN, not PLAY 0.1), so nothing in the copy
+  // needs changing per release; a license id like GPL-3.0-or-later is not one
+  {
+    const detail = [];
+    const VER = /(?<![\w.:-])v?\d+\.\d+(?:\.\d+)?(?![\w-]|\.\d)/g;
+    for (const p of ["/", MISSING]) {
+      await visit(p);
+      const t = await evalJS(`[document.title, (document.querySelector('meta[name="description"]') || {}).content || "", ...[...document.querySelectorAll('meta[property^="og:"], meta[name^="twitter:"]')].map((m) => m.content), document.body.innerText].join("\\n")`);
+      const hits = [...new Set(t.match(VER) || [])];
+      if (hits.length) detail.push(`${p} names ${hits.join(", ")}`);
+      if (!t.length) detail.push(`${p}: no text read`);
+    }
+    detail.length ? bad("version", detail.join("; ")) : ok("version", "no version number in the title, the meta and link-card text, or the rendered copy of / and the 404");
   }
 
   // ---- 404 ---------------------------------------------------------------------------------
