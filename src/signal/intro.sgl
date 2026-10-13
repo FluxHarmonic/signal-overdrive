@@ -1,0 +1,179 @@
+;;; (signal intro) - Before the title: the start gate and the Flux Harmonic
+;;; card.
+;;;
+;;; The gate (the web only: a browser plays no sound before a gesture) is a
+;;; black frame and one line, TAP TO TUNE IN or PRESS ANY KEY TO TUNE IN. The
+;;; gesture opens the sound and starts the card, with the tuning-in sound
+;;; ((signal tunein)): a carrier sweeping up through static to a clean tone.
+;;; Natively there is no gate; the card starts at once.
+;;;
+;;; The card (card-len seconds, about 4; any start press or tap skips it):
+;;; the Flux Harmonic mark lies flat on the road (a (signal mode7 decal)),
+;;; seen from straight above. After card-hold seconds the camera tilts down
+;;; to the driving angle, lowering and pulling back, so the mark slides away
+;;; up the road toward the horizon, while the picture's interference (the
+;;; palette pass's tearing) locks clean at tone-lock seconds, as the sound
+;;; does. The camera ends exactly where the title's attract camera begins
+;;; (title-camera of a new title), so the card hands into the title with no
+;;; cut; the mark stays on the road until the attract camera has passed it.
+;;;
+;;; Pure, on the race's fixed tick: (intro-step i tuning race gesture? skip?)
+;;; is the next intro. Events, for the music: card-start (the gesture, or
+;;; the boot natively) and card-end (the hand-off or a skip). The title knob
+;;; at 0, the card knob at 0 or the shell's start parameter skip all of it.
+
+(define-library (signal intro)
+  (import (sigil core)
+          (sigil math)
+          (sigil struct)
+          (signal track)
+          (signal race)
+          (signal tuning)
+          (signal mode7 camera)
+          (signal mode7 decal)
+          (signal title))
+
+  (export intro intro? intro-new intro-none intro-skip intro-step intro-phase intro-events intro-active?
+          intro-camera intro-fade intro-glitch intro-mark-shown? intro-draw-mark! intro-set-mark!
+          intro-gate-line MARK-S)
+
+  (begin
+    ;; phase: gate, card, done. tick: ticks in this phase. after: ticks since
+    ;; the hand-off (the mark stays on the road until the attract camera has
+    ;; passed it).
+    (define-struct intro
+      (phase default: 'done)
+      (tick default: 0)
+      (after default: 0)
+      (events default: '()))
+
+    (define (knob tuning k) (tuning-ref tuning k))
+    (define (on? tuning) (and (>= (knob tuning 'title) 0.5) (>= (knob tuning 'card) 0.5)))
+
+    ;; web?: a gate first. With the title or the card off, done at once.
+    (define (intro-new tuning web?)
+      (cond ((not (on? tuning)) (intro-none))
+            (web? (intro phase: 'gate))
+            (else (intro phase: 'card))))
+    (define (intro-none) (intro phase: 'done after: 1000000))
+
+    ;; Done at once; a card that had started says it has ended.
+    (define (intro-skip i)
+      (intro phase: 'done tick: 0 after: 1000000
+             events: (if (and (eq? (intro-phase i) 'card) (> (intro-tick i) 0)) (list 'card-end) '())))
+
+    (define (intro-active? i) (not (eq? (intro-phase i) 'done)))
+
+    (define (ticks s) (max 1 (exact (round (* 60.0 s)))))
+    (define SKIP-AFTER 10)       ; ticks: the gate's own gesture never skips the card
+
+    (define (intro-step i tuning race gesture? skip?)
+      (let ((i (intro i events: '())))
+        (case (intro-phase i)
+          ((gate)
+           (cond ((not (on? tuning)) (intro-none))
+                 (gesture? (intro i phase: 'card tick: 0))
+                 (else i)))
+          ;; card-start on the card's first tick, however it began; card-end
+          ;; when it hands over or is skipped
+          ((card)
+           (let* ((t (+ (intro-tick i) 1))
+                  (ev (if (= (intro-tick i) 0) (list 'card-start) '())))
+             (if (or (not (on? tuning))
+                     (>= t (ticks (knob tuning 'card-len)))
+                     (and skip? (> t SKIP-AFTER)))
+                 (intro i phase: 'done tick: 0 after: 0 events: (append ev (list 'card-end)))
+                 (intro i tick: t events: ev))))
+          (else (intro i after: (+ (intro-after i) 1))))))
+
+    ;; --- the card's camera ------------------------------------------------------------
+
+    ;; The mark: on the centre line MARK-S texels down the track from the
+    ;; start, MARK-W x MARK-H texels, its top toward the road ahead.
+    (define MARK-S 700.0)
+    (define MARK-W 170.0)
+    (define MARK-H 84.0)
+    (define (mark-place tr)
+      (let ((p (track-point tr MARK-S 0.0)))
+        (list (car p) (cadr p) (atan (caddr p) (- (cadddr p))))))
+
+    (define TOP-PITCH 1.52)      ; nearly straight down
+    (define TOP-HEIGHT 190.0)    ; the mark about 340 px wide
+
+    (define (lerp a b k) (+ a (* k (- b a))))
+    (define PI 3.141592653589793)
+    (define (angle-lerp a b k)
+      (let ((d (- b a)))
+        (+ a (* k (- d (* 2.0 PI (floor (/ (+ d PI) (* 2.0 PI)))))))))
+
+    ;; The tilt's progress at card time t: held flat for card-hold seconds,
+    ;; then an ease in and out whose steepness is card-tilt.
+    (define (tilt tuning t)
+      (let* ((hold (knob tuning 'card-hold))
+             (len (knob tuning 'card-len))
+             (u (max 0.0 (min 1.0 (/ (- t hold) (max 0.001 (- len hold))))))
+             (a (knob tuning 'card-tilt))
+             (ua (expt u a)) (va (expt (- 1.0 u) a)))
+        (if (= (+ ua va) 0.0) 0.0 (/ ua (+ ua va)))))
+
+    ;; The card's camera at its time; the end pose is the title's first.
+    (define (card-camera tuning tr t w h)
+      (let* ((end (title-camera (title-new) tuning tr w h))
+             (m (mark-place tr))
+             (f (cam-focal end))
+             (h0 (caddr m))
+             (k (tilt tuning t))
+             ;; from straight above the mark: the screen's centre on it
+             (back (/ TOP-HEIGHT (tan TOP-PITCH)))
+             (x0 (- (car m) (* back (sin h0))))
+             (y0 (+ (cadr m) (* back (cos h0))))
+             (pitch (lerp TOP-PITCH (cam-pitch end) k))
+             (cy (lerp (* 0.5 h) (cam-cy end) k)))
+        (make-cam (lerp x0 (cam-x end) k) (lerp y0 (cam-y end) k)
+                  (lerp TOP-HEIGHT (cam-height end) k)
+                  (angle-lerp h0 (cam-heading end) k)
+                  pitch (cam-fov end)
+                  (- cy (* f (tan pitch))) w h)))
+
+    ;; The frame's camera: the card's while it runs (the gate's frame sits
+    ;; on the card's first pose, under black), else #f.
+    (define (intro-camera i tuning race w h)
+      (case (intro-phase i)
+        ((gate) (card-camera tuning (race-track race) 0.0 w h))
+        ((card) (card-camera tuning (race-track race) (/ (intro-tick i) 60.0) w h))
+        (else #f)))
+
+    ;; Black behind the gate; nothing after.
+    (define (intro-fade i) (if (eq? (intro-phase i) 'gate) 1.0 0.0))
+
+    ;; The picture's interference 0..1: strong as the card starts, locking
+    ;; clean at tone-lock seconds, as the sound does.
+    (define (intro-glitch i tuning)
+      (if (eq? (intro-phase i) 'card)
+          (let ((u (min 1.0 (/ (/ (intro-tick i) 60.0) (knob tuning 'tone-lock)))))
+            (* 0.9 (- 1.0 u) (- 1.0 u)))
+          0.0))
+
+    ;; The mark is on the road through the card, and after the hand-off until
+    ;; the attract camera (title-dist behind its point, flying at
+    ;; title-speed from the start) has passed over it.
+    (define (intro-mark-shown? i tuning)
+      (case (intro-phase i)
+        ((card gate) #t)
+        (else (< (intro-after i)
+                 (ticks (/ (+ MARK-S (knob tuning 'title-dist) (* 0.5 MARK-H))
+                           (max 1.0 (knob tuning 'title-speed))))))))
+
+    (define *mark* #f)
+    (define *mark-size* (list 380 188))
+    (define (intro-set-mark! tex w h) (set! *mark* tex) (set! *mark-size* (list w h)))
+
+    (define (intro-draw-mark! c race)
+      (when *mark*
+        (let ((m (mark-place (race-track race))))
+          (draw-decal! c *mark* (car m) (cadr m) (caddr m) MARK-W MARK-H
+                       (car *mark-size*) (cadr *mark-size*)))))
+
+    ;; The gate's line, by the pointer the page reported.
+    (define (intro-gate-line touch?)
+      (if touch? "TAP TO TUNE IN" "PRESS ANY KEY TO TUNE IN"))))

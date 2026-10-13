@@ -19,6 +19,8 @@
           (substratic input pad)
           (signal scene)
           (signal title)
+          (signal intro)
+          (signal mode7 decal)
           (signal track)
           (signal shell core))
 
@@ -28,7 +30,7 @@
     (define (track-files t)
       (let ((n (symbol->string t)))
         (list (string-append n "-atlas.png") (string-append n "-map.png") (string-append n "-avg.png"))))
-    (define NAMES (append (apply append (map track-files TRACKS)) '("sky.png" "machines.png" "lut-embers.png" "lut-crash.png" "title-logo.png")))
+    (define NAMES (append (apply append (map track-files TRACKS)) '("sky.png" "machines.png" "lut-embers.png" "lut-crash.png" "title-logo.png" "fh-mark.png")))
     (define *fetches* '())
     (define *started* #f)
     (define *last-ms* #f)
@@ -67,6 +69,8 @@
                             (texture "sky.png") (texture "machines.png")
                             (list (cons 'embers (texture "lut-embers.png")) (cons 'crash (texture "lut-crash.png"))))
                (title-set-logo! (texture "title-logo.png"))
+               (decal-init! VIEW-W VIEW-H)
+               (intro-set-mark! (texture "fh-mark.png") 380 188)
                (set! *started* #t)))))
 
     (define (web-main)

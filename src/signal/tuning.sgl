@@ -85,6 +85,21 @@
         (title-height title    6.0    200.0  1.0   96.0    "TITLE CAMERA HEIGHT")
         (title-dist   title    20.0   200.0  2.0   150.0   "TITLE CAMERA DIST")))
 
+    ;; The card before the title ((signal intro)): 0 skips it (and the web's
+    ;; start gate); its length and the flat hold before the tilt, in
+    ;; seconds; the tilt's ease (1 linear, higher steeper in the middle);
+    ;; and the tuning-in sound's sweep ((signal tunein)): from tone-lo to
+    ;; tone-hi Hz, locking at tone-lock seconds, when the picture's
+    ;; interference locks clean too.
+    (define CARD-KNOBS
+      '((card         card     0.0    1.0    1.0   1.0     "CARD")
+        (card-len     card     1.0    10.0   0.1   4.0     "CARD LENGTH")
+        (card-hold    card     0.0    3.0    0.05  0.5     "CARD HOLD (FLAT)")
+        (card-tilt    card     1.0    5.0    0.1   2.0     "CARD TILT EASE")
+        (tone-lo      card     60.0   600.0  10.0  180.0   "TONE FROM HZ")
+        (tone-hi      card     200.0  2000.0 10.0  880.0   "TONE TO HZ")
+        (tone-lock    card     0.5    6.0    0.1   2.2     "TONE LOCKS AT")))
+
     (define HANDLING-KNOBS
       '((accel        handling 50.0   1200.0 10.0  "ACCEL")
         (top          handling 200.0  1200.0 10.0  "TOP SPEED")
@@ -121,7 +136,8 @@
               RACE-KNOBS
               CAMERA-KNOBS
               FX-KNOBS
-              TITLE-KNOBS))
+              TITLE-KNOBS
+              CARD-KNOBS))
 
     (define (knob-key k) (car k))
     (define (knob-group k) (cadr k))

@@ -629,7 +629,7 @@ function build(spec, outDir, still) {
 //   centred on the game's ground), title.png and title.json (the title
 //   animation), and FILES.txt listing every file with its size and hash.
 
-function readRGBA(file) {
+export function readRGBA(file) {
   // PNGs this script and lib.mjs wrote: 8-bit RGBA, non-interlaced; and the
   // game's captures (8-bit RGB or RGBA).
   const buf = fs.readFileSync(file);

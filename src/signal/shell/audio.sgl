@@ -15,6 +15,9 @@
 ;;;                                 player's events this frame ('boost, 'pad,
 ;;;                                 (wall . impact), 'ice, 'corrupt)
 ;;;   (audio-readout)               for F3: underruns, depth, cue mode and lag
+;;;   (audio-tune! lo hi lock secs) the tuning-in sound's sweep, before the start
+;;;   (audio-tune-in!)              play it ((signal tunein), as a cue): the
+;;;                                 card before the title
 ;;;
 ;;; Two paths, after David heard hitching in pass 3:
 ;;;   - the engine and the wind are a continuous stream, rendered here on
@@ -31,10 +34,11 @@
 
 (define-library (signal shell audio)
   (import (sigil audio sink)
-          (signal sound))
+          (signal sound)
+          (signal tunein))
 
   (export audio-mute! audio-depth! audio-cues! audio-start! audio-frame! audio-started? audio-readout
-          audio-context audio-pause!)
+          audio-context audio-pause! audio-tune! audio-tune-in!)
 
   (begin
     (define RATE 22050)
@@ -57,6 +61,10 @@
     (define (audio-context) *ctx*)
     (define (depth-frames) (exact (floor (/ (* *depth-ms* RATE) 1000))))
 
+    ;; the tuning-in sound's lo hi lock secs, set before the start
+    (define *tune* (list 180.0 880.0 2.2 4.0))
+    (define (audio-tune! lo hi lock secs) (set! *tune* (list lo hi lock secs)))
+
     (define (load-cues!)
       (when (and *cues-on* *ctx* (null? *cues*))
         (let ((rate (or (guard (e (#t #f)) (audio-context-sample-rate *ctx*)) 44100)))
@@ -65,7 +73,17 @@
                   (if (null? ks)
                       acc
                       (let ((c (guard (e (#t #f)) (load-audio-cue (render-cue (caar ks) rate) channels: 2))))
-                        (loop (cdr ks) (if c (cons (cons (caar ks) c) acc) acc)))))))))
+                        (loop (cdr ks) (if c (cons (cons (caar ks) c) acc) acc))))))
+          (let ((c (guard (e (#t #f)) (load-audio-cue (apply render-tune-in rate *tune*) channels: 2))))
+            (when c (set! *cues* (cons (cons 'tune-in c) *cues*)))))))
+
+    ;; The card's sound: the cue when there is one (no stream fallback: it
+    ;; belongs to the card, which goes on without it).
+    (define (audio-tune-in!)
+      (let ((c (assq 'tune-in *cues*)))
+        (when c
+          (guard (e (#t #f)) (play-audio-cue (cdr c) volume: 0.8 pan: 0.0))
+          (set! *cue-plays* (+ *cue-plays* 1)))))
 
     (define (audio-start!)
       (unless (or *muted* *paused*)

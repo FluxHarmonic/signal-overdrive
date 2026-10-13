@@ -31,6 +31,8 @@
           (signal race)
           (signal scene)
           (signal title)
+          (signal intro)
+          (signal mode7 decal)
           (signal track)
           (signal music reference)
           (signal shell core))
@@ -88,6 +90,8 @@
                      (texture "sky.png") (texture "machines.png")
                      (list (cons 'embers (texture "lut-embers.png")) (cons 'crash (texture "lut-crash.png"))))
         (title-set-logo! (texture "title-logo.png"))
+        (decal-init! VIEW-W VIEW-H)
+        (intro-set-mark! (texture "fh-mark.png") 380 188)
         ;; Exercise deferred shader/draw setup before publishing music.
         ;; This zero-dt frame cannot advance the simulation or open audio.
         (core-frame! 0.0 (frame-width) (frame-height) #t)

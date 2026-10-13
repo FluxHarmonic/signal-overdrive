@@ -1,0 +1,107 @@
+;;; (signal mode7 decal) - A picture lying flat on the Mode 7 ground.
+;;;
+;;; One full-screen pass: per pixel it unprojects onto the ground exactly as
+;;; (signal mode7 render)'s ground shader does (the same camera, the same
+;;; arithmetic, the horizon bend left out), and where the ground point falls
+;;; inside the decal's rectangle it draws the picture's texel there, by
+;;; texelFetch (point sampling). A texel with alpha under a half is not
+;;; drawn, so the ground shows through. Draw it after the ground and before
+;;; anything standing on it, inside the same 3D pass, so it goes through the
+;;; palette pass like the ground does.
+;;;
+;;; The rectangle is centred on (x, y) in world texels, w by h texels, its
+;;; top edge toward `heading` (the picture reads upright to a camera looking
+;;; along that heading).
+;;;
+;;;   (decal-init! w h)                                once, after gfx-setup
+;;;   (draw-decal! cam tex x y heading w h tw th)      a (signal mode7 camera) cam;
+;;;                                                    tw th the picture's pixels
+;;;
+;;; Like (signal mode7 render) and (signal mode7 camera), it knows nothing
+;;; of racing.
+
+(define-library (signal mode7 decal)
+  (import (sigil core)
+          (sigil graphics)
+          (signal mode7 camera))
+
+  (export decal-init! draw-decal!)
+
+  (begin
+    (define DECAL-VERTEX
+      "uniform vec4 view;
+in vec2 position;
+out vec2 v_screen;
+void main() {
+  gl_Position = vec4(position, 0.0, 1.0);
+  v_screen = vec2((position.x + 1.0) * 0.5 * view.x, (1.0 - position.y) * 0.5 * view.y);
+}
+")
+
+    ;; cam: x y height heading. proj: focal cy pitch. place: the decal's
+    ;; centre (x, y) and its heading (z); size: its width and height in
+    ;; texels (x, y) and the picture's in pixels (z, w).
+    (define DECAL-FRAGMENT
+      "uniform vec4 cam;
+uniform vec4 proj;
+uniform vec4 view;
+uniform vec4 place;
+uniform vec4 size;
+uniform sampler2D pic;
+in vec2 v_screen;
+out vec4 frag_color;
+void main() {
+  float f = proj.x;
+  float sx = v_screen.x - 0.5 * view.x;
+  float sy = proj.y - v_screen.y;
+  float cp = cos(proj.z);
+  float sp = sin(proj.z);
+  float rz = sy * cp - f * sp;
+  if (rz >= 0.0) discard;
+  float ra = f * cp + sy * sp;
+  float t = cam.z / -rz;
+  vec2 fw = vec2(sin(cam.w), -cos(cam.w));
+  vec2 rt = vec2(cos(cam.w), sin(cam.w));
+  vec2 g = cam.xy + t * (ra * fw + sx * rt);
+  vec2 dfw = vec2(sin(place.z), -cos(place.z));
+  vec2 drt = vec2(cos(place.z), sin(place.z));
+  vec2 d = g - place.xy;
+  float u = dot(d, drt) / size.x + 0.5;
+  float v = -dot(d, dfw) / size.y + 0.5;
+  if (u < 0.0 || u >= 1.0 || v < 0.0 || v >= 1.0) discard;
+  vec4 c = texelFetch(pic, ivec2(floor(vec2(u * size.z, v * size.w))), 0);
+  if (c.a < 0.5) discard;
+  frag_color = vec4(c.rgb, 1.0);
+}
+")
+
+    (define *pipe* #f)
+    (define *tri* #f)
+    (define (f32 v) (exact->inexact v))
+    (define (v4 a b c d) (list (f32 a) (f32 b) (f32 c) (f32 d)))
+
+    (define (bytes-of floats)
+      (let ((bv (make-bytevector (* 4 (length floats)) 0)))
+        (let loop ((fs floats) (k 0))
+          (unless (null? fs)
+            (bytevector-ieee-single-set! bv k (f32 (car fs)) 'little)
+            (loop (cdr fs) (+ k 4))))
+        bv))
+
+    (define (decal-init! w h)
+      (let ((pl (make-vertex-layout (list (list 'position 'float2)))))
+        (set! *tri* (make-mesh pl (bytes-of (list -1.0 -1.0 3.0 -1.0 -1.0 3.0))))
+        (set! *pipe* (make-pipeline pl
+                                    (string-append (glsl-header) DECAL-VERTEX)
+                                    (string-append (glsl-header) DECAL-FRAGMENT)
+                                    (list 'depth-test #f 'depth-write #f 'cull 'none))))
+      (set-pipeline-uniform! *pipe* 'view (v4 w h 0 0)))
+
+    ;; tex's own size gives the picture's pixels; w h its size on the ground.
+    (define (draw-decal! c tex x y heading w h tw th)
+      (when *pipe*
+        (set-pipeline-uniform! *pipe* 'cam (v4 (cam-x c) (cam-y c) (cam-height c) (cam-heading c)))
+        (set-pipeline-uniform! *pipe* 'proj (v4 (cam-focal c) (cam-cy c) (cam-pitch c) 0))
+        (set-pipeline-uniform! *pipe* 'place (v4 x y heading 0))
+        (set-pipeline-uniform! *pipe* 'size (v4 w h tw th))
+        (draw-mesh *pipe* *tri* tex)))))

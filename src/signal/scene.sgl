@@ -687,9 +687,10 @@
     ;; info: (best . ticks) (flash . frames) (start-line . text)
     ;; (restart-line . text) (overlay . selected-row-or-#f); and, all
     ;; optional, the title's: camera (one to use instead of the race's),
-    ;; fade (0..1 toward black), draw-3d (a thunk drawn over the machines,
-    ;; before the palette pass) and draw-2d (called with centred! after the
-    ;; HUD).
+    ;; fade (0..1 toward black), draw-ground (called with the camera after
+    ;; the ground, before the machines), draw-3d (a thunk drawn over the
+    ;; machines, before the palette pass) and draw-2d (called with centred!
+    ;; after the HUD).
     (define (info-get info key) (let ((e (assq key info))) (and e (cdr e))))
     ;; the heading of the camera in use (scene-frame!'s own cam-heading
     ;; argument is the race camera's, and hides the accessor there)
@@ -715,6 +716,7 @@
           (let passes ((k (exact (round (tuning-ref tuning 'fx-passes)))))
             (mode7-draw-ground! c)
             (when (> k 1) (passes (- k 1))))
+          (let ((d (info-get info 'draw-ground))) (when d (d c)))
           (when (cdr (assq 'sprites info))
             (draw-machines! c tuning r (camera-heading c) (cdr (assq 'spark info)) (cdr (assq 'ghost info))))
           (let ((d (info-get info 'draw-3d))) (when d (d))))

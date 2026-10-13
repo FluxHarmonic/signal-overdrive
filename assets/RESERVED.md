@@ -11,7 +11,10 @@ here, which are reserved and not licensed for reuse:
   `assets/src/logo/corrupt.spec`, `assets/src/logo/marks/corrupt-*.txt`)
   with everything rendered from them (`docs/logo/corrupt/`,
   `docs/logo/site/`)
-- The Flux Harmonic mark, wherever it appears
+- The Flux Harmonic mark, wherever it appears: the card before the title
+  (`assets/signal/fh-mark.png`, made by `scripts/art/gen-mark.mjs` from
+  `refs/mark/flux-harmonic.png`, which is kept outside `assets/` and does
+  not ship)
 
 The tracks, machines, skyline, palette, HUD, sound effects and music are
 not reserved.

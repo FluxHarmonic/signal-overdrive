@@ -1,0 +1,146 @@
+;;; Before the title: the start gate holds until a gesture (the sound needs
+;;; one), the card starts its sound on its first tick, a start skips it
+;;; (but not the gesture's own), it hands into the title's first camera
+;;; with no cut and no black frame, its interference locks with the sound,
+;;; the mark leaves the road only once the attract camera has passed it,
+;;; and its events pair. And the tuning-in sound: a glide with no steps
+;;; that ends on its tone, with the static gone after the lock.
+
+(import (sigil test)
+        (sigil math)
+        (signal race)
+        (signal track)
+        (signal tuning)
+        (signal mode7 camera)
+        (signal title)
+        (signal intro)
+        (signal tunein))
+
+(define TUNING (tuning-defaults))
+(define RACE (race-new TUNING))
+(define (near? a b eps) (< (abs (- a b)) eps))
+(define (ticks s) (exact (round (* 60.0 s))))
+
+;; n steps from i; gesture-at, skip-at: the step (1-based) that gestures or
+;; presses start (#f: never). Returns (intro . events, in order).
+(define (run i n gesture-at skip-at . tuning)
+  (let ((tn (if (pair? tuning) (car tuning) TUNING)))
+    (let loop ((k 1) (i i) (evs '()))
+      (if (> k n)
+          (cons i (reverse evs))
+          (let ((i (intro-step i tn RACE (and gesture-at (>= k gesture-at)) (and skip-at (= k skip-at)))))
+            (loop (+ k 1) i (append (reverse (intro-events i)) evs)))))))
+
+(test-group "the gate"
+  (test "on the web it holds, black and silent, until a gesture"
+    (let ((res (run (intro-new TUNING #t) 300 #f #f)))
+      (assert-equal 'gate (intro-phase (car res)))
+      (assert-equal '() (cdr res))
+      (assert-true (near? (intro-fade (car res)) 1.0 1e-9))
+      (assert-true (cam? (intro-camera (car res) TUNING RACE 480 270)))))
+  (test "the gesture starts the card, which starts its sound on its first tick"
+    (let ((res (run (intro-new TUNING #t) 3 2 #f)))
+      (assert-equal 'card (intro-phase (car res)))
+      (assert-equal '(card-start) (cdr res))))
+  (test "natively there is no gate"
+    (let ((res (run (intro-new TUNING #f) 1 #f #f)))
+      (assert-equal 'card (intro-phase (car res)))
+      (assert-equal '(card-start) (cdr res)))))
+
+(test-group "the card"
+  (test "it runs card-len seconds, then ends"
+    (let* ((n (ticks (tuning-ref TUNING 'card-len)))
+           (a (run (intro-new TUNING #f) (- n 1) #f #f))
+           (b (run (car a) 1 #f #f)))
+      (assert-equal 'card (intro-phase (car a)))
+      (assert-equal 'done (intro-phase (car b)))
+      (assert-equal '(card-end) (cdr b))))
+  (test "a start skips it, but not in its first ticks (the gesture's own press)"
+    (assert-equal 'card (intro-phase (car (run (intro-new TUNING #f) 5 #f 5))))
+    (let ((res (run (intro-new TUNING #f) 30 #f 30)))
+      (assert-equal 'done (intro-phase (car res)))
+      (assert-equal '(card-start card-end) (cdr res))))
+  (test "every frame of it is lit, and its interference locks clean with the sound"
+    (let ((lock (ticks (tuning-ref TUNING 'tone-lock))))
+      (let loop ((k 1) (i (intro-new TUNING #f)) (last 2.0))
+        (when (eq? (intro-phase i) 'card)
+          (let ((g (intro-glitch i TUNING)))
+            (assert-true (near? (intro-fade i) 0.0 1e-9))
+            (assert-true (<= g last))
+            (when (= k 2) (assert-true (> g 0.8)))
+            (when (>= k (+ lock 1)) (assert-true (near? g 0.0 1e-9)))
+            (loop (+ k 1) (intro-step i TUNING RACE #f #f) g))))))
+  (test "it hands into the title's first camera with no cut"
+    (let* ((n (ticks (tuning-ref TUNING 'card-len)))
+           (last (car (run (intro-new TUNING #f) (- n 1) #f #f)))
+           (c1 (intro-camera last TUNING RACE 480 270))
+           ;; the next tick: the card is done and the title takes its first step
+           (t (title-step (title-new) TUNING RACE #f))
+           (c2 (title-camera t TUNING (race-track RACE) 480 270))
+           (dh (- (cam-heading c1) (cam-heading c2))))
+      (assert-true (< (sqrt (+ (expt (- (cam-x c1) (cam-x c2)) 2) (expt (- (cam-y c1) (cam-y c2)) 2))) 8.0))
+      (assert-true (near? (cam-height c1) (cam-height c2) 0.5))
+      (assert-true (near? (cam-pitch c1) (cam-pitch c2) 0.01))
+      (assert-true (near? (cam-horizon c1) (cam-horizon c2) 1.0))
+      (assert-true (< (abs (atan (sin dh) (cos dh))) 0.05))
+      (assert-true (near? (title-fade t TUNING) 0.0 1e-9))))
+  (test "the mark leaves the road only once the attract camera has passed it"
+    (let* ((tr (race-track RACE))
+           (m (track-point tr MARK-S 0.0))
+           (ahead (lambda (c) (+ (* (- (car m) (cam-x c)) (sin (cam-heading c)))
+                                 (* (- (cadr m) (cam-y c)) (- (cos (cam-heading c))))))))
+      (let loop ((k 0) (i (intro-step (intro-new TUNING #f) TUNING RACE #f #t))
+                 (t (title-new)) (was #t))
+        (let* ((i (if (eq? (intro-phase i) 'done) (intro-step i TUNING RACE #f #f) (intro-step i TUNING RACE #f #t)))
+               (t (if (eq? (intro-phase i) 'done) (title-step t TUNING RACE #f) t))
+               (shown (intro-mark-shown? i TUNING)))
+          (cond ((and was (not shown))
+                 ;; the camera is past it the moment it goes
+                 (assert-true (< (ahead (title-camera t TUNING tr 480 270)) 0.0)))
+                ((< k 2000) (loop (+ k 1) i t shown))
+                (else (assert-true #f))))))))
+
+(test-group "events and skips"
+  (test "the title or the card off: nothing at all"
+    (assert-false (intro-active? (intro-new (tuning-set TUNING 'title 0.0) #t)))
+    (assert-false (intro-active? (intro-new (tuning-set TUNING 'card 0.0) #f))))
+  (test "a skip says card-end only for a card that had started"
+    (assert-equal '() (intro-events (intro-skip (intro-new TUNING #t))))
+    (assert-equal '() (intro-events (intro-skip (intro-new TUNING #f))))
+    (assert-equal '(card-end) (intro-events (intro-skip (car (run (intro-new TUNING #f) 3 #f #f)))))))
+
+(test-group "the tuning-in sound"
+  (test "it glides up from lo to hi with no steps, and holds hi after the lock"
+    (let loop ((k 0) (last 0.0))
+      (when (<= k 100)
+        (let ((f (tune-in-carrier-hz (* k 0.022) 180.0 880.0 2.2)))
+          (assert-true (>= f last))
+          (when (> k 0) (assert-true (< (- f last) 60.0)))
+          (loop (+ k 1) f))))
+    (assert-true (near? (tune-in-carrier-hz 0.0 180.0 880.0 2.2) 180.0 1e-6))
+    (assert-true (near? (tune-in-carrier-hz 3.0 180.0 880.0 2.2) 880.0 1e-6)))
+  (test "its PCM: the right length, its tone after the lock, and the static gone"
+    (let* ((rate 44100) (buf (render-tune-in rate 180.0 880.0 2.2 4.0))
+           (n (quotient (bytevector-length buf) 8))
+           (x (lambda (i) (bytevector-ieee-single-ref buf (* 8 i) 'little)))
+           (crossings (lambda (a b) (let loop ((i (+ a 1)) (c 0))
+                                      (if (>= i b) c
+                                          (loop (+ i 1) (if (not (eq? (< (x i) 0.0) (< (x (- i 1)) 0.0))) (+ c 1) c))))))
+           ;; roughness: the mean step between samples, over a window, per unit level
+           (rough (lambda (a b) (let loop ((i (+ a 1)) (d 0.0) (l 0.0))
+                                  (if (>= i b) (/ d (max 1e-9 l))
+                                      (loop (+ i 1) (+ d (abs (- (x i) (x (- i 1))))) (+ l (abs (x i)))))))))
+      (assert-equal (* 4 rate) n)
+      ;; after the lock: two crossings a cycle at 880 Hz, within 5 percent
+      (let ((c (crossings (* 25 (quotient rate 10)) (* 30 (quotient rate 10)))))
+        (assert-true (near? (/ c 2.0 0.5) 880.0 44.0)))
+      ;; the static: the first fifth of a second is far rougher, for its
+      ;; level, than the clean tone after the lock (at 44.1 kHz a pure 880 Hz
+      ;; tone steps little between samples; noise does not). Measured 0.77
+      ;; against 0.12.
+      (assert-true (> (rough 0 (quotient rate 5)) (* 3.0 (rough (* 25 (quotient rate 10)) (* 27 (quotient rate 10))))))
+      ;; nothing leaves -1..1
+      (let loop ((i 0))
+        (when (< i n)
+          (assert-true (<= (abs (x i)) 1.0))
+          (loop (+ i 1)))))))

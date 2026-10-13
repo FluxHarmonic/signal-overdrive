@@ -1,0 +1,5 @@
+source: ~/NotesOriginal/Shows/FluxHarmonic/Media/Flux Harmonic.png (David's, 2021-12-16; white brush lettering, two-tone orange ring, transparent), copied from harkfell refs/mark/flux-harmonic.png, itself from crash-the-stack assets/refs/card/flux-harmonic.png
+sha256: 79fcb968b84a7c73fa8881503ef5ee5c9986ae517c00ce3cbd43b703eabe29db
+size: 3040x1502
+reserved: the Flux Harmonic mark (assets/RESERVED.md); the image scripts/art/gen-mark.mjs makes from it is reserved too
+use: scripts/art/gen-mark.mjs -> assets/signal/fh-mark.png, the mark lying on the road in the card before the title

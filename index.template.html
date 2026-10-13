@@ -140,6 +140,8 @@
       app = e.detail; if (pending) app.dispatch(pending[0], pending[1]);
       focusState();
       app.dispatch("param", "touch-scheme=" + scheme);
+      // the start gate's line: TAP TO TUNE IN on a touch screen
+      app.dispatch("param", "pointer=" + (matchMedia("(pointer: coarse)").matches ? "coarse" : "fine"));
       // the audio bridge's stream mode, as the bridge itself decides it
       // (sigil-wasm-audio.js): an AudioWorklet and a SharedArrayBuffer
       // (cross-origin isolation) give worklet-sab; a worklet alone,

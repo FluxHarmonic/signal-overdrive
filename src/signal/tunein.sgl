@@ -1,0 +1,70 @@
+;;; (signal tunein) - The sound of tuning in: a radio locking onto a signal.
+;;;
+;;; Played once, as the card before the title starts (the start gate's
+;;; gesture on the web, the boot natively). Pure: (render-tune-in rate lo hi
+;;; lock secs) is the cue's stereo float32 PCM, so the tests can listen to
+;;; it without a sound device and the shell loads it as a cue.
+;;;
+;;; What it is, per sample:
+;;;   static  noise, gated into crackle, loud at the start and gone by the
+;;;           lock: the receiver searching
+;;;   carrier a sine (with a little of its octave) gliding up from lo to hi
+;;;           Hz over the first lock seconds, easing in as it arrives, with
+;;;           a wobble that dies away: the dial turning
+;;;   station a steady sine at hi Hz, rising as the carrier nears it, so the
+;;;           two beat against each other and the beat slows to nothing at
+;;;           the lock (zero beat, the way a real receiver finds a station)
+;;; then the clean tone holds and fades over the last 0.8 s, and a soft clip
+;;; keeps it inside -1..1. No steps in pitch and no chirps: it must never
+;;; sound like a modem dialling.
+
+(define-library (signal tunein)
+  (import (sigil core)
+          (sigil math))
+
+  (export render-tune-in tune-in-carrier-hz)
+
+  (begin
+    (define PI 3.141592653589793)
+
+    ;; The carrier's pitch at t seconds: an ease-out glide from lo to hi over
+    ;; lock seconds, then hi.
+    (define (tune-in-carrier-hz t lo hi lock)
+      (if (>= t lock)
+          hi
+          (let* ((u (/ t lock))
+                 (e (- 1.0 (* (- 1.0 u) (- 1.0 u) (- 1.0 u)))))
+            (* lo (expt (/ hi lo) e)))))
+
+    (define (render-tune-in rate lo hi lock secs)
+      (let* ((n (exact (floor (* secs rate))))
+             (buf (make-bytevector (* 8 n) 0))
+             (dt (/ 1.0 rate))
+             (fade-in (* 0.03 rate))
+             (fade-out (* 0.8 rate)))
+        (let loop ((i 0) (pa 0.0) (pb 0.0) (seed 12345) (lp 0.0) (gate 0.0))
+          (if (< i n)
+              (let* ((t (* i dt))
+                     (u (min 1.0 (/ t lock)))
+                     ;; the dial's wobble, fading out by the lock
+                     (wob (* (- 1.0 u) 0.012 (sin (* 2.0 PI 5.3 t))))
+                     (f (* (tune-in-carrier-hz t lo hi lock) (+ 1.0 wob)))
+                     (pa (let ((p (+ pa (* f dt)))) (- p (floor p))))
+                     (pb (let ((p (+ pb (* hi dt)))) (- p (floor p))))
+                     (seed (modulo (+ (* seed 1103515245) 12345) 2147483648))
+                     (nz (- (* 2.0 (/ seed 2147483648.0)) 1.0))
+                     (lp (+ lp (* 0.35 (- nz lp))))
+                     ;; crackle: the gate flips at random about 60 times a second
+                     (gate (if (< (/ (modulo seed 1000) 1000.0) (/ 60.0 rate)) (- 1.0 gate) gate))
+                     (static (* (- 1.0 u) (- 1.0 u) (+ (* 0.55 lp) (* 0.25 gate nz))))
+                     (carrier (* (+ 0.2 (* 0.25 u))
+                                 (+ (sin (* 2.0 PI pa)) (* 0.25 (sin (* 4.0 PI pa))))))
+                     (station (* 0.22 u u (sin (* 2.0 PI pb))))
+                     (env (* (min 1.0 (/ i fade-in))
+                             (min 1.0 (/ (- n i) fade-out))))
+                     (mix (* env (+ static carrier station)))
+                     (out (/ mix (+ 1.0 (abs mix)))))
+                (bytevector-ieee-single-set! buf (* 8 i) out 'little)
+                (bytevector-ieee-single-set! buf (+ (* 8 i) 4) out 'little)
+                (loop (+ i 1) pa pb seed lp gate))
+              buf))))))
