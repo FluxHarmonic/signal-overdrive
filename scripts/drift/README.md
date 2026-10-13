@@ -13,6 +13,10 @@ It has a one-minute limit and writes RESULT plus binary-hash metadata.
 Set `CONDUCTOR_GDB=1` to run the same muted check under a cached GDB and
 preserve a backtrace in `game.log`. A crash still fails the check.
 
+`node scripts/drift/benchmark.mjs RUNDIR PLAN FRAMES` measures offline
+rendering throughput with the same inserts and a two-minute limit. It
+includes startup and PCM writes; it is a diagnostic, not live frame cost.
+
 The analyzer correlates 3 kHz amplitude envelopes, with 1.5-second windows
 at each beat across the full race. It dates each reference window from the
 simulation's clock trace, requires at least 95% matching coverage and
