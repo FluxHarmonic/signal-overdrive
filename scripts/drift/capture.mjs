@@ -91,6 +91,8 @@ try {
   }
   fs.writeFileSync(path.join(RUN, "meta.json"), JSON.stringify({ arm: ARM, binary: BIN, display: env.DISPLAY,
     game_pid: verifiedPID, null_sink: nullSink[0], cpu, headless_race: HEADLESS, gc_profile: GC_PROFILE,
+    gc_young_threshold_kb: process.env.SIGIL_YOUNG_THRESHOLD || "default",
+    gc_young_threshold_max_kb: process.env.SIGIL_YOUNG_THRESHOLD_MAX || "default",
     software_rendering_threads: HEADLESS ? 0 : GL_THREADS,
     load_start: os.loadavg(), commit: execFileSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8" }).trim() }, null, 2));
   let complete = false;
