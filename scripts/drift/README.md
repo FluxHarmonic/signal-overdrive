@@ -109,6 +109,13 @@ These checks use temporary loopback servers only. Public hosting still
 requires the task's HARD STOP approval. A busy-host FPS result alone
 does not establish the effects' P32 budget or the audio drift gate.
 
+For the separate full web race/music check, use `web-race-steps.json`
+with the same effects harness, `--gpu`, and query
+`start&autopilot&musiclog&track=loop`. It requires isolation, fresh
+probes with engine and music on, the intended results landing, and a
+finished race. It uses muted headless Chrome on worker-null and a
+temporary loopback server; no PCM correlation or drift verdict runs.
+
 After that candidate passes, run one arm at a time from the repository root:
 
 ```sh

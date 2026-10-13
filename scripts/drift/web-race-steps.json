@@ -1,0 +1,12 @@
+[
+  {"assert": "self.crossOriginIsolated === true", "label": "COOP/COEP isolation"},
+  {"eval": "SigilWebApp.dispatch('pointerdown', '0,0,0')"},
+  {"wait": 2000},
+  {"describe": true, "expect": " audio on .* music on .* paused 0"},
+  {"waitLine": "conductor intended .*mark results", "ms": 400000, "required": true, "history": true},
+  {"waitLine": "phase finished", "ms": 30000, "required": true, "history": true},
+  {"wait": 4000},
+  {"describe": true, "expect": " audio on .* music on .* paused 0"},
+  {"lines": "conductor intended", "last": 8},
+  {"shot": "race-results.png"}
+]

@@ -21,6 +21,10 @@
 //       over 20 ms (a missed refresh at 60 Hz) and over 33 ms (a hitch)
 //   {"eval": "js expression"}            printed
 //   {"describe": true}                   the game's probe line
+//     "expect": "regex" requires a fresh probe matching the expression
+//   {"assert": "js expression"}         require a truthy browser result
+// A waitLine with "required": true fails if missing; "history": true
+// also searches lines already received. These checks never judge drift.
 //   {"lines": "regex", "last": 3}        the last console lines matching
 //
 // Exit 0 when every step ran and the console showed no error; 1 on a
@@ -74,7 +78,8 @@ const gl = GPU
   ? ["--use-angle=vulkan", "--enable-features=Vulkan", "--ignore-gpu-blocklist", "--disable-gpu-sandbox"]
   : ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"];
 const chrome = spawn("google-chrome", [
-  "--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--mute-audio", ...gl,
+  "--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--mute-audio",
+  "--autoplay-policy=no-user-gesture-required", ...gl,
   "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
   `--remote-debugging-port=${CDP}`, `--user-data-dir=${udd}`, "--window-size=1000,600", "about:blank",
 ], { stdio: "ignore", detached: true, env: { ...process.env, PULSE_SINK: "worker-null" } });
@@ -137,9 +142,10 @@ for (const step of STEPS) {
   } else if (step.wait) {
     await sleep(step.wait);
   } else if (step.waitLine) {
-    const from = lines.length;
+    const from = step.history ? 0 : lines.length;
     const l = await waitLine(new RegExp(step.waitLine), step.ms || 30000, from);
     console.log(l ? `line: ${l}` : `NO LINE /${step.waitLine}/ in ${step.ms || 30000} ms`);
+    if (!l && step.required) shutdown(1);
   } else if (step.shot) {
     const d = await evalJS(`new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => { const c = document.getElementById("stage"); r([c.width, c.height, c.toDataURL("image/png")]); })))`);
     fs.writeFileSync(path.join(OUT, step.shot), Buffer.from(d[2].split(",")[1], "base64"));
@@ -158,13 +164,22 @@ for (const step of STEPS) {
     console.log(`measure ${step.label || ""}: frames ${iv.length} fps ${r(1000 / mean)} mean ${r(mean)} p50 ${r(pct(s, 0.5))} p99 ${r(pct(s, 0.99))} max ${r(s[s.length - 1])} over20 ${iv.filter((v) => v > 20).length} over33 ${iv.filter((v) => v > 33).length}`);
   } else if (step.eval) {
     console.log(`eval: ${JSON.stringify(await evalJS(step.eval))}`);
+  } else if (step.assert) {
+    const ok = Boolean(await evalJS(step.assert));
+    console.log(`assert ${step.label || step.assert}: ${ok ? "PASS" : "FAIL"}`);
+    if (!ok) shutdown(1);
   } else if (step.lines) {
     const re = new RegExp(step.lines);
     lines.filter((l) => re.test(l)).slice(-(step.last || 3)).forEach((l) => console.log(`line: ${l}`));
   } else if (step.describe) {
+    const from = lines.length;
     await evalJS(`(globalThis.SigilWebApp).dispatch("probe", "")`);
-    await sleep(100);
-    console.log(`describe: ${lines.filter((l) => /probe heading/.test(l)).slice(-1)[0] || "(none)"}`);
+    const line = await waitLine(/probe heading/, 5000, from);
+    console.log(`describe: ${line || "(none)"}`);
+    if (step.expect && (!line || !new RegExp(step.expect).test(line))) {
+      console.log(`required probe /${step.expect}/: FAIL`);
+      shutdown(1);
+    }
   }
 }
 const err = lines.find((l) => /error|unbound|exception|trap|FATAL/i.test(l));
