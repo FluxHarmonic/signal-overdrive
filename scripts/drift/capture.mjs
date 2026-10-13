@@ -11,6 +11,8 @@ const ROOT = path.resolve(process.env.CONDUCTOR_ROOT || process.cwd());
 const RUN = path.resolve(process.argv[2]);
 const ARM = process.argv[3] || "normal";
 if (!["normal", "depth", "immediate", "skew"].includes(ARM)) throw new Error("invalid capture arm");
+const GL_THREADS = process.env.CONDUCTOR_GL_THREADS || "1";
+if (!["1", "2"].includes(GL_THREADS)) throw new Error("at most two software-rendering threads");
 const BIN = path.resolve(process.env.CONDUCTOR_BINARY || path.join(ROOT, "build/release/bin/signal-overdrive"));
 if (!fs.existsSync(BIN)) throw new Error("no release binary");
 fs.mkdirSync(RUN, { recursive: true });
@@ -31,7 +33,7 @@ try {
   const env = { ...process.env, DISPLAY: privateX.display, SIGIL_APP_PLATFORM: "x11",
     SIGIL_AUDIO_BACKEND: "pulseaudio", SIGIL_AUDIO_VERBOSE: "1", PULSE_SINK: "worker-null",
     PIPEWIRE_NODE: "worker-null", XDG_DATA_HOME: path.join(RUN, "xdg"),
-    LIBGL_ALWAYS_SOFTWARE: "1", LP_NUM_THREADS: "1", GALLIUM_DRIVER: "llvmpipe" };
+    LIBGL_ALWAYS_SOFTWARE: "1", LP_NUM_THREADS: GL_THREADS, GALLIUM_DRIVER: "llvmpipe" };
   delete env.WAYLAND_DISPLAY;
   const store = path.join(env.XDG_DATA_HOME, "signal-overdrive");
   fs.mkdirSync(store, { recursive: true });
@@ -82,7 +84,8 @@ try {
   if (!windowID) throw new Error("no private headless game window");
   execFileSync(xdotool, ["windowfocus", "--sync", windowID], { env, timeout: 5000 });
   fs.writeFileSync(path.join(RUN, "meta.json"), JSON.stringify({ arm: ARM, binary: BIN, display: env.DISPLAY,
-    game_pid: verifiedPID, null_sink: nullSink[0], cpu, load_start: os.loadavg(), commit: execFileSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8" }).trim() }, null, 2));
+    game_pid: verifiedPID, null_sink: nullSink[0], cpu, software_rendering_threads: GL_THREADS,
+    load_start: os.loadavg(), commit: execFileSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8" }).trim() }, null, 2));
   let complete = false;
   for (let i = 0; i < 400; i++) {
     await sleep(1000);

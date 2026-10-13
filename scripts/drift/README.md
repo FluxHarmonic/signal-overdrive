@@ -3,8 +3,11 @@
 The capture runs an actual native autopilot race on a private Xvfb and
 the existing worker-null sink. It forces PulseAudio and verifies the
 game's own stream routing. It never starts a host or plays on speakers.
-Local processes use one allowed CPU and nice 15; each arm has a ten-minute
+Local processes default to one allowed CPU and nice 15; each arm has a ten-minute
 limit. Cached Xvfb and xdotool are required; the driver does not fetch them.
+`CONDUCTOR_CPU_LIST=0,1` can select at most two allowed CPUs, and
+`CONDUCTOR_GL_THREADS=2` can select two llvmpipe threads for a bounded
+software-rendering capture. Both settings are recorded in run metadata.
 
 `node scripts/drift/focus.mjs RUNDIR` tests native focus loss separately,
 muted. It copies the binary, opens a private Xvfb, unmaps/remaps only its

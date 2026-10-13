@@ -1,5 +1,5 @@
 // Shared local test-process infrastructure. Each child is confined to
-// one allowed CPU at nice 15 in its own tracked process group.
+// at most two allowed CPUs at nice 15 in its own tracked process group.
 import fs from "node:fs";
 import path from "node:path";
 import { spawn, execFileSync } from "node:child_process";
@@ -17,8 +17,15 @@ export function cachedTool(name, packagePrefix) {
 }
 
 export function localProcesses(root) {
-  const cpu = fs.readFileSync("/proc/self/status", "utf8").match(/^Cpus_allowed_list:\s*(\d+)/m)?.[1];
-  if (!cpu) throw new Error("no allowed CPU");
+  const allowed = fs.readFileSync("/proc/self/status", "utf8")
+    .match(/^Cpus_allowed_list:\s*([\d,-]+)/m)?.[1];
+  if (!allowed) throw new Error("no allowed CPU");
+  const ranges = allowed.split(",").map(part => part.split("-").map(Number));
+  const cpu = process.env.CONDUCTOR_CPU_LIST || String(ranges[0][0]);
+  const requested = cpu.split(",").map(Number);
+  if (!/^\d+(,\d+)?$/.test(cpu) || requested.some(value =>
+    !Number.isInteger(value) || !ranges.some(([lo, hi = lo]) => value >= lo && value <= hi)))
+    throw new Error("test CPU list must contain at most two allowed CPUs");
   const children = new Set();
   function launch(command, args, options = {}) {
     const child = spawn("taskset", ["-c", cpu, "nice", "-n", "15", command, ...args],
