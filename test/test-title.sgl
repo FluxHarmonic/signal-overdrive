@@ -6,6 +6,7 @@
 (import (sigil test)
         (sigil math)
         (signal fx beat)
+        (signal music conductor)
         (signal track)
         (signal race)
         (signal tuning)
@@ -51,7 +52,14 @@
     (let loop ((k 0))
       (when (< k 2000)
         (assert-equal (tick->bar k) (exact (floor (/ (title-beat k) LOGO-GLITCH-EVERY))))
-        (loop (+ k 1))))))
+        (loop (+ k 1)))))
+  (test "its beats are the song's: the conductor's bar and beat, from its tick"
+    (let loop ((k 0) (c (conductor-new 'calm)))
+      (when (< k 2000)
+        (assert-equal k (conductor-tick c))
+        (assert-equal (+ (* 4 (conductor-bar c)) (conductor-beat c))
+                      (exact (floor (title-beat (conductor-tick c)))))
+        (loop (+ k 1) (conductor-step c))))))
 
 (test-group "the phases"
   (test "the first step enters, and the title waits for a start"

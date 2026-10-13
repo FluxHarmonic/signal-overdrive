@@ -743,7 +743,7 @@
                           (cons (quote camera) (title-camera *title* *tuning* (race-track *race*) VIEW-W VIEW-H))
                           (cons (quote fade) (title-fade *title* *tuning*))
                           (cons (quote draw-3d) (and (title-active? *title*)
-                                                     (lambda () (title-draw-logo! *title* (title-beat (race-tick *race*))))))
+                                                     (lambda () (title-draw-logo! *title* (title-beat (conductor-tick (race-song *race*)))))))
                           (cons (quote draw-2d) (and (title-prompt? *title*) (not *no-hud*)
                                                      (lambda (centred!)
                                                        (centred! (if (eq? *platform* 'web) "PRESS ENTER, START OR TAP" "PRESS ENTER OR START")

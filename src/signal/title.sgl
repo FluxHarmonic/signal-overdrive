@@ -15,13 +15,16 @@
 ;;; fade, logo and prompt. The logo's frames and timing are (signal title
 ;;; logo)'s, generated with its atlas by scripts/art/gen-logo.mjs.
 ;;;
-;;; Events, for the music (the song plays muffled under the title and opens
-;;; up at the start): title-enter on the title's first tick, title-exit when
-;;; it stops showing (a start, or a skip while it shows), and race-start,
-;;; which the shell sends whenever a race begins its countdown, from the
-;;; title or otherwise. All go through title-emit!, which calls every
-;;; procedure given to title-listen!, so the music can hook in without
-;;; touching the shell. An enter is always followed by an exit.
+;;; Events: title-enter on the title's first tick, title-exit when it stops
+;;; showing (a start, or a skip while it shows), and race-start, which the
+;;; shell sends whenever a race begins its countdown, from the title or
+;;; otherwise. All go through title-emit!, which calls every procedure given
+;;; to title-listen!. An enter is always followed by an exit. The song
+;;; itself needs none of them: it follows the race (docs/CONDUCTOR.md), the
+;;; calm section while the race waits in its title phase, the grid from
+;;; song tick zero when race-start begins the countdown. The events are for
+;;; what the song does not carry, such as playing it muffled under the
+;;; title and opening it up at the start.
 ;;;
 ;;; The title knob at 0 skips it (the countdown waits for a start as
 ;;; before), and so do the shell's start parameter and its restart. The
@@ -154,8 +157,10 @@
 
     ;; --- the logo and the prompt ------------------------------------------------------
 
-    ;; Beats from ticks at the stub's tempo, 140 BPM ((signal fx beat)'s
-    ;; tick->row is the same clock in rows); the conductor's beat later.
+    ;; Beats from the song's tick, (signal music conductor)'s conductor-tick:
+    ;; its rows are floor(tick x 14 / 45), eight to a beat (140 BPM), so the
+    ;; whole part is the song's absolute beat, 4 x conductor-bar +
+    ;; conductor-beat. (signal fx beat)'s tick->row is the same clock.
     (define (title-beat tick) (/ (* 7.0 tick) 180.0))
 
     ;; The atlas frame for this beat (see (signal title logo)).
