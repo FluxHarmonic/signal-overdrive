@@ -249,7 +249,7 @@
 
     ;; How dark the frame is: black behind the gate; the card fades up from
     ;; DIM, clean at the lock; nothing after.
-    (define DIM 0.6)
+    (define DIM 0.35)
     (define (intro-fade i tuning)
       (case (intro-phase i)
         ((gate) 1.0)

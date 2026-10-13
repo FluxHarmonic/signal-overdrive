@@ -30,7 +30,13 @@ tuning-in sound lock clean together; a tilt into perspective; then the
 camera pulls back and down as the mark recedes up the road, coming to rest
 where the title's camera begins (on the web, a TAP TO TUNE IN gate first:
 the browser needs a gesture before sound). The CARD knobs; any start skips
-it; <code>?card=0</code> leaves it out.</li>
+it, and its sound with it; <code>?card=0</code> leaves it out. Its interference keeps
+the effects' rules: it tears only in bursts of at most 6 ticks (P15),
+scaled by <code>fx-glitch</code>, and not at all with another effect solo or with
+reduced motion (the browser's preference, or <code>?motion=reduce</code>), when the
+picture only fades up clean. The tuning-in sound is rendered when the
+sound starts, so a CARD knob changed later in the overlay is heard on the
+next load.</li>
 <li>A title screen: the camera wanders the track by itself while the CORRUPT
 logo glitches on the beat; a start fades out into the race's countdown and
 fades back in (the TITLE knobs; <code>?title=0</code> skips it).</li>

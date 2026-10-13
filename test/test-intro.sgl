@@ -196,7 +196,7 @@
   (test "it locks as the zoom arrives, and the picture is never black: it fades up clean by then"
     (assert-true (near? (intro-lock TUNING) (+ (knob 'card-hold) (knob 'card-zoom)) 1e-9))
     (let ((fs (map car (interference 1.0))))
-      (assert-true (> (car fs) 0.5))
+      (assert-true (> (car fs) 0.25))
       (let loop ((fs fs) (k 0) (last 1.0))
         (unless (null? fs)
           (assert-true (< (car fs) 1.0))

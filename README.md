@@ -24,7 +24,13 @@ through the Flux Harmonic palette and Bayer dither pass.
   camera pulls back and down as the mark recedes up the road, coming to rest
   where the title's camera begins (on the web, a TAP TO TUNE IN gate first:
   the browser needs a gesture before sound). The CARD knobs; any start skips
-  it; `?card=0` leaves it out.
+  it, and its sound with it; `?card=0` leaves it out. Its interference keeps
+  the effects' rules: it tears only in bursts of at most 6 ticks (P15),
+  scaled by `fx-glitch`, and not at all with another effect solo or with
+  reduced motion (the browser's preference, or `?motion=reduce`), when the
+  picture only fades up clean. The tuning-in sound is rendered when the
+  sound starts, so a CARD knob changed later in the overlay is heard on the
+  next load.
 - A title screen: the camera wanders the track by itself while the CORRUPT
   logo glitches on the beat; a start fades out into the race's countdown and
   fades back in (the TITLE knobs; `?title=0` skips it).
