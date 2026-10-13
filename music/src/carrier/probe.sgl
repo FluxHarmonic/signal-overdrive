@@ -83,7 +83,7 @@
     (define (chorus-arm label d-ms r set? mix)
       (let* ((T0 4.0) (H (/ 1.0 (* 2.0 r)))
              (sets (if set? (list (list T0 'rate r) (list T0 'depth d-ms) (list T0 'mix mix)) '()))
-             (x (run (lead-insert (sine-source 440.0 0.5)) '(rate depth mix gain cutoff bits) sets (+ T0 (* 2 H) 0.2)))
+             (x (run (lead-insert (sine-source 440.0 0.5)) '(rate depth mix gain cutoff bits makeup) sets (+ T0 (* 2 H) 0.2)))
              (shift (* 4.0 (/ d-ms 1000.0) r))
              (lo (* 440.0 (- 1.0 shift))) (hi (* 440.0 (+ 1.0 shift)))
              (step (max 0.05 (/ 0.2 (* 0.8 H))))

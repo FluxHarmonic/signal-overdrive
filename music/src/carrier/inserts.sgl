@@ -35,15 +35,24 @@
                (g:param 'bits 16.0 1.0 16.0)
                (g:param 'rate-div 1.0 1.0 64.0)))
 
+    ;; Two Butterworth low-passes in series, sharing one `cutoff` (24 dB per
+    ;; octave). Not motif's Moog ladder: open at 0.45 of the rate, the ladder
+    ;; made CLEAN 1.35 dB quieter than the song with no inserts and left a
+    ;; difference only 13 dB under the mix (measured, carrier damage-check).
     (define (lowpass-stage x)
       (let ((hi (open-cutoff)))
-        (g:moog x (g:param 'cutoff hi 20.0 hi) (g:param 'resonance 0.1 0.0 0.95))))
+        (g:butlp (g:butlp x (g:param 'cutoff hi 20.0 hi)) (g:param 'cutoff hi 20.0 hi))))
 
+    ;; At full wet the chorus averages two detuned copies, which beat and
+    ;; partly cancel: the lead measured 2.8 dB quieter at WORN with mix 1.
+    ;; `makeup` (1 when dry) restores the level, so detune reads as detune
+    ;; and not as the part getting quieter.
     (define (chorus-stage x)
-      (g:chorus x
-                (g:param 'rate 0.5 0.0 20.0)
-                (g:param 'depth 0.0 0.0 20.0)
-                (g:param 'mix 0.0 0.0 1.0)))
+      (g:mul (g:chorus x
+                       (g:param 'rate 0.5 0.0 20.0)
+                       (g:param 'depth 0.0 0.0 20.0)
+                       (g:param 'mix 0.0 0.0 1.0))
+             (g:param 'makeup 1.0 0.0 2.0)))
 
     (define (gain-stage x) (g:mul x (g:param 'gain 1.0 0.0 1.0)))
 

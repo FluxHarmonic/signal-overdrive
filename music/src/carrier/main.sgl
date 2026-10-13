@@ -8,7 +8,7 @@
 (define-library (carrier main)
   (import (sigil core) (sigil io) (sigil string) (sigil math) (sigil process)
           (motif tune) (motif tune player)
-          (carrier score) (carrier render) (carrier analysis) (carrier probe))
+          (carrier score) (carrier render) (carrier analysis) (carrier probe) (carrier damage))
   (export main)
   (begin
     (define (say . xs) (for-each display xs) (newline))
@@ -73,6 +73,8 @@
            (cmd-render (cadr args) (caddr args)
                        (if (= (length args) 4) (string->number (cadddr args)) 48000)))
           ((equal? args (list "probe")) (run-probe))
+          ((equal? args (list "damage-check")) (check-damage-wiring) (check-clean-transparency) (for-each check-clean-transparency (list 1 3 4 5 6 7)) 0)
+          ((and (= (length args) 2) (equal? (car args) "damage")) (render-damage-audition (cadr args)))
           ((and (>= (length args) 2) (equal? (car args) "stems"))
            (cmd-stems (cadr args) 48000 (if (= (length args) 3) (caddr args) #f)))
           (else (say "usage: carrier tune OUT.cts | carrier render IN.cts OUT.wav [SR] | carrier stems IN.cts [DIR] | carrier probe") 1)))))))
