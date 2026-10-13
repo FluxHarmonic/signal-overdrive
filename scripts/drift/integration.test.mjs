@@ -18,9 +18,19 @@ for (let i = 0; i < frames; i++) {
 }
 
 const marks = ["grid", "lap1", "lap2", "hold", "fill", "traced", "uplink", "results"];
-function fixture(arm, offset, clockRate = 1) {
+function fixture(arm, offset, clockRate = 1, referenceRate = RATE) {
   const run = path.join(root, arm); fs.mkdirSync(run);
-  fs.writeFileSync(path.join(run, "reference.pcm"), reference);
+  let rendered = reference;
+  if (referenceRate !== RATE) {
+    rendered = Buffer.alloc(Math.round(frames * referenceRate / RATE) * 8);
+    for (let i = 0; i < rendered.length / 8; i++) {
+      const source = i * RATE / referenceRate, a = Math.floor(source), fraction = source - a;
+      const value = wave[a] * (1 - fraction) + wave[Math.min(a + 1, frames - 1)] * fraction;
+      rendered.writeFloatLE(value, i * 8); rendered.writeFloatLE(value, i * 8 + 4);
+    }
+    fs.writeFileSync(path.join(run, "meta.json"), JSON.stringify({ reference_sample_rate: referenceRate }));
+  }
+  fs.writeFileSync(path.join(run, "reference.pcm"), rendered);
   const capture = Buffer.alloc((frames + RATE * 7) * 4);
   const lead = Math.round((1 + offset) * RATE);
   for (let i = 0; i < frames; i++) {
@@ -46,6 +56,10 @@ try {
   assert.ok(normal.pass, JSON.stringify({ p95: normal.p95_ms, worst: normal.worst_ms, coverage: normal.coverage }));
   assert.ok(Math.abs(normal.p95_ms - 7) < 0.5);
   assert.equal(normal.insert_cost_ms.p95, 1.2);
+  const nativeRate = fixture("native-rate", 0.007, 1, 44100);
+  assert.ok(nativeRate.pass, JSON.stringify(nativeRate));
+  assert.ok(Math.abs(nativeRate.p95_ms - 7) < 0.5);
+  assert.equal(nativeRate.reference_sample_rate, 44100);
   const depth = fixture("depth", 0.25);
   assert.ok(!depth.pass);
   assert.ok(depth.p95_ms > 240);

@@ -146,10 +146,13 @@ dated clock/cost samples. The clock timestamp is taken before drawing
 and rendering, so CPU time is not mistaken for clock drift. Intended
 landings are independent of the player's actual landing diagnostics.
 The gate renders its reference from the intended log.
-The native `--music-reference PLAN PCM FRAMES` command uses
+The native `--music-reference PLAN PCM FRAMES [RATE]` command uses
 `(signal music reference)` and exits before shell/audio/window boot. It
-asserts that audio remains uninitialized. `scripts/drift/build-candidate`
-builds the release and checks this command on grid→lap1; the capture
+asserts that audio remains uninitialized; RATE defaults to 48 kHz for
+existing callers. Actual captures render at the device's logged source
+rate, recorded in metadata, and analyze against the 48 kHz monitor using
+envelopes at a common 3 kHz clock. `scripts/drift/build-candidate`
+builds the release and checks grid→lap1 at both 48 and 44.1 kHz; the capture
 driver invokes it for each actual intended race log. All gate tools
 and tests are committed under `scripts/drift/`; no temporary copy is
 needed to reproduce them. Music cost is sampled on every traced frame.

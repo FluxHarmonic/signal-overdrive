@@ -130,12 +130,15 @@
         ;; context, or creating a window. A null backend is not a render.
         (let ((reference (member "--music-reference" args)))
           (when reference
-            (unless (= (length reference) 4)
-              (error "usage: --music-reference PLAN PCM FRAMES"))
+            (unless (or (= (length reference) 4) (= (length reference) 5))
+              (error "usage: --music-reference PLAN PCM FRAMES [RATE]"))
             (when (audio-initialized?)
               (error "offline reference must not initialize audio"))
             (reference-render! (cadr reference) (caddr reference)
-                               (string->number (cadddr reference)))
+                               (string->number (cadddr reference))
+                               rate: (if (= (length reference) 5)
+                                         (string->number (list-ref reference 4))
+                                         48000))
             (when (audio-initialized?)
               (error "reference unexpectedly initialized audio"))
             (display "signal-overdrive: offline reference complete; audio uninitialized")

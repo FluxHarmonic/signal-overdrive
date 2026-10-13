@@ -4,7 +4,6 @@ import { pathToFileURL } from "node:url";
 
 const RATE = 48000;
 const ENVELOPE_RATE = 3000;
-const DECIMATION = RATE / ENVELOPE_RATE;
 
 function fft(real, imag, inverse = false) {
   const n = real.length;
@@ -78,25 +77,29 @@ export function correlate(reference, capture) {
   return best;
 }
 
-function envelope(file, format) {
+function envelope(file, format, rate = RATE) {
+  if (!Number.isInteger(rate) || rate < 8000 || rate > 192000) throw new Error("invalid PCM sample rate");
   const bytes = fs.readFileSync(file);
   const frameBytes = format === "s16" ? 4 : 8;
   const frames = Math.floor(bytes.length / frameBytes);
-  const result = new Float32Array(Math.floor(frames / DECIMATION));
-  let squareSum = 0;
+  const result = new Float32Array(Math.floor(frames / rate * ENVELOPE_RATE));
+  let squareSum = 0, samples = 0;
   for (let i = 0; i < result.length; i++) {
     let sum = 0;
-    for (let j = 0; j < DECIMATION; j++) {
-      const offset = (i * DECIMATION + j) * frameBytes;
+    const first = Math.floor(i * rate / ENVELOPE_RATE);
+    const end = Math.floor((i + 1) * rate / ENVELOPE_RATE);
+    for (let frame = first; frame < end; frame++) {
+      const offset = frame * frameBytes;
       const value = format === "s16"
         ? (bytes.readInt16LE(offset) + bytes.readInt16LE(offset + 2)) / 65536
         : (bytes.readFloatLE(offset) + bytes.readFloatLE(offset + 4)) / 2;
       if (!Number.isFinite(value)) throw new Error(`nonfinite PCM in ${file}`);
       sum += Math.abs(value); squareSum += value * value;
+      samples++;
     }
-    result[i] = sum / DECIMATION;
+    result[i] = sum / (end - first);
   }
-  return { values: result, seconds: frames / RATE, rms: Math.sqrt(squareSum / (result.length * DECIMATION)) };
+  return { values: result, seconds: frames / rate, rms: Math.sqrt(squareSum / samples) };
 }
 
 export function percentile(values, fraction) {
@@ -132,7 +135,10 @@ export function analyze(run) {
   const required = ["grid", "lap1", "lap2", "hold", "fill", "traced", "uplink", "results"];
   if (required.some(mark => !trace.jumps.some(j => j.mark === mark))) throw new Error("race did not visit every intended section");
   const cap = envelope(path.join(run, "capture.pcm"), "s16");
-  const ref = envelope(path.join(run, "reference.pcm"), "f32");
+  const metaPath = path.join(run, "meta.json");
+  const referenceRate = fs.existsSync(metaPath)
+    ? JSON.parse(fs.readFileSync(metaPath, "utf8")).reference_sample_rate ?? RATE : RATE;
+  const ref = envelope(path.join(run, "reference.pcm"), "f32", referenceRate);
   if (!(cap.rms > 1e-4)) return { pass: false, reason: "silent actual-game capture", rms: cap.rms };
   const observations = fs.readFileSync(path.join(run, "capclock.txt"), "utf8").trim().split("\n")
     .map(line => line.split(/\s+/).map(Number)).filter(([wall, bytes]) => Number.isFinite(wall) && bytes > 0);
@@ -173,6 +179,7 @@ export function analyze(run) {
   const verdict = assess(good.map(r => r.error_ms), good.length / rows.length);
   const costs = clocks.map(c => +c.metrics["music-ms"]).filter(Number.isFinite);
   return { ...verdict, windows: rows.length, correlated: good.length, capture_rms: cap.rms,
+    reference_sample_rate: referenceRate, reference_rms: ref.rms,
     correlation_search: "4 s acquisition, then 250 ms around last correlated lag",
     capture_start_ms: start, capture_clock_spread_ms: Math.max(...bounds) - start,
     insert_cost_ms: { samples: costs.length, p50: percentile(costs, 0.5), p95: percentile(costs, 0.95), worst: Math.max(...costs) },

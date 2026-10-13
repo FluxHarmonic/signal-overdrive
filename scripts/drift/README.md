@@ -42,8 +42,11 @@ reported errors include the capture's own startup/buffering latency.
 The reference reads only the simulation's intended landing records. It
 uses the same Motif pull/inserts path as the game and verifies every
 landing at its exact intended bar. Player diagnostics are not reference
-input. Raw reference PCM is stereo float32 at 48 kHz; capture PCM is
-stereo s16 at 48 kHz. No Python is used.
+input. Raw reference PCM is stereo float32 at the actual native device
+rate reported in the trace (44.1 kHz for the pinned backend), recorded in
+metadata. Capture PCM is stereo s16 at 48 kHz. The analyzer constructs
+3 kHz envelopes at each file's own rate; voices/noise/filters now use the
+same source clock as the game. No Python is used.
 
 Prepared tools and tests:
 

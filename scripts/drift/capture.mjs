@@ -108,9 +108,16 @@ try {
   await sleep(300); stop(capture); await sleep(100); stop(capture, "SIGKILL");
   const trace = parseTrace(gameText);
   fs.writeFileSync(path.join(RUN, "intended.sgv"), `(${trace.jumps.map(jump => `#(${jump.tick} ${jump.bar} ${jump.mark})`).join("\n ")})\n`);
-  const frames = Math.ceil((trace.clocks.at(-1).song + 2) * 48000);
+  const deviceRate = gameText.match(/sigil-audio: backend=.* format=\S+ channels=\d+ rate=(\d+)/)?.[1];
+  if (!deviceRate) throw new Error("no actual native device sample rate in trace");
+  const referenceRate = Number(deviceRate);
+  const metaPath = path.join(RUN, "meta.json");
+  const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+  meta.reference_sample_rate = referenceRate;
+  fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+  const frames = Math.ceil((trace.clocks.at(-1).song + 2) * referenceRate);
   const renderLog = fs.openSync(path.join(RUN, "reference.log"), "w");
-  reference = launch(path.join(ROOT, "scripts/dev"), [BIN, "--music-reference", path.join(RUN, "intended.sgv"), path.join(RUN, "reference.pcm"), String(frames)],
+  reference = launch(path.join(ROOT, "scripts/dev"), [BIN, "--music-reference", path.join(RUN, "intended.sgv"), path.join(RUN, "reference.pcm"), String(frames), String(referenceRate)],
     { env: { ...env, SIGIL_AUDIO_BACKEND: "null",
       ...(GC_PROFILE ? { SIGIL_GC_STATS_FILE: path.join(RUN, "reference-gc.jsonl") } : {}) },
       stdio: ["ignore", renderLog, renderLog] });
