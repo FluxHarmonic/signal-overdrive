@@ -1,0 +1,195 @@
+;;; (signal title) - The title screen: an attract mode, then the start.
+;;;
+;;; While the title shows, the camera wanders the track by itself. It flies
+;;; the racing line at a calm speed, higher and further back than the race
+;;; camera, its heading easing toward the road ahead, past the grid where
+;;; the machines wait. The logo glitches on the beat and a prompt asks for
+;;; a start. On a start the frame fades out (the title-out knob, seconds),
+;;; the race begins its countdown, and the frame fades back in behind the
+;;; race camera (title-in); then the title is done and the HUD returns.
+;;;
+;;; Pure, on the race's fixed tick: (title-step t tuning race start?) is
+;;; the next title. The shell owns the rest: while the title is active it
+;;; hands the start press here instead of to the race, begins the race when
+;;; title-race-due? says so, and asks this module for the frame's camera,
+;;; fade, logo and prompt. The logo's frames and timing are (signal title
+;;; logo)'s, generated with its atlas by scripts/art/gen-logo.mjs.
+;;;
+;;; Events, for the music (the song plays muffled under the title and opens
+;;; up at the start): title-enter on the title's first tick, title-exit when
+;;; it stops showing (a start, or a skip while it shows), and race-start,
+;;; which the shell sends whenever a race begins its countdown, from the
+;;; title or otherwise. All go through title-emit!, which calls every
+;;; procedure given to title-listen!, so the music can hook in without
+;;; touching the shell. An enter is always followed by an exit.
+;;;
+;;; The title knob at 0 skips it (the countdown waits for a start as
+;;; before), and so do the shell's start parameter and its restart. The
+;;; fades live in the palette's lookup pass: with the dither off, or the
+;;; exact pass chosen for comparison (lut=0), the frame cuts instead.
+
+(define-library (signal title)
+  (import (sigil core)
+          (sigil math)
+          (sigil struct)
+          (signal track)
+          (signal race)
+          (signal tuning)
+          (signal mode7 camera)
+          (signal mode7 render)
+          (signal title logo))
+
+  (export title title? title-new title-skip title-step title-phase title-events title-race-due?
+          title-active? title-hud? title-camera title-fade title-logo-frame title-draw-logo!
+          title-prompt? title-set-logo! title-listen! title-emit! title-beat)
+
+  (begin
+    ;; phase: attract, out (fading out), in (fading in on the race), done.
+    ;; tick: ticks in this phase; age: ticks since the title began.
+    ;; s, heading: the attract camera's distance along the track and its
+    ;; eased heading (#f until the first step).
+    (define-struct title
+      (phase default: 'attract)
+      (tick default: 0)
+      (age default: 0)
+      (s default: 0.0)
+      (heading default: #f)
+      (events default: '())
+      (race-due default: #f))
+
+    (define (title-new) (title))
+
+    ;; Done at once; if the title was showing and had not yet exited, its
+    ;; events say so.
+    (define (title-skip t)
+      (title t phase: 'done tick: 0 race-due: #f
+             events: (if (and (> (title-age t) 0) (eq? (title-phase t) 'attract)) (list 'title-exit) '())))
+
+    (define (title-active? t) (not (eq? (title-phase t) 'done)))
+    (define (title-hud? t) (eq? (title-phase t) 'done))
+    (define (title-race-due? t) (title-race-due t))
+
+    (define (seconds->ticks v) (max 1 (exact (round (* 60.0 v)))))
+    (define (knob tuning k) (tuning-ref tuning k))
+
+    ;; --- the attract camera ----------------------------------------------------------
+
+    ;; The racing line at s: (x y tx ty), its offset interpolated between
+    ;; the track's samples so the camera never steps sideways.
+    (define (line-at tr s)
+      (let* ((s (wrap-s tr s))
+             (i (track-index-at tr s))
+             (j (if (>= (+ i 1) (track-n tr)) 0 (+ i 1)))
+             (s0 (track-s tr i))
+             (seg (- (if (= j 0) (track-length tr) (track-s tr j)) s0))
+             (f (if (> seg 0.0) (/ (- s s0) seg) 0.0))
+             (u (+ (track-line tr i) (* f (- (track-line tr j) (track-line tr i))))))
+        (track-point tr s u)))
+
+    ;; The heading from here toward the line LEAD texels ahead: looking a
+    ;; little into each curve, the way a driver does.
+    (define LEAD 280.0)
+    (define (aim tr s)
+      (let ((a (line-at tr s)) (b (line-at tr (+ s LEAD))))
+        (atan (- (car b) (car a)) (- (- (cadr b) (cadr a))))))
+
+    (define PI 3.141592653589793)
+    (define (angle-diff a b)
+      (let ((d (- a b)))
+        (- d (* 2.0 PI (floor (/ (+ d PI) (* 2.0 PI)))))))
+
+    ;; One tick of flight: on along the line at title-speed texels a second,
+    ;; the heading easing toward the aim (about a second to settle).
+    (define (fly t tuning tr)
+      (let* ((s (wrap-s tr (+ (title-s t) (/ (knob tuning 'title-speed) 60.0))))
+             (want (aim tr s))
+             (h (title-heading t))
+             (h (if h (+ h (* 0.05 (angle-diff want h))) want)))
+        (title t s: s heading: h)))
+
+    ;; The frame's camera while the title flies (attract and fading out),
+    ;; else #f: the race camera takes over for the fade-in. Before the
+    ;; first step it looks along the line already.
+    (define (title-camera t tuning tr w h)
+      (and (memq (title-phase t) '(attract out))
+           (let* ((p (line-at tr (title-s t)))
+                  (hd (or (title-heading t) (aim tr (title-s t))))
+                  (c (make-cam 0.0 0.0 (knob tuning 'title-height) hd
+                               (+ (knob tuning 'pitch) 0.05) (knob tuning 'fov)
+                               (knob tuning 'horizon) w h)))
+             (cam-behind c (car p) (cadr p) hd (knob tuning 'title-dist)))))
+
+    ;; --- the steps ---------------------------------------------------------------------
+
+    (define (title-step t tuning race start?)
+      (let* ((tr (race-track race))
+             (enter (if (and (= (title-age t) 0) (>= (knob tuning 'title) 0.5)) (list 'title-enter) '()))
+             (shown (> (title-age t) 0))
+             (t (title t age: (+ (title-age t) 1) tick: (+ (title-tick t) 1) events: '() race-due: #f))
+             (t (if (memq (title-phase t) '(attract out)) (fly t tuning tr) t)))
+        (case (title-phase t)
+          ((attract)
+           (cond ((< (knob tuning 'title) 0.5)
+                  (title t phase: 'done tick: 0 events: (if shown (list 'title-exit) '())))
+                 (start? (title t phase: 'out tick: 0 events: (append enter (list 'title-exit))))
+                 (else (title t events: enter))))
+          ((out)
+           (if (>= (title-tick t) (seconds->ticks (knob tuning 'title-out)))
+               (title t phase: 'in tick: 0 race-due: #t)
+               t))
+          ((in)
+           (if (>= (title-tick t) (seconds->ticks (knob tuning 'title-in)))
+               (title t phase: 'done tick: 0)
+               t))
+          (else t))))
+
+    ;; How dark the frame is, 0 to 1: rising through the fade-out, falling
+    ;; through the fade-in.
+    (define (title-fade t tuning)
+      (let ((f (lambda (k) (min 1.0 (/ (exact->inexact (title-tick t)) (seconds->ticks (knob tuning k)))))))
+        (case (title-phase t)
+          ((out) (f 'title-out))
+          ((in) (- 1.0 (f 'title-in)))
+          (else 0.0))))
+
+    ;; --- the logo and the prompt ------------------------------------------------------
+
+    ;; Beats from ticks at the stub's tempo, 140 BPM ((signal fx beat)'s
+    ;; tick->row is the same clock in rows); the conductor's beat later.
+    (define (title-beat tick) (/ (* 7.0 tick) 180.0))
+
+    ;; The atlas frame for this beat (see (signal title logo)).
+    (define (title-logo-frame beat)
+      (let* ((every (exact->inexact LOGO-GLITCH-EVERY))
+             (bar (exact (floor (/ beat every))))
+             (b (- beat (* every bar))))
+        (if (< b LOGO-GLITCH-HOLD)
+            (+ LOGO-LIFTS (* 2 (modulo bar LOGO-GLITCHES)) (if (< b (/ LOGO-GLITCH-HOLD 2.0)) 0 1))
+            (let ((f (- beat (floor beat))))
+              (if (< f LOGO-PULSE-LEN)
+                  (exact (floor (+ 0.5 (* (- LOGO-LIFTS 1) (- 1.0 (/ f LOGO-PULSE-LEN))))))
+                  0)))))
+
+    (define *logo* #f)
+    (define (title-set-logo! tex) (set! *logo* tex))
+
+    ;; Draw the logo into the 3D pass (before the palette pass, so it fades
+    ;; with the frame), while the title flies.
+    (define (title-draw-logo! t beat)
+      (when (and *logo* (memq (title-phase t) '(attract out)))
+        (let ((v0 (exact->inexact (* (title-logo-frame beat) LOGO-H))))
+          (mode7-draw-sprite! *logo* (exact->inexact LOGO-X) (exact->inexact LOGO-Y)
+                              (exact->inexact LOGO-W) (exact->inexact LOGO-H)
+                              0.0 v0 (exact->inexact LOGO-W) (+ v0 LOGO-H)
+                              0.0 (list 0.0 0.0 0.0)))))
+
+    ;; The prompt shows two thirds of every second until a start.
+    (define (title-prompt? t)
+      (and (eq? (title-phase t) 'attract) (< (modulo (title-age t) 60) 40)))
+
+    ;; --- events ------------------------------------------------------------------------
+
+    (define *listeners* '())
+    (define (title-listen! proc) (set! *listeners* (cons proc *listeners*)))
+    (define (title-emit! events)
+      (for-each (lambda (e) (for-each (lambda (l) (l e)) *listeners*)) events))))

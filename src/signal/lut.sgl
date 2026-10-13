@@ -27,7 +27,8 @@
     ;; time in seconds, z the glitch 0..1 (rows torn sideways and the
     ;; channels split: a wall hit, ICE), w corruption 0..1 (the glitch at
     ;; full and the picture going red: corrupt cargo). vp: the vanishing
-    ;; point (x, y), rows from the top.
+    ;; point (x, y), rows from the top, and z how far the frame has faded
+    ;; to black, 0..1 (the title's fades).
     (define LUT-FRAGMENT
       "uniform vec4 params;
 uniform vec4 opts;
@@ -77,6 +78,8 @@ void main() {
   }
   // corruption: toward the trace's red
   c = mix(c, vec3(204.0, 51.0, 64.0) * (0.4 + 0.6 * dot(c, vec3(0.0013))), 0.6 * fx.w);
+  // the title's fade: darker before the palette, so it steps down through it
+  c *= 1.0 - clamp(vp.z, 0.0, 1.0);
   int x = p.x;
   int y = yt;
   float t = ((float(B4[(y % 4) * 4 + (x % 4)]) + 0.5) / 16.0 - 0.5) * params.x;

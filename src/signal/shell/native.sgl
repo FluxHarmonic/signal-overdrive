@@ -30,6 +30,7 @@
           (sigil fs)
           (signal race)
           (signal scene)
+          (signal title)
           (signal track)
           (signal music reference)
           (signal shell core))
@@ -86,6 +87,7 @@
                           TRACKS)
                      (texture "sky.png") (texture "machines.png")
                      (list (cons 'embers (texture "lut-embers.png")) (cons 'crash (texture "lut-crash.png"))))
+        (title-set-logo! (texture "title-logo.png"))
         ;; Exercise deferred shader/draw setup before publishing music.
         ;; This zero-dt frame cannot advance the simulation or open audio.
         (core-frame! 0.0 (frame-width) (frame-height) #t)

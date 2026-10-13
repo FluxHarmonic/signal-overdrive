@@ -72,6 +72,19 @@
         (fx-passes    fx       1.0    512.0  1.0   1.0     "FX GROUND PASSES")
         (fx-hold      fx       0.0    1.0    1.0   0.0     "FX HOLD AT PEAK (COST)")))
 
+    ;; The title screen ((signal title)): 0 skips it; the fades either side
+    ;; of the start, in seconds; the attract camera's speed along the racing
+    ;; line (texels/s), its height (above the start gate's beam, which tops
+    ;; out at 70), and its distance behind its point (at most 200: further
+    ;; back, the camera leaves the road on the loop's tight bends).
+    (define TITLE-KNOBS
+      '((title        title    0.0    1.0    1.0   1.0     "TITLE SCREEN")
+        (title-out    title    0.0    3.0    0.05  0.5     "TITLE FADE OUT")
+        (title-in     title    0.0    3.0    0.05  0.5     "TITLE FADE IN")
+        (title-speed  title    0.0    400.0  10.0  240.0   "TITLE CAMERA SPEED")
+        (title-height title    6.0    200.0  1.0   96.0    "TITLE CAMERA HEIGHT")
+        (title-dist   title    20.0   200.0  2.0   150.0   "TITLE CAMERA DIST")))
+
     (define HANDLING-KNOBS
       '((accel        handling 50.0   1200.0 10.0  "ACCEL")
         (top          handling 200.0  1200.0 10.0  "TOP SPEED")
@@ -107,7 +120,8 @@
                    HANDLING-KNOBS)
               RACE-KNOBS
               CAMERA-KNOBS
-              FX-KNOBS))
+              FX-KNOBS
+              TITLE-KNOBS))
 
     (define (knob-key k) (car k))
     (define (knob-group k) (cadr k))

@@ -44,6 +44,11 @@
 
 <div class="cols"><div class="col"><h3>CORRUPT</h3><p class="desc">The cargo's integrity failing: tall condensed letters, their channels split cyan and magenta, one slice torn sideways, ICE amber and dropouts where the data broke. On the title the signal holds for a bar, then glitches hard on the downbeat and snaps back.</p></div></div>
 
+<h2>The site's wordmark, glitching as it will on signaloverdrive.net</h2>
+<p class="note">These run the exported files in <code>site/</code> exactly as the site will embed them (<a href="site/EMBED.txt">EMBED.txt</a>): the still <code>logo.png</code> in an img, and <code>logo-glitch.js</code> stepping it through eight glitch frames on a timeline (about two seconds still, a tenth of a second glitching). With JS off or prefers-reduced-motion the still stays. Also there: <a href="site/og.png">og.png</a>, the 1200x630 social preview.</p>
+<div class="ground dark"><img src="site/logo.png" width="696" height="96" alt="Signal Overdrive" data-glitch="site/logo-glitch-{n}.png"></div><div class="ground light"><img src="site/logo.png" width="696" height="96" alt="Signal Overdrive" data-glitch="site/logo-glitch-{n}.png"></div>
+<script src="site/logo-glitch.js" defer></script>
+
 
 <h2>Wordmark at 1x</h2>
 <p class="note">1x is the size in the game's 480x270 frame; the site would use 2x or more. Dark ground is the game's own #0D0A1A.</p>
@@ -62,6 +67,10 @@
 <h2>In a browser tab</h2>
 <div class="cols"><div class="col"><h3>CORRUPT</h3><div class="tabbar dark"><div class="tab"><img src="corrupt/mark-16.png" srcset="corrupt/mark-32.png 2x" width="16" height="16" alt=""><span>Signal Overdrive</span><b>×</b></div><div class="tab dim"><span>New Tab</span></div></div><div class="tabbar light"><div class="tab"><img src="corrupt/mark-16.png" srcset="corrupt/mark-32.png 2x" width="16" height="16" alt=""><span>Signal Overdrive</span><b>×</b></div><div class="tab dim"><span>New Tab</span></div></div></div></div>
 
+
+<h2>The title screen, in the game</h2>
+<p class="note"><a href="game/">Play it</a> (the web build hosted beside this sheet). The camera wanders the track by itself while the logo glitches on the beat and the prompt asks for a start; a start (Enter, Space, a pad's Start or A, a tap) fades out, begins the race's countdown and fades back in. These are captures of that build in headless Chrome, at 2x; the logo in the first is the atlas's frame pixel for pixel.</p>
+<div class="ground dark"><figure><img src="frames/game-attract.png" width="960" height="540" alt="attract: the camera flies the track"><div class="label">attract: the camera flies the track</div></figure><figure><img src="frames/game-fade-out.png" width="960" height="540" alt="a start: fading out"><div class="label">a start: fading out</div></figure><figure><img src="frames/game-fade-in.png" width="960" height="540" alt="fading in on the countdown"><div class="label">fading in on the countdown</div></figure><figure><img src="frames/game-countdown.png" width="960" height="540" alt="the countdown, HUD back"><div class="label">the countdown, HUD back</div></figure></div>
 
 <h2>The title animation, as the script renders it</h2>
 <p class="note">gen-logo.mjs's own render of the loop, two bars at 140 BPM (the tempo of <i>Carrier</i>), over a frame captured before the effects pass. The game picks its frames from the same timing.</p>

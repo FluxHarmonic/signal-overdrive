@@ -4,8 +4,9 @@
 # HUD only; if low integrity blurred the road, a struggling player would hit
 # more walls.
 #
-# How: the web build (default build/web) on the title screen, where the
-# camera and the road do not move, with no HUD (?nohud), no machines
+# How: the web build (default build/web) on the race's title phase with the
+# title screen's attract mode off (?title=0: its camera flies the track),
+# where the camera and the road do not move, with no HUD (?nohud), no machines
 # (?nosprites: their thrusters flicker even on the title, 840 px at scale 2) and
 # interference alone (?fx-solo=7) at CRITICAL (?fx-tier=5, the strongest:
 # tracking lines, bleed, and static dropouts). Three canvas captures: OFF1
@@ -39,7 +40,7 @@ cat > "$OUT/steps.json" <<'EOF'
 EOF
 GPUFLAG=""; [ "${GPU:-1}" = 1 ] && GPUFLAG="--gpu"
 if ! node "$REPO/scripts/fx-check.mjs" "$BUILD" "$OUT/steps.json" $GPUFLAG --scale $SCALE \
-     --query "mute&nohud&nosprites&fx-solo=7&fx-tier=5&fx-interf=0" --out "$OUT" > "$OUT/run.log" 2>&1; then
+     --query "mute&title=0&nohud&nosprites&fx-solo=7&fx-tier=5&fx-interf=0" --out "$OUT" > "$OUT/run.log" 2>&1; then
   echo "SETUP-FAILED: the capture did not run cleanly; $OUT/run.log:"; cat "$OUT/run.log"; exit 2
 fi
 grep -E "^renderer:" "$OUT/run.log" || true

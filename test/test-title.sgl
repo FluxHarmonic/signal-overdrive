@@ -1,0 +1,135 @@
+;;; The title screen: the logo's frame from the beat (glitches on the bar,
+;;; the flash on every beat, on the effects' clock), the phases and their
+;;; events (an enter always followed by an exit, whatever ends the title),
+;;; the fades, the skips, and the attract camera's calm.
+
+(import (sigil test)
+        (sigil math)
+        (signal fx beat)
+        (signal track)
+        (signal race)
+        (signal tuning)
+        (signal mode7 camera)
+        (signal title)
+        (signal title logo))
+
+(define (near? a b eps) (< (abs (- a b)) eps))
+(define TUNING (tuning-defaults))
+
+;; n steps of the title against a race in its title phase; start-at: the
+;; step (1-based) that presses start, or #f. Returns (title . all events).
+(define (run-title n start-at . tuning)
+  (let ((tn (if (pair? tuning) (car tuning) TUNING))
+        (r (race-new TUNING)))
+    (let loop ((k 1) (t (title-new)) (evs '()))
+      (if (> k n)
+          (cons t (reverse evs))
+          (let ((t (title-step t tn r (and start-at (= k start-at)))))
+            (loop (+ k 1) t (append (reverse (title-events t)) evs)))))))
+
+(test-group "the logo's frame"
+  (test "a glitch on each bar's first quarter beat, in two halves, cycling the four"
+    (assert-equal LOGO-LIFTS (title-logo-frame 0.0))
+    (assert-equal (+ LOGO-LIFTS 1) (title-logo-frame 0.2))
+    (assert-equal (+ LOGO-LIFTS 2) (title-logo-frame 4.0))
+    (assert-equal (+ LOGO-LIFTS 7) (title-logo-frame 12.2))
+    ;; bar 4 is glitch 0 again
+    (assert-equal LOGO-LIFTS (title-logo-frame 16.1)))
+  (test "otherwise the still, its flash falling over the beat's first 0.3"
+    (assert-equal 0 (title-logo-frame 0.3))
+    (assert-equal 2 (title-logo-frame 1.0))
+    (assert-equal 1 (title-logo-frame 1.1))
+    (assert-equal 0 (title-logo-frame 1.25))
+    (assert-equal 0 (title-logo-frame 15.9)))
+  (test "every frame it picks is in the atlas"
+    (let loop ((k 0))
+      (when (< k 4000)
+        (let ((f (title-logo-frame (title-beat k))))
+          (assert-true (and (>= f 0) (< f LOGO-FRAMES))))
+        (loop (+ k 1)))))
+  (test "its bars are the effects' bars (the stub's clock, 140 BPM)"
+    (let loop ((k 0))
+      (when (< k 2000)
+        (assert-equal (tick->bar k) (exact (floor (/ (title-beat k) LOGO-GLITCH-EVERY))))
+        (loop (+ k 1))))))
+
+(test-group "the phases"
+  (test "the first step enters, and the title waits for a start"
+    (let ((res (run-title 120 #f)))
+      (assert-equal 'attract (title-phase (car res)))
+      (assert-equal '(title-enter) (cdr res))
+      (assert-true (title-active? (car res)))
+      (assert-false (title-hud? (car res)))))
+  (test "a start fades out, starts the race, fades in, and is done"
+    (let* ((out (exact (round (* 60.0 (tuning-ref TUNING 'title-out)))))
+           (in (exact (round (* 60.0 (tuning-ref TUNING 'title-in)))))
+           (r (race-new TUNING)))
+      ;; step by step, to see the race fall due exactly once
+      (let loop ((k 1) (t (title-new)) (due 0) (evs '()))
+        (if (<= k (+ 10 out in 5))
+            (let ((t (title-step t TUNING r (= k 10))))
+              (when (= k 10) (assert-equal 'out (title-phase t)))
+              (when (= k (+ 10 (quotient out 2)))
+                (assert-true (near? (title-fade t TUNING) 0.5 0.05)))
+              (when (= k (+ 10 out)) (assert-equal 'in (title-phase t)))
+              (loop (+ k 1) t (+ due (if (title-race-due? t) 1 0)) (append (reverse (title-events t)) evs)))
+            (begin
+              (assert-equal 'done (title-phase t))
+              (assert-true (title-hud? t))
+              (assert-equal 1 due)
+              ;; race-start is the shell's, sent when the race begins
+              (assert-equal '(title-enter title-exit) (reverse evs))
+              (assert-true (near? (title-fade t TUNING) 0.0 1e-9)))))))
+  (test "the title knob at 0 skips it, and title-skip is done at once"
+    (let ((res (run-title 2 #f (tuning-set TUNING 'title 0.0))))
+      (assert-equal 'done (title-phase (car res))))
+    (assert-false (title-active? (title-skip (title-new)))))
+  (test "an enter is always followed by an exit, whatever ends the title"
+    ;; never shown (the knob off from the start, or skipped before a step): nothing
+    (assert-equal '() (cdr (run-title 5 #f (tuning-set TUNING 'title 0.0))))
+    (assert-equal '() (title-events (title-skip (title-new))))
+    ;; shown, then skipped by the knob or the shell: an exit
+    (let ((r (race-new TUNING)))
+      (let loop ((k 0) (t (title-new)) (evs '()))
+        (if (< k 10)
+            (let ((t (title-step t TUNING r #f))) (loop (+ k 1) t (append evs (title-events t))))
+            (begin
+              (assert-equal '(title-enter) evs)
+              (assert-equal '(title-exit) (title-events (title-skip t)))
+              (assert-equal '(title-exit) (title-events (title-step t (tuning-set TUNING 'title 0.0) r #f)))
+              ;; skipping while it fades out (the exit already sent): nothing more
+              (let ((out (title-step t TUNING r #t)))
+                (assert-equal '(title-exit) (title-events out))
+                (assert-equal '() (title-events (title-skip out)))))))))
+  (test "the prompt shows only while the title waits"
+    (let ((t (car (run-title 10 #f))))
+      (assert-true (title-prompt? t)))
+    (let ((t (car (run-title 12 10))))
+      (assert-false (title-prompt? t)))))
+
+(test-group "the attract camera"
+  (test "it flies the title's camera until the race's takes over"
+    (let ((r (race-new TUNING)))
+      (let ((t (car (run-title 5 #f))))
+        (let ((c (title-camera t TUNING (race-track r) 480 270)))
+          (assert-true (cam? c))
+          (assert-true (near? (cam-height c) (tuning-ref TUNING 'title-height) 1e-9))))
+      ;; before the first step it already looks along the line
+      (assert-true (cam? (title-camera (title-new) TUNING (race-track r) 480 270)))
+      (assert-false (title-camera (title-skip (title-new)) TUNING (race-track r) 480 270))))
+  (test "it is calm: a minute on each track turns at most 0.03 rad a tick"
+    (for-each
+     (lambda (tk)
+       (let* ((tn (tuning-set TUNING 'track tk))
+              (r (race-new tn))
+              (tr (race-track r))
+              (step (/ (tuning-ref tn 'title-speed) 60.0)))
+         (let loop ((k 0) (t (title-new)) (last-h #f) (last-c #f) (worst 0.0))
+           (if (< k 3600)
+               (let* ((t (title-step t tn r #f))
+                      (c (title-camera t tn tr 480 270))
+                      (h (cam-heading c))
+                      (d (if last-h (abs (atan (sin (- h last-h)) (cos (- h last-h)))) 0.0)))
+                 (loop (+ k 1) t h c (max worst d)))
+               (assert-true (< worst 0.03))))))
+     '(0.0 1.0))))
