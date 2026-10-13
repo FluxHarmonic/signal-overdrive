@@ -40,6 +40,14 @@ function capture(arm, mix) {
   return "RESULT: SETUP-FAILED — three attempts";
 }
 
+{
+  const env = process.env, bin = env.CONDUCTOR_BINARY || path.join(process.cwd(), "build/release/bin/signal-overdrive");
+  let sha = "unreadable";
+  try { sha = spawnSync("sha256sum", [bin], { encoding: "utf8" }).stdout.split(/\s+/)[0]; } catch { /* reported as unreadable */ }
+  log(`config: ${env.CONDUCTOR_HEADLESS === "1" ? "headless (no window or drawing)" : "graphical (private Xvfb, software GL)"}; ` +
+      `cpus ${env.CONDUCTOR_CPU_LIST || "first allowed"}; nice ${env.CONDUCTOR_NICE ?? "15"}; sink ${env.CONDUCTOR_SINK || "worker-null"}; ` +
+      `binary ${bin} sha256 ${sha}; load ${fs.readFileSync("/proc/loadavg", "utf8").trim()}`);
+}
 const verdicts = { normal: capture("normal", "music") };
 const companion = capture("normal", "full");
 verdicts["normal-mix underruns"] = /product RED|RESULT: (FAIL|SETUP-FAILED)/.test(companion) ? companion : "RESULT: PASS — no product failure in the full mix";
