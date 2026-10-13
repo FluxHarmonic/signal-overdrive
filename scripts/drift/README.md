@@ -12,6 +12,8 @@ tests through the pinned CLI's linked native-dependency harness, with
 one CPU/nice 15, 4 GiB and a 30-minute build/test bound. This is required
 for the DSP/ring checks; plain source evaluation has no `dsp-init` binding.
 It writes RESULT and the test log/report, with null audio and no display.
+The CLI's default dev/bytecode configuration retains linked native C
+bindings while avoiding native compilation of the runner/build tool DSL.
 
 | Actual normal capture | p95 | Worst | Matching coverage | Sounding underruns | Resyncs |
 | --- | ---: | ---: | ---: | ---: | ---: |
