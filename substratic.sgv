@@ -41,5 +41,5 @@
   check: (arm: "scripts/check-site-arm.mjs"
           gate-files: ("scripts/plausible-check.mjs"))
   ;; a private preview on the VPN (substratic's host-site serves both ports)
-  host: (https: 8861 http: 8862 dir: "~/Projects/Code/sigil/signal-overdrive-site-hosted" interface: "wg0")
+  host: (https: 8861 http: 8860 dir: "~/Projects/Code/sigil/signal-overdrive-site-hosted" interface: "wg0")
   remote: (web-config: web))
