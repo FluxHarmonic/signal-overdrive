@@ -95,9 +95,9 @@
     ;; arrives; the card's length is the four beats.
     (define CARD-KNOBS
       '((card         card     0.0    1.0    1.0   1.0     "CARD")
-        (card-height  card     200.0  4000.0 50.0  1600.0  "CARD START HEIGHT")
+        (card-height  card     200.0  4000.0 50.0  2600.0  "CARD START HEIGHT")
         (card-hold    card     0.0    3.0    0.05  0.4     "CARD HOLD (HIGH)")
-        (card-zoom    card     0.2    5.0    0.05  1.6     "CARD ZOOM TIME")
+        (card-zoom    card     0.2    5.0    0.05  1.8     "CARD ZOOM TIME")
         (card-tilt    card     0.2    5.0    0.05  1.4     "CARD TILT TIME")
         (card-move    card     0.2    5.0    0.05  1.4     "CARD MOVE TIME")
         (card-ease    card     1.0    5.0    0.1   2.0     "CARD EASE")

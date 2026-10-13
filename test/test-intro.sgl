@@ -146,8 +146,8 @@
             (assert-true (<= (cam-height c) (+ last-h 1e-9)))
             (loop (cdr cs) (projected-y p) (mark-px c) (behind c) (cam-height c)))))))
   (test "no cut anywhere in it: no tick's step changes by 3 texels, nor its pitch by 0.06 rad"
-    ;; measured: steps up to 34 texels a tick mid-zoom, changing by at most
-    ;; 1.3; the pitch by at most 0.035 rad a tick mid-tilt
+    ;; measured: steps up to 54 texels a tick mid-zoom, changing by at most
+    ;; 2.0; the pitch by at most 0.035 rad a tick mid-tilt
     (let loop ((cs CAMS) (last-d #f))
       (unless (null? (cdr cs))
         (let* ((a (cdar cs)) (b (cdadr cs)) (d (dist a b)))
