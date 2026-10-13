@@ -207,11 +207,13 @@ export function armSignature(arm, analysis, clocks) {
 //   when RED with its own defect's signature.
 export const DROPOUT_LIMITS = { longest_ms: 50, total_ms: 250 };
 export function classifyCapture(arm, analysis, signature) {
-  const underruns = analysis.music_underruns_in_race;
+  const underruns = analysis.music_underruns_total ?? analysis.music_underruns_in_race;
   const d = analysis.device_dropouts;
   const gate = analysis.pass ? "GREEN" : "RED";
-  if (Number.isFinite(underruns) && underruns > 0)
-    return { status: "FAIL", gate, reason: `product RED: ${underruns} sounding music underrun frames during the race` };
+  if (!Number.isFinite(underruns))
+    return { status: "SETUP-FAILED", gate, reason: "no music underrun counter in the trace" };
+  if (underruns > 0)
+    return { status: "FAIL", gate, reason: `product RED: ${underruns} sounding music underrun frames since music started` };
   if (d && (d.longest_ms > DROPOUT_LIMITS.longest_ms || d.total_ms > DROPOUT_LIMITS.total_ms))
     return { status: "SETUP-FAILED", gate, reason: `device dropouts ${d.count} / ${d.total_ms} ms (longest ${d.longest_ms} ms) with no game underruns; re-run` };
   if (arm === "normal")
@@ -289,10 +291,45 @@ export function analyze(run) {
     }
   }
   const end = Math.min(ref.seconds - 2 * halfWindow, clocks.at(-1).song - halfWindow);
+  // Tracking alone is blind to a jump of whole beats: the drums make a
+  // window a beat or a bar off still correlate above 0.5, and the true lag
+  // is outside the 120 ms search, so tracking would follow the alias
+  // (shown by shifting a real capture after 25 s by +-1 beat, 2 beats and
+  // a bar: all GREEN). Every 8 windows an 8 s window, searched 2 s either
+  // side, re-checks the lag. Where the music is distinctive the true lag
+  // beats the aliases by a wide margin (0.99 against 0.76 at the count-in);
+  // in a beat-periodic stretch (the hold's riser) the true lag and its
+  // beat aliases score within 0.05 and no method can tell them apart. So
+  // tracking re-locks only when a lag more than 60 ms away scores at least
+  // 0.7 and beats the best score within 60 ms of the tracked lag by at least
+  // 0.15. (A resync's silence inside the window drops the true lag's score;
+  // the aliases that then win score about 0.55.) The long window must lie
+  // inside the analyzed race: past it the capture is silence.
+  const VERIFY_EVERY = 8, VERIFY_SECONDS = 8, VERIFY_SEARCH = 2, RELOCK_MARGIN = 0.15, RELOCK_FLOOR = 0.7;
+  const relocks = [];
+  let windowIndex = 0;
   for (let song = 2; song < end; song += 60 / 140) {
     const wall = wallAt(song);
     if (wall === null) continue;
     const expected = (wall - start) / 1000;
+    if (trackedOffset !== null && windowIndex++ % VERIFY_EVERY === 0) {
+      const vFrom = Math.round(song * ENVELOPE_RATE), vLength = Math.round(VERIFY_SECONDS * ENVELOPE_RATE);
+      const c = expected + trackedOffset;
+      const from = Math.max(0, Math.floor((c - VERIFY_SEARCH) * ENVELOPE_RATE));
+      const to = Math.min(cap.values.length, Math.ceil((c + VERIFY_SECONDS + VERIFY_SEARCH) * ENVELOPE_RATE));
+      const nearFrom = Math.max(0, Math.floor((c - 0.06) * ENVELOPE_RATE));
+      const nearTo = Math.min(cap.values.length, Math.ceil((c + VERIFY_SECONDS + 0.06) * ENVELOPE_RATE));
+      if (song + VERIFY_SECONDS <= end && vFrom + vLength <= ref.values.length && to - from >= vLength && nearTo - nearFrom >= vLength) {
+        const window = ref.values.subarray(vFrom, vFrom + vLength);
+        const best = correlate(window, cap.values.subarray(from, to));
+        const near = correlate(window, cap.values.subarray(nearFrom, nearTo));
+        const offset = (start + (from + best.lag) / ENVELOPE_RATE * 1000 - wall) / 1000;
+        if (best.norm >= RELOCK_FLOOR && Math.abs(offset - trackedOffset) > 0.06 && best.norm - near.norm >= RELOCK_MARGIN) {
+          relocks.push({ song, from_ms: trackedOffset * 1000, to_ms: offset * 1000, norm: best.norm, tracked_norm: near.norm });
+          trackedOffset = offset;
+        }
+      }
+    }
     // INTERCEPT follows the last correlated lag after acquisition. A
     // fresh wide search at every beat aliases repeated musical phrases.
     // Tracking changes the search, never the absolute error or verdict.
@@ -346,28 +383,35 @@ export function analyze(run) {
   const resyncWalls = [];
   for (let i = 1; i < clocks.length; i++)
     if (clocks[i].metrics.resyncs !== clocks[i - 1].metrics.resyncs) resyncWalls.push(clocks[i].wall);
-  const afterResync = r => { const w = start + r.at_s * 1000; return resyncWalls.some(x => w >= x && w - x <= 1000); };
+  // Heard a ring's depth plus latency after the resync frame (229-316 ms
+  // measured): only silence starting 100-700 ms after a resync frame counts.
+  const afterResync = r => { const w = start + r.at_s * 1000; return resyncWalls.some(x => w - x >= 100 && w - x <= 700); };
   const sounding = (silent?.runs ?? []).filter(r => {
     const song = songAtCapture(r.at_s);
     return song !== null && referenceLevel(song, r.ms / 1000) > 0.005;
   });
   const resyncSilences = sounding.filter(afterResync);
   const dropped = sounding.filter(r => !afterResync(r));
+  const tenth = x => Math.round(x * 10) / 10;
   const dropouts = silent === null ? null : { min_ms: silent.min_ms, silent_runs: silent.count, silent_ms: silent.total_ms,
-    count: dropped.length, total_ms: Math.round(dropped.reduce((t, r) => t + r.ms, 0)),
-    longest_ms: Math.round(Math.max(0, ...dropped.map(r => r.ms))), first_at_capture_s: dropped.slice(0, 5).map(r => +r.at_s.toFixed(3)),
+    count: dropped.length, total_ms: tenth(dropped.reduce((t, r) => t + r.ms, 0)),
+    longest_ms: tenth(Math.max(0, ...dropped.map(r => r.ms))), first_at_capture_s: dropped.slice(0, 5).map(r => +r.at_s.toFixed(3)),
     resync_silences: { count: resyncSilences.length, total_ms: Math.round(resyncSilences.reduce((t, r) => t + r.ms, 0)),
       longest_ms: Math.round(Math.max(0, ...resyncSilences.map(r => r.ms))) } };
   // The game's own sounding-underrun counter over the analyzed race.
   const raceClocks = clocks.filter(c => c.song >= 2);
   const underrunCount = c => Number(c?.metrics["music-underruns"]);
   const musicUnderruns = raceClocks.length ? underrunCount(raceClocks.at(-1)) - underrunCount(raceClocks[0]) : null;
+  // Since music started: the counter keeps closed streams' counts, so this
+  // includes the title (a startup stall drains the ring before the race).
+  const musicUnderrunsTotal = clocks.length ? underrunCount(clocks.at(-1)) : null;
   return { ...verdict, windows: rows.length, correlated: good.length, capture_rms: cap.rms,
     reference_sample_rate: referenceRate, reference_rms: ref.rms,
     correlation_search: "8 s acquisition from song 2 (count-in into lap1), then 120 ms around the last correlated lag; among peaks within 0.05 of the best, the one nearest the tracked (or nominal) lag",
     acquisition,
     capture_start_ms: start, capture_clock_spread_ms: Math.max(...bounds) - start,
-    device_dropouts: dropouts, music_underruns_in_race: musicUnderruns,
+    device_dropouts: dropouts, music_underruns_in_race: musicUnderruns, music_underruns_total: musicUnderrunsTotal,
+    relocks,
     insert_cost_ms: { samples: costs.length, p50: percentile(costs, 0.5), p95: percentile(costs, 0.95), worst: Math.max(...costs) },
     intended_jumps: trace.jumps, rows };
 }

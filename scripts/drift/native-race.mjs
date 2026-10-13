@@ -92,18 +92,18 @@ try {
   function route() {
     const inputs = JSON.parse(pulse(["-f", "json", "list", "sink-inputs"]))
       .filter(i => owned(Number(i.properties?.["application.process.id"])));
-    if (!inputs.length) return false;
+    if (!inputs.length) return "absent";
     for (const i of inputs) fs.appendFileSync(path.join(RUN, "routing.jsonl"), JSON.stringify({ wall_ms: Date.now(),
       index: i.index, sink: i.sink, sink_name: sinkName(i.sink), corked: i.corked ?? null }) + "\n");
-    if (inputs.some(unlinked)) return false;
+    if (inputs.some(unlinked)) return "pending";
     const stray = inputs.find(i => String(i.sink) !== sink[0]);
     if (stray) throw new Error(`owned stream ${stray.index} on sink ${stray.sink} (${sinkName(stray.sink)}), not ${SINK}`);
     fs.writeFileSync(path.join(RUN, "routing.json"), JSON.stringify(inputs.map(i =>
       ({ index: i.index, sink: i.sink, pid: i.properties["application.process.id"] })), null, 2));
-    return true;
+    return "ok";
   }
   let routed = false;
-  for (let i = 0; i < 1000 && !(routed = route()); i++) {
+  for (let i = 0; i < 1000 && !(routed = route() === "ok"); i++) {
     if (game.exitCode !== null) throw new Error("game exited before audio");
     await sleep(10);
   }
@@ -124,7 +124,7 @@ try {
   for (let i = 0; i < 400; i++) {
     await sleep(1000);
     if (game.exitCode !== null) throw new Error("game exited before race completed");
-    if (!route()) throw new Error("owned music stream disappeared");
+    if (route() === "absent") throw new Error("owned music stream disappeared");
     const trace = parseTrace(text), last = trace.clocks.at(-1), results = trace.jumps.find(j => j.mark === "results");
     if (results && last?.phase === "finished" && last.song > results.bar * 12 / 7 + 4) { complete = true; break; }
   }

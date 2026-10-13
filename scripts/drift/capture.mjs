@@ -25,6 +25,10 @@ const MUSIC_ONLY = MIX === "music";
 // The capture sink must be a null sink with no loopback to any device,
 // used by nothing else during the run (worker-null is shared by sessions).
 const SINK = process.env.CONDUCTOR_SINK || "worker-null";
+// A failure of the game itself (a crash, a hang, a stream that goes away, a
+// race that misses sections): a product FAIL, never re-run as a setup fault.
+class ProductError extends Error {}
+
 // PulseAudio reports a stream that is not linked to any sink yet with
 // PA_INVALID_INDEX. While it is also corked it plays nowhere: wait for the
 // link (at most 2 s) rather than treat it as a stray route.
@@ -54,11 +58,22 @@ try {
     throw new Error(`${SINK} monitor is absent`);
   // Anything else playing into the capture sink would be mixed into the
   // capture: refuse to start, and abort if it appears mid-run.
+  // A stream is the game's when its PID is the launched game or one of its
+  // descendants (another copy of the same binary is not ours). A stream
+  // with no readable PID is never ours.
+  function owned(pid) {
+    if (!game || !pid) return false;
+    for (let i = 0; i < 32 && pid > 1; i++) {
+      if (pid === game.pid) return true;
+      try { pid = Number(fs.readFileSync(`/proc/${pid}/status`, "utf8").match(/^PPid:\s*(\d+)/m)[1]); }
+      catch { return false; }
+    }
+    return false;
+  }
+  const isOurs = input => owned(Number(input.properties?.["application.process.id"]));
   function foreignOnSink(inputs) {
-    return inputs.filter(input => String(input.sink) === nullSink[0]).filter(input => {
-      const pid = input.properties?.["application.process.id"];
-      try { return !pid || fs.realpathSync(`/proc/${pid}/exe`) !== fs.realpathSync(BIN); } catch { return true; }
-    }).map(input => `${input.properties?.["application.name"] ?? "?"} pid ${input.properties?.["application.process.id"] ?? "?"}`);
+    return inputs.filter(input => String(input.sink) === nullSink[0] && !isOurs(input))
+      .map(input => `${input.properties?.["application.name"] ?? "?"} pid ${input.properties?.["application.process.id"] ?? "?"}`);
   }
   const foreignAtStart = foreignOnSink(JSON.parse(pulse(["-f", "json", "list", "sink-inputs"])));
   if (foreignAtStart.length) throw new Error(`${SINK} is in use by another client (${foreignAtStart.join(", ")}); refusing a mixed capture`);
@@ -93,30 +108,27 @@ try {
   function gameOutput(bytes) { fs.writeSync(logFD, bytes); gameText += bytes; }
   game.stdout.on("data", gameOutput); game.stderr.on("data", gameOutput);
   let verifiedPID = null;
+  // "ok", "pending" (corked and not yet linked) or "absent".
   function verifyRoute() {
     const inputs = JSON.parse(pulse(["-f", "json", "list", "sink-inputs"]));
-    const ours = inputs.filter(input => {
-      const pid = input.properties?.["application.process.id"];
-      if (!pid) return false;
-      try { return fs.realpathSync(`/proc/${pid}/exe`) === fs.realpathSync(BIN); } catch { return false; }
-    });
+    const ours = inputs.filter(isOurs);
     const foreign = foreignOnSink(inputs);
     if (foreign.length) throw new Error(`another client began playing into ${SINK} (${foreign.join(", ")}); capture is mixed`);
-    if (!ours.length) return false;
+    if (!ours.length) return "absent";
     // Every observation, from the stream's first appearance on.
     for (const input of ours) fs.appendFileSync(path.join(RUN, "routing.jsonl"), JSON.stringify({ wall_ms: Date.now(),
       index: input.index, sink: input.sink, sink_name: sinkName(input.sink), corked: input.corked ?? null }) + "\n");
-    if (ours.some(unlinked)) return false;
+    if (ours.some(unlinked)) return "pending";
     const stray = ours.find(input => String(input.sink) !== nullSink[0]);
     if (stray) throw new Error(`game stream ${stray.index} on sink ${stray.sink} (${sinkName(stray.sink)}), not ${SINK}`);
     verifiedPID = ours[0].properties["application.process.id"];
     fs.writeFileSync(path.join(RUN, "routing.json"), JSON.stringify(ours.map(input => ({ index: input.index, sink: input.sink, pid: input.properties["application.process.id"] })), null, 2));
-    return true;
+    return "ok";
   }
   // Poll fast until the stream appears: a stray route is killed within
   // about one poll plus a pactl call.
-  for (let i = 0; i < 1000 && !verifyRoute(); i++) {
-    if (game.exitCode !== null) throw new Error("game exited before opening its Pulse stream");
+  for (let i = 0; i < 1000 && verifyRoute() !== "ok"; i++) {
+    if (game.exitCode !== null) throw new ProductError("game exited before opening its Pulse stream");
     await sleep(10);
   }
   if (!verifiedPID) throw new Error(`no verified game stream on ${SINK}`);
@@ -154,12 +166,12 @@ try {
   for (let i = 0; i < 400; i++) {
     await sleep(1000);
     sampleScheduling();
-    if (!verifyRoute()) throw new Error("game Pulse stream disappeared");
+    if (verifyRoute() === "absent") throw new ProductError("game Pulse stream disappeared");
     const trace = parseTrace(gameText), final = trace.jumps.find(jump => jump.mark === "results");
     if (final && trace.clocks.at(-1)?.song > final.bar * 12 / 7 + 4) { complete = true; break; }
     if (game.exitCode !== null) break;
   }
-  if (!complete) throw new Error("full intended race/coda did not complete");
+  if (!complete) throw new ProductError(game.exitCode !== null ? `game exited (${game.exitCode}) before the race and coda completed` : "full intended race/coda did not complete");
   stop(game); await sleep(1000); stop(game, "SIGKILL");
   await sleep(300); stop(capture); await sleep(100); stop(capture, "SIGKILL");
   const trace = parseTrace(gameText);
@@ -179,8 +191,15 @@ try {
       stdio: ["ignore", renderLog, renderLog] });
   fs.closeSync(renderLog);
   const code = await new Promise((resolve, reject) => { reference.once("exit", resolve); reference.once("error", reject); });
-  if (code !== 0) throw new Error(`offline reference failed (${code})`);
-  const result = analyze(RUN);
+  if (code !== 0) throw new ProductError(`offline reference failed (${code})`);
+  let result;
+  try { result = analyze(RUN); }
+  catch (error) {
+    // A trace that misses sections is the game's; other analysis errors
+    // (no capture clock, unreadable PCM) are the capture's.
+    if (/missing grid race trace|did not visit every intended section/.test(error.message)) throw new ProductError(error.message);
+    throw error;
+  }
   if (scheduling.length > 1) {
     const first = scheduling[0], last = scheduling.at(-1);
     result.process_timing = {
@@ -205,8 +224,9 @@ try {
   console.log(JSON.stringify({ ...report, rows: undefined }));
   process.exitCode = MIX === "full" ? 0 : verdict.status === "PASS" ? 0 : verdict.status === "SETUP-FAILED" ? 125 : 1;
 } catch (error) {
-  fs.writeFileSync(path.join(RUN, "RESULT"), `RESULT: SETUP-FAILED — ${error.message}\n`);
-  console.error(`SETUP-FAILED: ${error.message}`); process.exitCode = 125;
+  const status = error instanceof ProductError ? "FAIL" : "SETUP-FAILED";
+  fs.writeFileSync(path.join(RUN, "RESULT"), `RESULT: ${status} — ${status === "FAIL" ? "product: " : ""}${error.message}\n`);
+  console.error(`${status}: ${error.message}`); process.exitCode = status === "FAIL" ? 1 : 125;
 } finally {
   clearTimeout(timeout);
   pool.cleanup();

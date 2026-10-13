@@ -29,9 +29,11 @@ and only mask the correlation. Measured on one build, same race timing:
 | music only (`sfx=0`) | 0.93 | 99.6% | 12.7 ms | 21.9 ms |
 
 The full mix stays as a **reported companion** (`CONDUCTOR_MIX=full`, and
-`gate.mjs` runs it): its RESULT is a REPORT with the same timing numbers
-and coverage, never a verdict, so a regression that only shows in the mix
-stays visible.
+`gate.mjs` runs it): its timing numbers and coverage are a REPORT, never a
+verdict, so a regression that only shows in the mix stays visible. A
+product failure in the full mix (sounding music underruns, a crash, a race
+that misses sections) does fail the gate: underruns are the game's, and
+the full mix is the workload players run.
 
 ## How a capture is judged
 
@@ -45,7 +47,19 @@ stays visible.
    about 90 ms (a resync's 60 ms threshold plus half a row). Among peaks
    within 0.05 of the best, the one nearest the tracked lag wins, so the
    drums' beat and half-beat aliases cannot pull it away.
-3. **Absolute error** for each window is the simulation's wall time for
+3. **Re-verification**: tracking alone cannot see a jump of whole beats
+   (a section landing a beat or a bar off mid-race, a resync landing off),
+   because a window a beat or a bar off still correlates above 0.5 and the
+   true lag is outside the search. Every 8 windows an 8-second window,
+   searched 2 s either side, re-checks the lag, and tracking re-locks when a
+   lag more than 60 ms away scores at least 0.7 and beats the best score
+   within 60 ms of the tracked lag by at least 0.15. In a beat-periodic
+   stretch (the hold's riser) the true lag and its beat aliases score
+   within 0.05 of each other at any envelope resolution, so no re-lock
+   happens there; a shift is caught once the music is distinctive again.
+   Shifting a real capture by +-1 beat, 2 beats or a bar after 25 s or 60 s
+   turns it RED (it was GREEN before this check).
+4. **Absolute error** for each window is the simulation's wall time for
    that song position minus when the capture heard it, dated from the
    capture's own byte clock. A steady +11 ms is expected: the audible clock
    advances only when the device callback consumes a 1024-frame period
@@ -53,12 +67,15 @@ stays visible.
 
 Each capture is then classified by cause:
 
-- **Sounding music underruns during the race** (the game's own counter):
+- **Sounding music underruns since music started** (the game's own
+  counter, which keeps closed streams' counts, so the title is included):
   product RED.
+- A crash, a hang, a game stream that disappears, a failed reference render
+  or a race that misses sections: product FAIL, never re-run.
 - **Device dropouts**: exact digital silence where the aligned reference
-  sounds, not within a second after a resync (a resync cuts every note, and
-  a held part stays silent until its next note; those are reported as
-  `resync_silences`). One over 50 ms, or more than 250 ms in total, means
+  sounds, not starting 100-700 ms after a resync frame (when the resync is
+  heard: a resync cuts every note, and a held part stays silent until its
+  next note; those are reported as `resync_silences`). One over 50 ms, or more than 250 ms in total, means
   the capture did not play in real time: **SETUP-FAILED**, re-run. Shorter
   ones are reported only: a 256-frame PipeWire quantum (5.3 ms) of silence
   appears even for a plain `pacat` tone into the null sink on a loaded host.
@@ -79,13 +96,17 @@ Each must be RED and show its own defect's signature in `analysis.json`:
 - `CONDUCTOR_SINK=drift-null`: a **private null sink**. `worker-null` is
   shared by sessions, and another client playing into the capture sink
   would be mixed into the measurement. A capture refuses to start, or
-  aborts, if any other client plays into its sink. Create it with
+  aborts, if any other client plays into its sink. The game's stream is
+  recognized by process ancestry from the launched game, not by its
+  executable (another copy of the same binary is foreign). Create it with
   `pactl load-module module-null-sink sink_name=drift-null` (no loopback;
   never make it the default) and unload it when done.
 - Routing: the harness sets `PULSE_SINK` before the game starts, polls every
   10 ms until the game's stream appears and then every second, appends each
   observation to `routing.jsonl`, and kills the game at once if its stream
-  is on any other sink.
+  is on any other sink. A corked stream reported with PA_INVALID_INDEX
+  (4294967295) is not linked anywhere yet and plays nowhere: the harness
+  waits up to 2 s for the link, then gives up (SETUP-FAILED).
 - `CONDUCTOR_CPU_LIST=5,6 CONDUCTOR_NICE=0` lets the game run like a
   player's: the default (one CPU at nice 15) pins the audio callback thread
   to the main thread's CPU, and on a busy host the device output drops out.

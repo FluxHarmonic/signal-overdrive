@@ -1,13 +1,18 @@
 // The whole drift gate, one capture at a time: the music-only normal arm,
-// the full-mix companion (reported, never a verdict), then the depth,
-// immediate and skew sabotage arms. A SETUP-FAILED capture (the device or
-// sink dropped out) is re-run, at most twice.
+// the full-mix companion (its timing and coverage are reported, never a
+// verdict), then the depth, immediate and skew sabotage arms. A SETUP-FAILED
+// capture (the device or sink dropped out) is re-run, at most twice; a
+// product FAIL (crash, hang, missing sections, underruns) never is.
+// Sounding music underruns fail the gate in either mix: they are the
+// game's, and the full mix is the workload players run.
 //
 //   node scripts/drift/gate.mjs ROOT
 //
 // ROOT must not exist. Each capture goes to ROOT/<arm>[-mix][-try2|3].
 // ROOT/GATE holds one line per capture and the verdict: PASS when the
-// normal arm is GREEN and every sabotage arm is RED for its own defect.
+// normal arm is GREEN, neither mix shows a product failure (and the
+// companion did not fail setup three times), and every sabotage arm is RED
+// for its own defect.
 // The environment (CONDUCTOR_SINK, CONDUCTOR_CPU_LIST, CONDUCTOR_NICE,
 // CONDUCTOR_BINARY, CONDUCTOR_HEADLESS, CONDUCTOR_GC_PROFILE) passes
 // through to capture.mjs.
@@ -36,8 +41,9 @@ function capture(arm, mix) {
 }
 
 const verdicts = { normal: capture("normal", "music") };
-capture("normal", "full");
+const companion = capture("normal", "full");
+verdicts["normal-mix underruns"] = /product RED|RESULT: (FAIL|SETUP-FAILED)/.test(companion) ? companion : "RESULT: PASS — no product failure in the full mix";
 for (const arm of ["depth", "immediate", "skew"]) verdicts[arm] = capture(arm, "music");
 const pass = Object.values(verdicts).every(v => v.startsWith("RESULT: PASS"));
-log(`GATE: ${pass ? "PASS" : "FAIL"} — normal GREEN and each sabotage arm RED for its own defect: ${pass ? "yes" : "no"}`);
+log(`GATE: ${pass ? "PASS" : "FAIL"} — normal GREEN, no product failure in either mix, each sabotage arm RED for its own defect: ${pass ? "yes" : "no"}`);
 process.exitCode = pass ? 0 : 1;

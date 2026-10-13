@@ -38,6 +38,21 @@ assert.equal(trace.clocks[0].metrics["music-ms"], "1.2");
   assert.equal(correlate(window, periodic, 3000).lag, 3000);
 }
 
+// The preference only breaks near-ties: a clearly better peak far from the
+// preferred lag must win over a weaker one beside it (measured on a real
+// capture: true lag 0.99, beat alias 0.76). A tie threshold of 0.3 fails this.
+{
+  const window = Float32Array.from({ length: 1500 }, () => random());
+  const capture = Float32Array.from({ length: 9000 }, () => random() * 0.02);
+  for (let i = 0; i < window.length; i++) {
+    capture[6000 + i] = window[i];                                   // the true lag, exact
+    capture[1000 + i] = window[i] * 0.6 + (random() - 0.5) * 0.55;   // a weaker look-alike
+  }
+  const weak = correlate(window, capture.subarray(800, 2700)).norm;
+  assert.ok(weak > 0.6 && weak < 0.9, `look-alike score ${weak}`);
+  assert.equal(correlate(window, capture, 1000).lag, 6000);
+}
+
 // Arm signatures from matched windows.
 {
   const rows = (f, from = 0, to = 100) => Array.from({ length: 200 }, (_, i) => ({ song: from + (to - from) * i / 200, norm: 0.9, error_ms: f(from + (to - from) * i / 200) }));
