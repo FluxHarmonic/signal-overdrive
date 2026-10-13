@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
-import { analyze, parseTrace } from "./analyze.mjs";
+import { analyze, armSignature, classifyCapture, parseTrace } from "./analyze.mjs";
 import { cachedTool, localProcesses, privateDisplay, sleep } from "./native.mjs";
 
 const ROOT = path.resolve(process.env.CONDUCTOR_ROOT || process.cwd());
@@ -15,9 +15,13 @@ const GL_THREADS = process.env.CONDUCTOR_GL_THREADS || "1";
 if (!["1", "2"].includes(GL_THREADS)) throw new Error("at most two software-rendering threads");
 const HEADLESS = process.env.CONDUCTOR_HEADLESS === "1";
 const GC_PROFILE = process.env.CONDUCTOR_GC_PROFILE === "1";
-// Diagnostic only: the engine silent and no one-shots, music alone in the
-// capture. The gate's verdict is defined on the normal mix.
-const MUSIC_ONLY = process.env.CONDUCTOR_MUSIC_ONLY === "1";
+// The gate judges the music alone (sfx=0: engine silent, no one-shots, the
+// synth still rendering): the conductor clocks only the music, and the
+// engine and one-shots in a full mix only mask the correlation.
+// CONDUCTOR_MIX=full captures the full mix as a reported companion,
+// never a verdict.
+const MIX = process.env.CONDUCTOR_MIX === "full" ? "full" : "music";
+const MUSIC_ONLY = MIX === "music";
 // The capture sink must be a null sink with no loopback to any device,
 // used by nothing else during the run (worker-null is shared by sessions).
 const SINK = process.env.CONDUCTOR_SINK || "worker-null";
@@ -176,10 +180,18 @@ try {
     };
   }
   fs.writeFileSync(path.join(RUN, "analysis.json"), JSON.stringify(result, null, 2) + "\n");
-  const expected = ARM === "normal" ? result.pass : !result.pass;
-  fs.writeFileSync(path.join(RUN, "RESULT"), `RESULT: ${expected ? "PASS" : "FAIL"} — ${ARM} captured gate ${result.pass ? "GREEN" : "RED"}\n`);
-  console.log(JSON.stringify({ ...result, arm: ARM, expected_verdict: expected, rows: undefined }));
-  process.exitCode = expected ? 0 : 1;
+  const verdictClocks = trace.clocks.filter(c => c.audio !== null);
+  const signature = ARM === "normal" ? null : armSignature(ARM, result, verdictClocks);
+  const verdict = classifyCapture(ARM, result, signature);
+  const report = { ...result, mix: MIX, arm: ARM, signature, verdict };
+  fs.writeFileSync(path.join(RUN, "analysis.json"), JSON.stringify(report, null, 2) + "\n");
+  const timing = `p95 ${result.p95_ms?.toFixed(1)} ms, worst ${result.worst_ms?.toFixed(1)} ms, coverage ${(100 * result.coverage).toFixed(1)}%`;
+  let line;
+  if (MIX === "full") line = `RESULT: REPORT — full-mix companion (not a verdict), ${ARM}: ${timing}; ${verdict.reason}`;
+  else line = `RESULT: ${verdict.status} — ${ARM}: ${verdict.reason}; ${timing}`;
+  fs.writeFileSync(path.join(RUN, "RESULT"), line + "\n");
+  console.log(JSON.stringify({ ...report, rows: undefined }));
+  process.exitCode = MIX === "full" ? 0 : verdict.status === "PASS" ? 0 : verdict.status === "SETUP-FAILED" ? 125 : 1;
 } catch (error) {
   fs.writeFileSync(path.join(RUN, "RESULT"), `RESULT: SETUP-FAILED — ${error.message}\n`);
   console.error(`SETUP-FAILED: ${error.message}`); process.exitCode = 125;

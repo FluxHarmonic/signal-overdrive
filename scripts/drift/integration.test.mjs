@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import assert from "node:assert/strict";
-import { analyze } from "./analyze.mjs";
+import { analyze as currentAnalyze } from "./analyze.mjs";
+// ANALYZER=path runs these fixtures against another analyzer (a sabotage leg).
+const { analyze } = process.env.ANALYZER ? await import(path.resolve(process.env.ANALYZER)) : { analyze: currentAnalyze };
 
 const RATE = 48000, seconds = 18, frames = RATE * seconds;
 const root = fs.mkdtempSync("/tmp/conductor-analyzer-integration-");
@@ -17,8 +19,12 @@ for (let i = 0; i < frames; i++) {
   reference.writeFloatLE(value, i * 8); reference.writeFloatLE(value, i * 8 + 4);
 }
 
+// A count-in: the first four bars repeat one bar exactly, as the grid does.
+const BAR = Math.round(RATE * 12 / 7);
+const countIn = Float32Array.from(wave, (x, i) => i < 4 * BAR ? wave[i % BAR] : x);
+
 const marks = ["grid", "lap1", "lap2", "hold", "fill", "traced", "uplink", "results"];
-function fixture(arm, offset, clockRate = 1, referenceRate = RATE) {
+function fixture(arm, offset, clockRate = 1, referenceRate = RATE, source = wave, noisyFrom = null, noisyTo = null) {
   const run = path.join(root, arm); fs.mkdirSync(run);
   let rendered = reference;
   if (referenceRate !== RATE) {
@@ -30,12 +36,23 @@ function fixture(arm, offset, clockRate = 1, referenceRate = RATE) {
     }
     fs.writeFileSync(path.join(run, "meta.json"), JSON.stringify({ reference_sample_rate: referenceRate }));
   }
+  if (source !== wave) {
+    rendered = Buffer.alloc(frames * 8);
+    for (let i = 0; i < frames; i++) { rendered.writeFloatLE(source[i], i * 8); rendered.writeFloatLE(source[i], i * 8 + 4); }
+  }
   fs.writeFileSync(path.join(run, "reference.pcm"), rendered);
   const capture = Buffer.alloc((frames + RATE * 7) * 4);
   const lead = Math.round((1 + offset) * RATE);
+  let blockGain = 1;
   for (let i = 0; i < frames; i++) {
-    const source = arm === "wrong-material" ? (i + Math.round(RATE * 12 / 7)) % frames : i;
-    const value = Math.round(wave[source] * 32767);
+    const from = arm === "wrong-material" ? (i + Math.round(RATE * 12 / 7)) % frames : i;
+    // Noise in 64-sample blocks over [noisyFrom, noisyTo) s of song, so it
+    // survives the 16-sample envelope: the true lag there scores under a
+    // clean copy of the same bar elsewhere.
+    const noisy = noisyFrom !== null && i >= noisyFrom * RATE && i < noisyTo * RATE;
+    if (noisy && i % 64 === 0) blockGain = 1 + 0.6 * (random() - 0.5);
+    const sample = arm === "wrong-material" ? wave[from] : source[from] * (noisy ? blockGain : 1);
+    const value = Math.max(-32768, Math.min(32767, Math.round(sample * 32767)));
     capture.writeInt16LE(value, (i + lead) * 4);
     capture.writeInt16LE(value, (i + lead) * 4 + 2);
   }
@@ -66,10 +83,14 @@ try {
   const wrong = fixture("wrong-material", 0);
   assert.ok(!wrong.pass);
   assert.ok(wrong.p95_ms > 1600 || wrong.coverage < 0.95);
+  // The count-in alias: the true lag at song 2 is noisy, a bar later clean.
+  const countInRun = fixture("count-in", 0.007, 1, RATE, countIn, 2.0, 3.6);
+  assert.ok(countInRun.pass, JSON.stringify({ p95: countInRun.p95_ms, worst: countInRun.worst_ms, coverage: countInRun.coverage }));
+  assert.ok(Math.abs(countInRun.p95_ms - 7) < 1);
   const skew = fixture("skew", 0, 1.01);
   assert.ok(!skew.pass);
   assert.ok(skew.p95_ms > 100);
-  console.log(JSON.stringify({ normal: { p95: normal.p95_ms, worst: normal.worst_ms, coverage: normal.coverage },
+  console.log(JSON.stringify({ normal: { p95: normal.p95_ms, worst: normal.worst_ms, coverage: normal.coverage }, count_in_p95: countInRun.p95_ms,
     depth_p95: depth.p95_ms, wrong_material_p95: wrong.p95_ms, skew_p95: skew.p95_ms }));
-  console.log("Synthetic PCM and dated-clock integration: normal GREEN, depth/wrong-material/skew RED");
+  console.log("Synthetic PCM and dated-clock integration: normal and count-in GREEN, depth/wrong-material/skew RED");
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

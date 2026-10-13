@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { correlate, assess, parseTrace } from "./analyze.mjs";
+import { correlate, assess, parseTrace, armSignature, classifyCapture } from "./analyze.mjs";
 
 let seed = 42;
 const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
@@ -26,4 +26,43 @@ assert.ok(!assess(Array.from({ length: 100 }, (_, i) => i * 12), 1).pass);
 const trace = parseTrace("signal-overdrive: conductor reset wall 1000 mark grid\nsignal-overdrive: conductor intended tick 0 bar 0 mark grid\nsignal-overdrive: conductor clock wall 1001 song 0.01 audio 0 tick 0 phase countdown music on music-ms 1.2\n");
 assert.deepEqual(trace.jumps, [{ tick: 0, bar: 0, mark: "grid" }]);
 assert.equal(trace.clocks[0].metrics["music-ms"], "1.2");
-console.log("FFT correlation, unrelated material, threshold boundaries, coverage, offsets and growing drift: PASS");
+
+// Equal peaks one period apart: preferLag picks the nearer, the plain search
+// whichever scores higher by rounding.
+{
+  const period = 600, pattern = Float32Array.from({ length: period }, () => random());
+  const periodic = Float32Array.from({ length: 6000 }, (_, i) => pattern[i % period]);
+  const window = periodic.subarray(1200, 1200 + 1800);
+  assert.equal(correlate(window, periodic, 1200 + 600).lag % period, 0);
+  assert.equal(correlate(window, periodic, 1200 + 600).lag, 1800);
+  assert.equal(correlate(window, periodic, 3000).lag, 3000);
+}
+
+// Arm signatures from matched windows.
+{
+  const rows = (f, from = 0, to = 100) => Array.from({ length: 200 }, (_, i) => ({ song: from + (to - from) * i / 200, norm: 0.9, error_ms: f(from + (to - from) * i / 200) }));
+  const clocks = [];
+  for (let song = 0; song <= 100; song += 0.1) clocks.push({ song, metrics: { resyncs: String(Math.floor(song / 6)) } });
+  assert.ok(armSignature("immediate", { rows: rows(s => s < 6.86 ? 10 : 1725) }, clocks).matched);
+  assert.ok(!armSignature("immediate", { rows: rows(() => 10) }, clocks).matched);
+  assert.ok(armSignature("depth", { rows: rows(() => -240) }, clocks).matched);
+  assert.ok(!armSignature("depth", { rows: rows(() => 1700) }, clocks).matched);
+  // 1% fast: the error falls 10 ms a second, and each resync (every 6 s) resets it.
+  assert.ok(armSignature("skew", { rows: rows(s => 20 - 10 * (s % 6)) }, clocks).matched);
+  assert.ok(!armSignature("skew", { rows: rows(() => 45) }, clocks).matched);
+}
+
+// Verdicts by cause.
+{
+  const base = { pass: true, music_underruns_in_race: 0, device_dropouts: { count: 3, total_ms: 16, longest_ms: 6 } };
+  assert.equal(classifyCapture("normal", base).status, "PASS");
+  assert.equal(classifyCapture("normal", { ...base, pass: false }).status, "FAIL");
+  assert.equal(classifyCapture("normal", { ...base, music_underruns_in_race: 7407 }).status, "FAIL");
+  assert.equal(classifyCapture("normal", { ...base, device_dropouts: { count: 1, total_ms: 51, longest_ms: 51 } }).status, "SETUP-FAILED");
+  assert.equal(classifyCapture("normal", { ...base, device_dropouts: { count: 30, total_ms: 251, longest_ms: 10 } }).status, "SETUP-FAILED");
+  assert.equal(classifyCapture("normal", { ...base, device_dropouts: { count: 30, total_ms: 250, longest_ms: 50 } }).status, "PASS");
+  assert.equal(classifyCapture("skew", { ...base, pass: false }, { matched: true }).status, "PASS");
+  assert.equal(classifyCapture("skew", { ...base, pass: false }, { matched: false }).status, "FAIL");
+  assert.equal(classifyCapture("skew", base, { matched: true }).status, "FAIL");
+}
+console.log("FFT correlation, nominal-lag preference, arm signatures, verdict classes, threshold boundaries, coverage, offsets and growing drift: PASS");
