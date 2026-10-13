@@ -23,6 +23,9 @@ through the Flux Harmonic palette and Bayer dither pass.</p>
 </ul>
 <h2>What is in it</h2>
 <ul>
+<li>A title screen: the camera wanders the track by itself while the CORRUPT
+logo glitches on the beat; a start fades out into the race's countdown and
+fades back in (the TITLE knobs; <code>?title=0</code> skips it).</li>
 <li>Two tracks: <code>oval</code>, a wide, gentle test track (the default), and <code>loop</code>, curves of
 every tightness and a hairpin. Both have boost pads, the repair strip (the
 &quot;checksum lane&quot;) and ICE patches.</li>
@@ -510,6 +513,132 @@ the stream instead of as cues, the old way), <code>?hitchlog</code> (every frame
 <td>0</td>
 <td>0 to 1</td>
 <td>1</td>
+</tr>
+<tr>
+<td><code>fx-dip</code> FX HORIZON DIP</td>
+<td>fx</td>
+<td>1</td>
+<td>0 to 2</td>
+<td>0.1</td>
+</tr>
+<tr>
+<td><code>fx-pools</code> FX LIGHT POOLS</td>
+<td>fx</td>
+<td>1</td>
+<td>0 to 2</td>
+<td>0.1</td>
+</tr>
+<tr>
+<td><code>fx-chase</code> FX RAIL CHASE</td>
+<td>fx</td>
+<td>1</td>
+<td>0 to 1</td>
+<td>0.1</td>
+</tr>
+<tr>
+<td><code>fx-sky</code> FX SKYLINE LIFE</td>
+<td>fx</td>
+<td>1</td>
+<td>0 to 1</td>
+<td>0.1</td>
+</tr>
+<tr>
+<td><code>fx-glitch</code> FX ICE GLITCH</td>
+<td>fx</td>
+<td>1</td>
+<td>0 to 1</td>
+<td>0.1</td>
+</tr>
+<tr>
+<td><code>fx-warp</code> FX ICE WARP</td>
+<td>fx</td>
+<td>1</td>
+<td>0 to 1</td>
+<td>0.1</td>
+</tr>
+<tr>
+<td><code>fx-interf</code> FX INTERFERENCE</td>
+<td>fx</td>
+<td>1</td>
+<td>0 to 1</td>
+<td>0.1</td>
+</tr>
+<tr>
+<td><code>fx-solo</code> FX SOLO (0 ALL)</td>
+<td>fx</td>
+<td>0</td>
+<td>0 to 7</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>fx-tier</code> FX INTEGRITY (-1 REAL)</td>
+<td>fx</td>
+<td>-1</td>
+<td>-1 to 100</td>
+<td>5</td>
+</tr>
+<tr>
+<td><code>fx-showcase</code> FX SHOWCASE</td>
+<td>fx</td>
+<td>0</td>
+<td>0 to 1</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>fx-passes</code> FX GROUND PASSES</td>
+<td>fx</td>
+<td>1</td>
+<td>1 to 512</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>fx-hold</code> FX HOLD AT PEAK (COST)</td>
+<td>fx</td>
+<td>0</td>
+<td>0 to 1</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>title</code> TITLE SCREEN</td>
+<td>title</td>
+<td>1</td>
+<td>0 to 1</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>title-out</code> TITLE FADE OUT</td>
+<td>title</td>
+<td>0.5</td>
+<td>0 to 3</td>
+<td>0.05</td>
+</tr>
+<tr>
+<td><code>title-in</code> TITLE FADE IN</td>
+<td>title</td>
+<td>0.5</td>
+<td>0 to 3</td>
+<td>0.05</td>
+</tr>
+<tr>
+<td><code>title-speed</code> TITLE CAMERA SPEED</td>
+<td>title</td>
+<td>240</td>
+<td>0 to 400</td>
+<td>10</td>
+</tr>
+<tr>
+<td><code>title-height</code> TITLE CAMERA HEIGHT</td>
+<td>title</td>
+<td>96</td>
+<td>6 to 200</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>title-dist</code> TITLE CAMERA DIST</td>
+<td>title</td>
+<td>150</td>
+<td>20 to 200</td>
+<td>2</td>
 </tr>
 </tbody>
 </table>

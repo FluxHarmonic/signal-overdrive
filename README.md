@@ -17,6 +17,9 @@ through the Flux Harmonic palette and Bayer dither pass.
 
 ## What is in it
 
+- A title screen: the camera wanders the track by itself while the CORRUPT
+  logo glitches on the beat; a start fades out into the race's countdown and
+  fades back in (the TITLE knobs; `?title=0` skips it).
 - Two tracks: `oval`, a wide, gentle test track (the default), and `loop`, curves of
   every tightness and a hairpin. Both have boost pads, the repair strip (the
   "checksum lane") and ICE patches.
@@ -160,6 +163,24 @@ The knobs, from `signal-overdrive --knobs` (units are world texels, seconds and 
 | `spread` SPREAD | look | 8 | 0 to 64 | 4 |
 | `lut` DITHER BY LOOKUP | look | 1 | 0 to 1 | 1 |
 | `palette` PALETTE | look | 0 | 0 to 1 | 1 |
+| `fx-dip` FX HORIZON DIP | fx | 1 | 0 to 2 | 0.1 |
+| `fx-pools` FX LIGHT POOLS | fx | 1 | 0 to 2 | 0.1 |
+| `fx-chase` FX RAIL CHASE | fx | 1 | 0 to 1 | 0.1 |
+| `fx-sky` FX SKYLINE LIFE | fx | 1 | 0 to 1 | 0.1 |
+| `fx-glitch` FX ICE GLITCH | fx | 1 | 0 to 1 | 0.1 |
+| `fx-warp` FX ICE WARP | fx | 1 | 0 to 1 | 0.1 |
+| `fx-interf` FX INTERFERENCE | fx | 1 | 0 to 1 | 0.1 |
+| `fx-solo` FX SOLO (0 ALL) | fx | 0 | 0 to 7 | 1 |
+| `fx-tier` FX INTEGRITY (-1 REAL) | fx | -1 | -1 to 100 | 5 |
+| `fx-showcase` FX SHOWCASE | fx | 0 | 0 to 1 | 1 |
+| `fx-passes` FX GROUND PASSES | fx | 1 | 1 to 512 | 1 |
+| `fx-hold` FX HOLD AT PEAK (COST) | fx | 0 | 0 to 1 | 1 |
+| `title` TITLE SCREEN | title | 1 | 0 to 1 | 1 |
+| `title-out` TITLE FADE OUT | title | 0.5 | 0 to 3 | 0.05 |
+| `title-in` TITLE FADE IN | title | 0.5 | 0 to 3 | 0.05 |
+| `title-speed` TITLE CAMERA SPEED | title | 240 | 0 to 400 | 10 |
+| `title-height` TITLE CAMERA HEIGHT | title | 96 | 6 to 200 | 1 |
+| `title-dist` TITLE CAMERA DIST | title | 150 | 20 to 200 | 2 |
 
 ## How it's built
 
