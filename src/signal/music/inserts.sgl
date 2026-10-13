@@ -4,9 +4,12 @@
   (import (motif graph))
   (export MUSIC-INSERTS)
   (begin
+    ;; At rest the crush must be the identity: drive 0 (sigil-dsp's crush
+    ;; saturates as tanh(x(1+drive))/tanh(1+drive), so drive 1 adds up to
+    ;; 6.3 dB to quiet hits and soft-clips the loud ones), bits 16 or more.
     (define (drum-insert signal)
       (g:crush signal
-               (g:param 'drive 1.0 0.0 8.0)
+               (g:param 'drive 0.0 0.0 8.0)
                (g:param 'bits 24.0 1.0 24.0)
                (g:param 'rate-div 1.0 1.0 16.0)))
 

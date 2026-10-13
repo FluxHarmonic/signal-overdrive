@@ -1,0 +1,87 @@
+;;; The clean insert path is the dry path. At rest (a clean race) the
+;;; channel inserts must leave the song as the player renders it with no
+;;; inserts at all: the crush is the identity only at drive 0, and a
+;;; drive of 1 once lifted quiet drum hits by up to 6.3 dB and clipped the
+;;; mix. Native offline pulls only: no audio context opens.
+(import (sigil test)
+        (sigil math)
+        (sigil list)
+        (motif graph)
+        (motif tune)
+        (motif tune player)
+        (signal music score)
+        (signal music conductor)
+        (signal music inserts))
+
+(define RATE 44100)
+(define tune (read-tune-string SCORE-TUNE-TEXT))
+
+;; An approved passage: the first two bars of lap2, the chorus of the
+;; approved audition. Every channel but Gibson's plays in it.
+(define FRAMES (exact (round (* 2 (song-bar-seconds) RATE))))
+
+(define (render inserts solo)
+  (let ((p (open-tune-player tune RATE start: (conductor-position (conductor-new 'lap2))
+                             inserts: inserts))
+        (out (make-bytevector (* 8 FRAMES) 0)))
+    (when solo (player-solo! p solo))
+    (let pull ((done 0))
+      (when (< done FRAMES)
+        (let ((n (min 256 (- FRAMES done))))
+          (player-pull! p out (* 8 done) n)
+          (pull (+ done n)))))
+    (player-close! p)
+    out))
+
+(define (sample bv i) (bytevector-ieee-single-ref bv (* 4 i) 'little))
+
+(define (max-difference a b)
+  (let loop ((i 0) (worst 0.0))
+    (if (>= i (* 2 FRAMES)) worst
+        (loop (+ i 1) (max worst (abs (- (sample a i) (sample b i))))))))
+
+(define (energy bv)
+  (let loop ((i 0) (sum 0.0))
+    (if (>= i (* 2 FRAMES)) sum
+        (loop (+ i 1) (+ sum (* (sample bv i) (sample bv i)))))))
+
+(define (db ratio) (* 10.0 (/ (log ratio) (log 10.0))))
+
+;; float noise: well under one 16-bit step (3e-5)
+(define NOISE 1e-6)
+
+;; a drum insert at drive 1, the value this guards against
+(define (driven-drum-insert signal)
+  (g:crush signal (g:param 'drive 1.0 0.0 8.0) (g:param 'bits 24.0 1.0 24.0)
+           (g:param 'rate-div 1.0 1.0 16.0)))
+
+(test-group "inserts: the clean path is the dry path"
+  (test "the crush inserts leave the kick, snare, ticks and arp as rendered dry"
+    (for-each
+      (lambda (channel)
+        (let ((dry (render '() channel)))
+          (assert-true (> (energy dry) 0.0))
+          (assert-true (< (max-difference (render MUSIC-INSERTS channel) dry) NOISE))))
+      '(1 2 3 7)))
+
+  (test "the lead's dry chorus and unity gain leave it as rendered dry"
+    (let ((dry (render '() 6)))
+      (assert-true (> (energy dry) 0.0))
+      (assert-true (< (max-difference (render MUSIC-INSERTS 6) dry) NOISE))))
+
+  ;; The bass and pad pass 16 kHz Butterworth low-passes. Their phase
+  ;; shift (about 5 degrees at 1 kHz) moves samples without changing what
+  ;; is heard, so these compare level, not samples.
+  (test "the bass, the pad and the whole mix keep their level within 0.1 dB"
+    (for-each
+      (lambda (solo)
+        (let ((change (db (/ (energy (render MUSIC-INSERTS solo)) (energy (render '() solo))))))
+          (assert-true (< (abs change) 0.1))))
+      '(4 5 #f)))
+
+  (test "control: a drum crush at drive 1 is caught, sample by sample and in level"
+    (let ((driven (map (lambda (entry)
+                         (if (memv (car entry) '(1 2 3 7)) (cons (car entry) driven-drum-insert) entry))
+                       MUSIC-INSERTS)))
+      (assert-true (> (max-difference (render driven 3) (render '() 3)) NOISE))
+      (assert-true (> (abs (db (/ (energy (render driven #f)) (energy (render '() #f))))) 0.1)))))
