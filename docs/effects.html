@@ -68,6 +68,23 @@
 <tr><td><span class="swatch" style="background:#FF59D9"></span>magenta</td><td>the city</td><td>neon signs (no more cyan, amber or violet signs), light pools, the left-hand rail</td></tr>
 </table>
 
+<h2>Choices I made where the design left room</h2>
+<ul>
+<li><b>The beat comes through one small interface.</b> Each tick the effects get a "pulse": the section, bar, row, which channels have a note, and whether the drop lands. Today a stub makes it, using the conductor's own clock arithmetic. When the conductor merges, one function reads it from the song instead. Nothing else changes.</li>
+<li><b>The dip bends the picture by row,</b> the way SNES racers did: the sky and the far road move most, and the road under you not at all. The design's crests (a track feature) aren't in 0.1; the same bend does them later.</li>
+<li><b>Light pools come from the track's own features</b> (pads, the checksum lane, ICE patches, plus city pools every 520 texels) until 0.2's track format can place them by hand.</li>
+<li><b>Per-pixel data rides in the textures' spare alpha channel</b> (which rail block, which window, which sign), because the ground shader has no texture slots left.</li>
+<li><b>The glitch has a rest:</b> at most 6 frames on the road, then half a second before the next. Without it a scrape along a wall glitched the road for the whole scrape. The ICE patch's 1.4 s of scrambled steering used to tear the road the whole time; now its lasting sign is the amber HUD banner.</li>
+<li><b>Interference keeps off the meter.</b> It's the one thing a player at low integrity needs to read.</li>
+<li><b>The tracer stub's strip runs straight ahead.</b> Placing real tracers in your lane (and leaving squeezes alone) is step 3's job; this is the look and the timing.</li>
+<li><b>Recoloured for P16:</b> the meter, pads, glitch patches, signs and windows, the right rail (cyan to blue), and the violet rival (to steel, so violet stays Gibson's).</li>
+</ul>
+<p><b>Two things for you to decide:</b></p>
+<ul>
+<li>A rival is still named NULL in 0.1. In the design, Null is one of Gibson's couriers and arrives in 0.2.</li>
+<li>Gibson's tower is small and mostly hidden behind the nearer skyline layers, so its violet is easy to miss. It could be drawn taller.</li>
+</ul>
+
 <h2>What they cost</h2>
 <p>Measured in headless Chrome 143 on this laptop's AMD Radeon 780M (integrated, RADV through ANGLE and Vulkan), at the game's 480x270:</p>
 <ul>
