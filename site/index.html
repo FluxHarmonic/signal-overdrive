@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Signal Overdrive</title>
+  <meta name="description" content="Signal Overdrive is a Mode 7 racer in the spirit of F-Zero, set in Crash The Stack's world. Carry a song across the city to a pirate uplink, and keep it clean.">
+  <meta name="theme-color" content="#0d0a1a">
+  <meta property="og:title" content="Signal Overdrive">
+  <meta property="og:description" content="The city's wire belongs to Gibson. The air doesn't. A Mode 7 racer in Crash The Stack's world.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://signaloverdrive.net/">
+  <meta property="og:image" content="https://signaloverdrive.net/shots/og.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="The title SIGNAL OVERDRIVE in magenta pixel letters over a night skyline, with Zero's cyan machine on the starting grid between two rivals.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Signal Overdrive">
+  <meta name="twitter:description" content="The city's wire belongs to Gibson. The air doesn't. A Mode 7 racer in Crash The Stack's world.">
+  <meta name="twitter:image" content="https://signaloverdrive.net/shots/og.png">
+  <meta name="twitter:image:alt" content="The title SIGNAL OVERDRIVE in magenta pixel letters over a night skyline, with Zero's cyan machine on the starting grid between two rivals.">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/style.css">
+  <!-- Privacy-friendly analytics by Plausible -->
+  <script async src="https://plausible.io/js/pa-GCzY0KZPnFuB1DEsbPead.js"></script>
+  <script>
+    window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
+    plausible.init()
+  </script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1 class="logo"><img src="/logo.png" width="291" height="27" alt="Signal Overdrive"></h1>
+      <p class="tagline">The city's wire belongs to Gibson. The air doesn't.</p>
+    </header>
+
+    <div class="carousel" data-interval="6000">
+      <div class="frames">
+        <img class="shot shown" src="/shots/pack.png" width="480" height="270"
+             alt="Zero's cyan machine in the pack on lap 1, rivals on either side, the city's skyline and its neon signs ahead.">
+        <img class="shot" src="/shots/critical.png" width="480" height="270" aria-hidden="true"
+             alt="Integrity almost gone: the road tears into horizontal strips, the sky is static, and the meter at the top shows a few red cells.">
+        <img class="shot" src="/shots/traced.png" width="480" height="270" aria-hidden="true"
+             alt="The final lap: TRACED. flashes in red over the skyline as Zero chases the pack toward a boost pad.">
+        <img class="shot" src="/shots/uplink.png" width="480" height="270" aria-hidden="true"
+             alt="The uplink gate over the start line, its chevrons lit cyan, with Zero and a rival racing under it.">
+        <img class="shot" src="/shots/title.png" width="480" height="270" aria-hidden="true"
+             alt="The title screen: SIGNAL OVERDRIVE over the starting grid, and the line COURIER ZERO. ONE PACKAGE. DON'T LET IT CORRUPT.">
+      </div>
+      <p class="caption" aria-live="polite">Lap 1, in the pack</p>
+      <div class="dots" role="group" aria-label="Pictures of Signal Overdrive">
+        <button type="button" aria-label="Lap 1, in the pack" aria-current="true"></button>
+        <button type="button" aria-label="Integrity under 10: the signal tearing apart"></button>
+        <button type="button" aria-label="The final lap: Gibson has traced you"></button>
+        <button type="button" aria-label="The uplink gate over the line"></button>
+        <button type="button" aria-label="Courier Zero, on the grid"></button>
+      </div>
+    </div>
+
+    <div class="pitch">
+      <p>Signal Overdrive is a Mode 7 racer in the spirit of F-Zero, set in the world of <a href="https://crashthestack.com/">Crash The Stack</a>. You're Zero, a data courier. Gibson owns every wire in the city: anything sent down one can be read, blocked or rewritten. So the collective hides its messages inside songs, and couriers like you carry them by hand to pirate uplinks, where they go out over the air and can't be taken back.</p>
+      <p>Your cargo is the song, and its integrity is your energy meter. Boosting spends it, scraping a wall costs it, and the checksum lane wins it back. Deliver it clean and the whole city hears your song. Let it fall apart on the way and the signal never makes it!</p>
+    </div>
+
+    <div class="play">
+      <button type="button" disabled aria-describedby="play-when">PLAY 0.1</button>
+      <span class="how" id="play-when">Coming soon. Free, in your browser.</span>
+    </div>
+
+    <section class="music">
+      <h2>The city plays your song</h2>
+      <p>Every race runs to one piece of music, and the two move together. You run the signal hot, so everything near the road picks it up: the light pools on the track and the skyline's windows swell with the kick, the signs flash on the snare, and the edge rails chase the hi-hats.</p>
+      <p>The race follows the song's shape, too. Lap 1 is the verse, and your boost comes online with the chorus on lap 2. The final lap is the drop, and that's when Gibson finally traces you. You only hear the song's melody whole when you cross the uplink.</p>
+      <p>And your driving changes what you hear. Damage the cargo and the song gets sick in specific places: the lead drifts out of tune and loses notes, the drums crush down, and the bass holds on longest, so there's always a pulse. Get into the checksum lane and it snaps back clean, right on the beat. You never have to time anything to the music, though. You just drive, and the music follows you!</p>
+    </section>
+
+    <p class="early">Signal Overdrive is in development. 0.1, the first build you'll be able to play, is one track and one song, <em>Carrier</em>, wired through the whole race.</p>
+
+    <section class="made">
+      <h2>How it's made</h2>
+      <p>I designed Signal Overdrive and I direct every part of how it's made. AI agents write the code, the music and the pixel art from my direction, and I play every build, listen to every sound, and decide what stays. No image generator was used: the machines, the track and the city are drawn by scripts an agent wrote, and the pictures on this page are frames from the game itself. If the use of AI is a dealbreaker for you, I understand! The source and its commit history will be public when 0.1 is out, so you can see exactly how it was made.</p>
+    </section>
+  </main>
+
+  <footer>
+    <a class="mark" href="https://fluxharmonic.com/"><img src="/mark.png" width="380" height="188" alt="Flux Harmonic"></a>
+    <p>Made by David Wilson at Flux Harmonic. Written in <a href="https://usesigil.org/">Sigil</a>.</p>
+    <p>Also from Flux Harmonic: <a href="https://crashthestack.com/">Crash The Stack</a>, <a href="https://harkfell.com/">Harkfell</a> and <a href="https://phantomburn.net/">Phantom Burn</a></p>
+    <p>The code is licensed <a href="https://www.gnu.org/licenses/gpl-3.0.html">GPL-3.0-or-later</a>. The Flux Harmonic mark is not covered by it.</p>
+    <p>Set in JetBrains Mono, under the <a href="/fonts/OFL.txt">SIL Open Font License</a>.</p>
+    <p class="privacy">Privacy-friendly analytics by <a href="https://plausible.io/data-policy">Plausible</a>: no cookies, no personal data.</p>
+  </footer>
+  <script>
+    // The pictures: one at a time, crossfading every data-interval ms, with
+    // the caption following. The dots pick one; the pointer over the
+    // pictures pauses them; a reader who asked for reduced motion gets no
+    // automatic change. Without this script the first picture simply stays.
+    (function () {
+      var c = document.querySelector(".carousel");
+      if (!c) return;
+      var imgs = c.querySelectorAll(".frames img");
+      var dots = c.querySelectorAll(".dots button");
+      var cap = c.querySelector(".caption");
+      var every = Number(c.getAttribute("data-interval")) || 6000;
+      var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      var at = 0, timer = null;
+      function show(n) {
+        at = (n + imgs.length) % imgs.length;
+        for (var k = 0; k < imgs.length; k++) {
+          imgs[k].classList.toggle("shown", k === at);
+          if (k === at) imgs[k].removeAttribute("aria-hidden"); else imgs[k].setAttribute("aria-hidden", "true");
+          if (dots[k]) { if (k === at) dots[k].setAttribute("aria-current", "true"); else dots[k].removeAttribute("aria-current"); }
+        }
+        if (cap && dots[at]) cap.textContent = dots[at].getAttribute("aria-label");
+      }
+      function start() { if (!still && !timer && !document.hidden) timer = setInterval(function () { show(at + 1); }, every); }
+      function stop() { clearInterval(timer); timer = null; }
+      for (var k = 0; k < dots.length; k++) (function (k) {
+        dots[k].addEventListener("click", function () { stop(); show(k); start(); });
+      })(k);
+      c.querySelector(".frames").addEventListener("mouseenter", stop);
+      c.querySelector(".frames").addEventListener("mouseleave", start);
+      document.addEventListener("visibilitychange", function () { document.hidden ? stop() : start(); });
+      c.classList.add("live");
+      start();
+    })();
+  </script>
+</body>
+</html>

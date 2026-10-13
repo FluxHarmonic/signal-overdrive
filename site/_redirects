@@ -1,0 +1,5 @@
+# signaloverdrive.net's redirects (Cloudflare Pages _redirects: FROM TO STATUS).
+# The game lives at /drive/. /play/ is the path everyone guesses, so it goes
+# there too, with whatever followed it and the query string.
+/play/* /drive/:splat 301
+/play /drive/ 301

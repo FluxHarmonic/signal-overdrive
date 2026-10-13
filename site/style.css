@@ -1,0 +1,154 @@
+/* signaloverdrive.net: one page and a 404.
+   The colours are the game's own (Crash The Stack's palette roles): the
+   violet-black of the night city, the title's magenta, the cyan of your
+   live signal (Zero's machine, the integrity meter), the yellow of the
+   start line, and C-TEXT for reading. The face is JetBrains Mono (OFL 1.1,
+   fonts/OFL.txt), the subset the other Flux Harmonic game sites serve, so
+   the sites read as siblings. */
+@font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("/fonts/JetBrainsMono-Regular.woff2") format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 700; font-display: swap; src: url("/fonts/JetBrainsMono-Bold.woff2") format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-style: italic; font-weight: 400; font-display: swap; src: url("/fonts/JetBrainsMono-Italic.woff2") format("woff2"); }
+
+:root {
+  --dark: #0d0a1a;      /* C-BG: the night */
+  --dark-2: #17122e;
+  --line: #2e1c4d;      /* rules and borders */
+  --ink: #cce6ff;       /* C-TEXT */
+  --ink-dim: #8a93b8;   /* body text on the dark */
+  --cyan: #4df2d9;      /* your live signal */
+  --magenta: #ff59d9;   /* the title */
+  --yellow: #ffcc33;    /* the start line */
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { background: var(--dark); }
+body {
+  margin: 0;
+  background: var(--dark);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 1rem;
+  line-height: 1.7;
+  -webkit-text-size-adjust: 100%;
+}
+a { color: var(--cyan); }
+a:hover { color: var(--magenta); }
+
+main, footer { max-width: 992px; margin: 0 auto; padding: 0 16px; }
+
+/* The logo: the title screen's wordmark in the game's 5x7 font
+   (scripts/art/gen-site.mjs), 291x27, drawn at a whole scale: 1x on a
+   phone, 2x from 640 CSS px, 3x from 960. */
+header { text-align: center; padding: 4rem 0 2rem; }
+h1.logo { margin: 0; line-height: 0; }
+h1.logo img {
+  display: block;
+  width: 291px;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+@media (min-width: 640px) { h1.logo img { width: 582px; } }
+@media (min-width: 960px) { h1.logo img { width: 873px; } }
+.tagline { margin: 1.4rem 0 0; color: var(--ink-dim); font-style: italic; }
+
+/* The pictures: 480x270 frames from the game, drawn crisp at a whole scale
+   where the width allows (2x from 992 CSS px, 1x from 512), and the
+   column's width on a narrower screen. */
+.carousel { margin: 0 auto; width: 100%; }
+@media (min-width: 512px) { .carousel { width: 480px; } }
+@media (min-width: 992px) { .carousel { width: 960px; } }
+.carousel .frames { position: relative; aspect-ratio: 480 / 270; background: #000; }
+.shot {
+  display: block;
+  width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+.carousel .frames .shot { position: absolute; inset: 0; height: 100%; opacity: 0; transition: opacity 1.2s ease; }
+.carousel .frames .shot.shown { opacity: 1; }
+.carousel .caption { min-height: 1.7em; margin: 0.6rem 0 0; text-align: center; font-size: 0.85rem; color: var(--ink-dim); }
+.carousel .dots { display: none; justify-content: center; gap: 0.2rem; margin-top: 0.3rem; }
+.carousel.live .dots { display: flex; }
+.carousel .dots button { width: 28px; height: 28px; padding: 0; border: 0; background: none; cursor: pointer; }
+.carousel .dots button::before { content: ""; display: block; width: 8px; height: 8px; margin: auto; background: var(--line); }
+.carousel .dots button[aria-current="true"]::before { background: var(--cyan); }
+.carousel .dots button:hover::before { background: var(--magenta); }
+.carousel .dots button:focus-visible { outline: 2px solid var(--cyan); outline-offset: -4px; }
+@media (prefers-reduced-motion: reduce) { .carousel .frames .shot { transition: none; } }
+
+.pitch, .music, .made, .early { max-width: 40em; margin-left: auto; margin-right: auto; }
+.pitch { margin-top: 2.5rem; }
+.pitch p, .music p { margin: 0 0 1em; }
+
+/* PLAY 0.1: not out yet, so a disabled button, not a link. When 0.1 ships
+   it becomes <a href="/drive/"> with the .play a rules below. */
+.play { text-align: center; margin: 2.5rem 0 3rem; }
+.play a, .play button {
+  display: inline-block;
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 1.6rem;
+  line-height: 1.7;
+  letter-spacing: 0.14em;
+  padding: 0.45em 1.4em 0.45em 1.54em;
+  border: 0;
+  text-decoration: none;
+}
+.play a { color: var(--dark); background: var(--cyan); }
+.play a:hover, .play a:focus-visible, .play a:active { color: var(--dark); }
+.play a:hover { box-shadow: 0 0 0 3px var(--dark), 0 0 0 5px var(--magenta); }
+.play a:active { background: var(--magenta); }
+.play a:focus-visible { outline: 2px solid var(--ink); outline-offset: 4px; }
+.play button[disabled] {
+  color: var(--ink-dim);
+  background: var(--dark-2);
+  box-shadow: inset 0 0 0 2px var(--line);
+  cursor: not-allowed;
+}
+.play .how { display: block; margin-top: 0.8rem; font-size: 0.9rem; font-style: italic; color: var(--ink-dim); }
+
+h2 {
+  font-size: 0.95rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  margin: 0 0 0.6rem;
+}
+.music { margin-bottom: 3rem; }
+.early { margin-bottom: 3rem; color: var(--ink-dim); }
+.made { margin-bottom: 4rem; color: var(--ink-dim); }
+.made p { margin: 0; }
+
+footer {
+  border-top: 1px solid var(--line);
+  padding-top: 2.5rem;
+  padding-bottom: 4rem;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--ink-dim);
+}
+footer .mark { display: inline-block; margin-bottom: 1.5rem; }
+footer .mark img { display: block; width: 190px; height: auto; }
+footer p { margin: 0 0 0.6em; }
+
+/* 404: the number in the title's magenta, the cyan signal split off it */
+.lost { min-height: 100vh; display: flex; flex-direction: column; justify-content: center; text-align: center; }
+h1.name {
+  position: relative;
+  align-self: center;
+  margin: 0 0 1.5rem;
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: clamp(3rem, 12vw, 5rem);
+  line-height: 1;
+  letter-spacing: 0.08em;
+  color: var(--magenta);
+  text-shadow: -0.06em 0 0 var(--cyan);
+}
+.lost p { color: var(--ink-dim); }
