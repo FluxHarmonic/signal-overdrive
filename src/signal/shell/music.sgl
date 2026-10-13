@@ -135,10 +135,12 @@
           (music-close!))
         (unless paused? (music-start! *ctx* c))
         (when (and (music-running?) (not paused?))
-          (let loop ()
+          ;; Bound producer work to the deficit observed at frame entry.
+          ;; Callback consumption during rendering belongs to the next
+          ;; frame, otherwise a slow pull/GC grows this loop's own work.
+          (let loop ((remaining (max 0 (- (depth-frames) (audio-stream-depth *stream*)))))
             (let* ((room (audio-stream-room *stream*))
-                   (need (- (depth-frames) (audio-stream-depth *stream*)))
-                   (available (min PUSH room need))
+                   (available (min PUSH room remaining))
                    (silence? (> *silence* 0))
                    (seek? (and *resync-pending* (not silence?)
                                (not (= *last-resync-bar* (conductor-bar c)))
@@ -158,7 +160,7 @@
                   (set! *resync-pending* #f)
                   (set! *last-resync-bar* (conductor-bar c))
                   (set! *resyncs* (+ *resyncs* 1)))
-                (loop))
+                (loop remaining))
               (when (> n 0)
                 (unless silence?
                   ;; The render head can reach the joining bar before
@@ -177,7 +179,7 @@
                     (error "music sink refused reserved frames" n accepted))
                   (set! *delivered* (+ *delivered* accepted))
                   (when silence? (set! *silence* (- *silence* accepted))))
-                (loop))))
+                (loop (- remaining n)))))
           (set! *last-tick* (conductor-tick c)))
         (set! *cost-ms* (/ (* 1000.0 (- (current-jiffy) t0)) (jiffies-per-second)))))
 
