@@ -82,7 +82,12 @@ try {
   fd = fs.openSync(path.join(RUN, "game.log"), "w");
   game = pool.launch(path.join(ROOT, "scripts/dev"), [BIN, "--start", "--autopilot", "--track=loop", "--musiclog", "--quit-after", "400"],
     { env, stdio: ["ignore", "pipe", "pipe"] });
-  const output = b => { text += b; fs.writeSync(fd, b); };
+  // Each output chunk with the wall time it arrived, to date startup steps.
+  const timeline = fs.openSync(path.join(RUN, "output-timeline.jsonl"), "w");
+  const output = b => {
+    text += b; fs.writeSync(fd, b);
+    fs.writeSync(timeline, JSON.stringify({ wall_ms: Date.now(), text: b.toString().slice(0, 400) }) + "\n");
+  };
   game.stdout.on("data", output); game.stderr.on("data", output);
   function route() {
     const inputs = JSON.parse(pulse(["-f", "json", "list", "sink-inputs"]))
