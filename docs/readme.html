@@ -112,6 +112,11 @@ site under <code>/shots/</code>.</p>
 <td>F4</td>
 <td></td>
 </tr>
+<tr>
+<td>Pause or resume</td>
+<td>F5</td>
+<td></td>
+</tr>
 </tbody>
 </table>
 <p><strong>On a phone</strong> the machine accelerates by itself. Three schemes, picked with
@@ -155,6 +160,7 @@ current values, and every knob takes a URL parameter of the same name, so
 <code>--grip=8.5</code>. Knobs that change the race (track, laps, rivals, rival pace) restart
 it on the grid.</p>
 <p>Other parameters: <code>?track=oval|loop</code> (the same as <code>track=0|1</code>), <code>?mute</code>,
+<code>?musicdepth=MS</code> (the song's queue, default 250),
 <code>?audiodepth=MS</code> (the engine sound's queue, default 250), <code>?cues=0</code> (the one-shot sounds in
 the stream instead of as cues, the old way), <code>?hitchlog</code> (every frame over 33 ms to the console),
 <code>?touch=zones|drag|stick</code>, <code>?autopilot</code> (the player drives the racing line),
@@ -658,6 +664,14 @@ the seed of a later substratic-mode7 package)</li>
 </ul>
 <p>Tests: <code>scripts/dev sigil test --sgl test/test-handling.sgl</code> (and
 <code>test-track</code>, <code>test-camera</code>, <code>test-race</code>, <code>test-sound</code>).</p>
+<p>Conductor checks: <code>scripts/test-conductor</code>, <code>scripts/test-score</code> and
+<code>scripts/test-reference</code>; effects state checks are in <code>test/test-fx.sgl</code>.
+The captured-audio drift gate is a separate opt-in target, currently
+<strong>known RED</strong>, with unchanged thresholds and reproducible evidence in
+<a href="scripts/drift/README.md"><code>scripts/drift/README.md</code></a>. It does not make
+the default tests or effects gates fail. The stable song/tick interface
+for effects and title integration is in
+<a href="docs/CONDUCTOR.md"><code>docs/CONDUCTOR.md</code></a>.</p>
 <h2>Screenshots</h2>
 <p><img src="shots/1-title.png" alt="1-title.png"></p>
 <p><img src="shots/2-race.png" alt="2-race.png"></p>
