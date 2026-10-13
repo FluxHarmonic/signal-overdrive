@@ -15,7 +15,8 @@
           (signal music inserts))
   (export music-start! music-frame! music-close! music-reset! music-running?
           music-audible-seconds music-depth! music-latency! music-readout
-          music-request-resync! music-log music-sabotage! music-generation)
+          music-request-resync! music-log music-sabotage! music-generation
+          music-hold! music-release-at!)
   (begin
     (define PUSH 256)
     (define *ctx* #f)
@@ -43,6 +44,43 @@
     (define *cost-ms* 0.0)
     (define *buf* (make-bytevector (* 8 PUSH) 0))
     (define *zero* (make-bytevector (* 8 PUSH) 0))
+
+    ;; The song's way in after the card: held (silent) until the shell
+    ;; names a release time, then a linear fade-in over *fade-secs* from it,
+    ;; then done: no envelope, so later restarts and pauses sound as before.
+    ;; It is the stream's volume, which both sinks apply as the device plays
+    ;; (0 is silence), set each frame from the song time being heard: the
+    ;; samples keep flowing, so the song keeps its place against the
+    ;; simulation, and none sounds before the release. Times are song
+    ;; seconds (the conductor's tick / 60). A release known ahead (the
+    ;; card's lock) lands on its frame; one named late (a skip) starts the
+    ;; fade at what is heard then. The earliest release named wins. Off
+    ;; until music-hold! (the shell's boot).
+    (define *env* 'done)          ; held, done, or the release in song seconds
+    (define *fade-secs* 0.8)
+    (define *volume* #f)          ; the stream's volume as last set
+    (define (music-hold!) (set! *env* 'held))
+    (define (music-release-at! t fade)
+      (unless (eq? *env* 'done)
+        (set! *fade-secs* (max 0.0 fade))
+        (let* ((heard (music-audible-seconds))
+               (t (if heard (max t heard) t)))
+          (set! *env* (if (number? *env*) (min *env* t) t)))))
+    (define (env-gain t)
+      (cond ((eq? *env* 'done) 1.0)
+            ((eq? *env* 'held) 0.0)
+            ((< t *env*) 0.0)
+            ((<= *fade-secs* 0.0) 1.0)
+            (else (min 1.0 (/ (- t *env*) *fade-secs*)))))
+    ;; The stream's volume for song time heard; past the fade, the envelope
+    ;; is done.
+    (define (env-volume! heard)
+      (when *stream*
+        (let ((g (env-gain heard)))
+          (when (and (number? *env*) (>= g 1.0)) (set! *env* 'done))
+          (unless (eqv? g *volume*)
+            (set-audio-stream-volume! *stream* g)
+            (set! *volume* g)))))
 
     (define (music-depth! ms)
       (set! *depth-ms* (max 10 (min 2000 ms))))
@@ -131,7 +169,11 @@
                 (open-audio-stream channels: 2 rate: *rate*
                                    buffer-frames: (max 8192 (* 2 frames))))
               (if *stream*
-                  (let ((accepted (push-audio-samples *stream* samples frames)))
+                  (let ((accepted (begin
+                                    ;; the envelope's volume before any sample
+                                    (set! *volume* #f)
+                                    (env-volume! *epoch*)
+                                    (push-audio-samples *stream* samples frames))))
                     (unless (= accepted frames)
                       (error "music sink refused initial queue" frames accepted))
                     (set! *delivered* accepted)
@@ -222,6 +264,7 @@
                   (set! *delivered* (+ *delivered* accepted))
                   (when silence? (set! *silence* (- *silence* accepted))))
                 (loop (- remaining n)))))
+          (env-volume! (or (music-audible-seconds) *epoch*))
           (set! *last-tick* (conductor-tick c)))
         (set! *cost-ms* (/ (* 1000.0 (- (current-jiffy) t0)) (jiffies-per-second)))))
 

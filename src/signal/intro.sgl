@@ -39,6 +39,12 @@
 ;;; after the hand-off. Events, for the music: card-start (the gesture, or
 ;;; the boot natively) and card-end (the hand-off or a skip). The title knob
 ;;; at 0, the card knob at 0 or the shell's start parameter skip all of it.
+;;;
+;;; The song waits for the card: (intro-song-wait i tuning) is how many
+;;; ticks from now it may start to sound. Through the zoom only the
+;;; tuning-in sound plays; the song fades in at the lock, as if the radio
+;;; just found the station, or at once when the card is skipped, ends or is
+;;; off. The gate holds it (#f).
 
 (define-library (signal intro)
   (import (sigil core)
@@ -55,7 +61,8 @@
 
   (export intro intro? intro-new intro-none intro-skip intro-step intro-follow intro-phase intro-events
           intro-active? intro-cut? intro-camera intro-fade intro-glitch intro-mark-shown? intro-draw-mark!
-          intro-set-mark! intro-gate-line intro-beats intro-length intro-lock intro-mark MARK-S)
+          intro-set-mark! intro-gate-line intro-beats intro-length intro-lock intro-mark MARK-S
+          intro-song-wait)
 
   (begin
     ;; phase: gate, card, done. tick: ticks in this phase. gone: after the
@@ -104,6 +111,14 @@
 
     (define (ticks s) (max 1 (exact (round (* 60.0 s)))))
     (define SKIP-AFTER 10)       ; ticks: the gate's own gesture never skips the card
+
+    ;; Ticks until the song may sound: the card's lock, counted from its
+    ;; tick; 0 once the card is skipped, over or off; #f at the gate.
+    (define (intro-song-wait i tuning)
+      (case (intro-phase i)
+        ((gate) #f)
+        ((card) (max 0 (- (ticks (intro-lock tuning)) (intro-tick i))))
+        (else 0)))
 
     (define (intro-step i tuning race gesture? skip?)
       (let ((i (intro i events: '())))

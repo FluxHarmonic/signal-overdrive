@@ -30,8 +30,11 @@ tuning-in sound lock clean together; a tilt into perspective; then the
 camera pulls back and down as the mark recedes up the road, coming to rest
 where the title's camera begins (on the web, a TAP TO TUNE IN gate first:
 the browser needs a gesture before sound). The CARD knobs; any start skips
-it, and its sound with it; <code>?card=0</code> leaves it out. Its interference keeps
-the effects' rules: it tears only in bursts of at most 6 ticks (P15),
+it, and its sound with it; <code>?card=0</code> leaves it out. The song waits for it:
+through the zoom only the tuning-in sound plays, and the song fades in as
+the picture locks (<code>card-song-fade</code> seconds), or at a skip, with the same
+fade. Its interference keeps the effects' rules: it tears only in bursts
+of at most 6 ticks (P15),
 scaled by <code>fx-glitch</code>, and not at all with another effect solo or with
 reduced motion (the browser's preference, or <code>?motion=reduce</code>), when the
 picture only fades up clean. The tuning-in sound is rendered when the
@@ -722,6 +725,13 @@ the stream instead of as cues, the old way), <code>?hitchlog</code> (every frame
 <td>880</td>
 <td>200 to 2000</td>
 <td>10</td>
+</tr>
+<tr>
+<td><code>card-song-fade</code> CARD SONG FADE-IN</td>
+<td>card</td>
+<td>0.8</td>
+<td>0 to 4</td>
+<td>0.05</td>
 </tr>
 </tbody>
 </table>

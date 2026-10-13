@@ -24,8 +24,11 @@ through the Flux Harmonic palette and Bayer dither pass.
   camera pulls back and down as the mark recedes up the road, coming to rest
   where the title's camera begins (on the web, a TAP TO TUNE IN gate first:
   the browser needs a gesture before sound). The CARD knobs; any start skips
-  it, and its sound with it; `?card=0` leaves it out. Its interference keeps
-  the effects' rules: it tears only in bursts of at most 6 ticks (P15),
+  it, and its sound with it; `?card=0` leaves it out. The song waits for it:
+  through the zoom only the tuning-in sound plays, and the song fades in as
+  the picture locks (`card-song-fade` seconds), or at a skip, with the same
+  fade. Its interference keeps the effects' rules: it tears only in bursts
+  of at most 6 ticks (P15),
   scaled by `fx-glitch`, and not at all with another effect solo or with
   reduced motion (the browser's preference, or `?motion=reduce`), when the
   picture only fades up clean. The tuning-in sound is rendered when the
@@ -204,6 +207,7 @@ The knobs, from `signal-overdrive --knobs` (units are world texels, seconds and 
 | `card-ease` CARD EASE | card | 2 | 1 to 5 | 0.1 |
 | `tone-lo` TONE FROM HZ | card | 180 | 60 to 600 | 10 |
 | `tone-hi` TONE TO HZ | card | 880 | 200 to 2000 | 10 |
+| `card-song-fade` CARD SONG FADE-IN | card | 0.8 | 0 to 4 | 0.05 |
 
 ## How it's built
 

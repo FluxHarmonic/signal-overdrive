@@ -295,6 +295,8 @@
       (set! *skip-interval* #f)
       (set! *resync-requests* 0)
       (music-reset!)
+      ;; the song waits for the card (song-gate!)
+      (music-hold!)
       (set! *music-generation* (music-generation))
       (audio-pause! #f)
       (set-store-app! GAME-NAME)
@@ -397,8 +399,19 @@
                    (intro-lock *tuning*) (intro-length *tuning*))
       (audio-start!)
       (when (and *race* (not (core-paused?)))
+        (song-gate!)
         (music-start! (audio-context) (race-song *race*))
         (music-frame! (race-song *race*) #f)))
+    ;; The song's release, named before each music frame: at the card's
+    ;; lock, in song seconds (a constant while the card runs: the song and
+    ;; the card count the same ticks and freeze together), at once when
+    ;; the card is skipped, over or off; held at the gate. The music keeps
+    ;; the earliest release it is given, and ignores it once faded in.
+    (define (song-gate!)
+      (let ((wait (intro-song-wait *intro* *tuning*)))
+        (when wait
+          (music-release-at! (/ (+ (conductor-tick (race-song *race*)) wait) 60.0)
+                             (tuning-ref *tuning* 'card-song-fade)))))
     ;; A gesture the browser counts as one (the page checks): it may start
     ;; the sound, and it opens the start gate. Nothing else opens the gate
     ;; but a pad's press (a browser never counts one, so the card then
@@ -844,6 +857,7 @@
 
     (define (service-audio!)
       (let ((m (racer-machine (race-player *race*))) (t0 (current-jiffy)))
+        (song-gate!)
         (music-frame! (race-song *race*) (core-paused?)
                       clock-fraction: (clock-acc *clock*)
                       frame-jiffy: *frame-jiffy*)

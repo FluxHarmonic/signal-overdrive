@@ -1,0 +1,136 @@
+;;; The song waits for the card: no music sounds before the card's lock,
+;;; it fades in from the lock over card-song-fade seconds, and a skip lets
+;;; it in early with the same fade. The fade is the song stream's volume,
+;;; which the ring's mix applies, as the device does. The shell runs headless (muted, so only
+;;; the song is in the ring) on the native ring with no device; the test
+;;; shim drains one frame's worth of samples a frame, so the d-th sample
+;;; drained since the song started is heard at song time d / rate.
+
+(import (sigil test)
+        (sigil audio)
+        (substratic store kv)
+        (signal tuning)
+        (signal race)
+        (signal intro)
+        (signal music conductor)
+        (signal shell music)
+        (signal shell core))
+
+(set-store-root! "/tmp/signal-card-song-test-store")
+(core-param! "mute")
+
+(define TUNING (tuning-defaults))
+(define RATE 44100)
+(define PER-FRAME (quotient RATE 60))
+(define out (make-bytevector (* 8 PER-FRAME) 0))
+(define LOCK (intro-lock TUNING))
+(define FADE (tuning-ref TUNING 'card-song-fade))
+
+(define (f32 bv i) (bytevector-ieee-single-ref bv (* 4 i) 'little))
+
+;; n frames of the shell from a fresh boot with the song started at once;
+;; (tap-at . frame) taps a start on that frame. Returns a vector of the
+;; loudest sample in each 1 ms of song time, and the song time of the tap.
+(define (run-card n tap-at)
+  (core-boot! 'desktop)
+  (music-start! 'offline-test-context (race-song (core-race)))
+  (let ((ms (make-vector (+ 2 (quotient (* 1000 n) 60)) 0.0))
+        (tapped #f))
+    (let loop ((k 0) (d 0))
+      (when (< k n)
+        (when (and tap-at (= k tap-at))
+          (set! tapped (/ (conductor-tick (race-song (core-race))) 60.0))
+          (core-tap!))
+        (core-headless-frame! (/ 1.0 60.0))
+        (%audio-stream-drain-for-test out PER-FRAME 2)
+        (let each ((j 0))
+          (when (< j PER-FRAME)
+            (let* ((s (max (abs (f32 out (* 2 j))) (abs (f32 out (+ 1 (* 2 j))))))
+                   (slot (quotient (* 1000 (+ d j)) RATE)))
+              (when (< slot (vector-length ms))
+                (vector-set! ms slot (max s (vector-ref ms slot)))))
+            (each (+ j 1))))
+        (loop (+ k 1) (+ d PER-FRAME))))
+    (music-close!)
+    (cons ms tapped)))
+
+;; the loudest sample in song time [a, b) seconds
+(define (loudest ms a b)
+  (let loop ((i (exact (floor (* 1000 a)))) (m 0.0))
+    (if (or (>= i (exact (floor (* 1000 b)))) (>= i (vector-length ms)))
+        m
+        (loop (+ i 1) (max m (vector-ref ms i))))))
+
+;; The same song with no envelope (the card and the fade off: the race,
+;; and so the song, runs the same ticks either way), to read the volume
+;; each millisecond was played at.
+(define REF
+  (begin
+    (core-param! "card=0")
+    (core-param! "card-song-fade=0")
+    (let ((ms (car (run-card 270 #f))))
+      (core-param! "card=1")
+      (core-param! (string-append "card-song-fade=" (number->string FADE)))
+      ms)))
+
+;; The volume in each 1 ms slot of song time [a, b) where the song is not
+;; quiet: (seconds . the run's loudest sample / the reference's).
+(define (gains ms a b)
+  (let loop ((i (exact (floor (* 1000 a)))) (acc '()))
+    (if (or (>= i (exact (floor (* 1000 b)))) (>= i (vector-length ms)))
+        (reverse acc)
+        (let ((r (vector-ref REF i)))
+          (loop (+ i 1) (if (> r 0.01) (cons (cons (/ i 1000.0) (/ (vector-ref ms i) r)) acc) acc))))))
+
+;; Never louder than a fade from base allows (the slot's end, plus a frame:
+;; the volume is set once a frame), and full after it; with enough slots of
+;; each to mean something.
+(define (assert-fade ms base end)
+  (let ((ramp (gains ms base (+ base FADE 0.1)))
+        (full (gains ms (+ base FADE 0.1) end)))
+    (assert-true (> (length ramp) 100))
+    (assert-true (> (length full) 100))
+    (for-each (lambda (g)
+                (assert-true (<= (cdr g) (+ 0.001 (/ (+ (- (car g) base) 0.001 (/ 1.0 60.0)) FADE)))))
+              ramp)
+    (for-each (lambda (g) (assert-true (< (abs (- (cdr g) 1.0)) 1.0e-6))) full)))
+
+(test-group "the song's wait (pure)"
+  (test "the gate holds it; the card counts down to its lock; then at once"
+    (let ((race (race-new TUNING))
+          (lock (exact (round (* 60.0 LOCK)))))
+      (assert-false (intro-song-wait (intro-new TUNING #t) TUNING))
+      (let loop ((k 0) (i (intro-new TUNING #f)))
+        (when (< k 200)
+          (when (eq? (intro-phase i) 'card)
+            (assert-equal (max 0 (- lock (min k lock))) (intro-song-wait i TUNING)))
+          (loop (+ k 1) (intro-step i TUNING race #f #f))))))
+  (test "a skip, the end, or the card off: at once"
+    (let* ((race (race-new TUNING))
+           (i (let loop ((k 0) (i (intro-new TUNING #f)))
+                (if (= k 30) i (loop (+ k 1) (intro-step i TUNING race #f #f))))))
+      (assert-equal 0 (intro-song-wait (intro-skip i) TUNING))
+      (assert-equal 0 (intro-song-wait (intro-step i TUNING race #f #t) TUNING))
+      (assert-equal 0 (intro-song-wait (intro-new (tuning-set TUNING 'card 0.0) #f) TUNING)))))
+
+(test-group "the song after the card (native ring, no device)"
+  (test "nothing sounds before the lock; it fades in from it and plays"
+    (let* ((r (run-card 270 #f))
+           (ms (car r)))
+      (assert-false (audio-initialized?))
+      ;; every sample before the lock is exactly silent (the song is there:
+      ;; the reference plays)
+      (assert-equal 0.0 (loudest ms 0.0 LOCK))
+      (assert-true (> (loudest REF 0.5 LOCK) 0.01))
+      ;; from the lock it fades in, and plays in full after the fade
+      (assert-fade ms LOCK 4.4)))
+
+  (test "a skip lets the song in long before the lock, faded in the same way"
+    (let* ((r (run-card 150 30))
+           (ms (car r))
+           (skip (cdr r)))
+      ;; silent until the skip, then the same fade from there, in full
+      ;; well before the lock would have let it in
+      (assert-equal 0.0 (loudest ms 0.0 skip))
+      (assert-true (< (+ skip FADE 0.1) LOCK))
+      (assert-fade ms skip 2.45))))
