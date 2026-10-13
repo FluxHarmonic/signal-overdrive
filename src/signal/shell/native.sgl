@@ -92,18 +92,26 @@
         (title-set-logo! (texture "title-logo.png"))
         (decal-init! VIEW-W VIEW-H)
         (intro-set-mark! (texture "fh-mark.png"))
-        ;; Warm the renderer before publishing music: draw AND present two
-        ;; zero-dt frames. A drawn frame is only recorded; the driver
-        ;; compiles and runs it at the present, and under software GL that
-        ;; first present took 2-4 s. Done after audio start, it drained the
-        ;; 250 ms music ring at the title (19695 sounding underrun frames
-        ;; in both native races measured). Zero-dt frames cannot advance
-        ;; the simulation or open audio.
+        ;; Warm everything the frame loop does before publishing music: draw
+        ;; AND present two zero-dt frames, and make the loop's own per-frame
+        ;; calls once (scaler, gamepad, keys). A first use can be slow (a
+        ;; drawn frame is compiled and run at the present; the first gamepad
+        ;; read initializes the joystick backend), and after audio start a
+        ;; stall longer than the 250 ms music ring is heard as a gap: 19695,
+        ;; 17647 and 18671 sounding underrun frames at the title in native
+        ;; races. Zero-dt frames cannot advance the simulation or open audio.
         (let ((t0 (current-second)))
           (let warm ((n 0))
             (when (< n 2)
               (core-frame! 0.0 (frame-width) (frame-height) #t)
               (wait-frame)
+              (core-startup-mark! "warm-present")
+              (window-scaler-frame! scaler)
+              (core-startup-mark! "warm-scaler")
+              (pad-poll! (core-pad))
+              (core-startup-mark! "warm-pad")
+              (keys-poll! (core-keys) KEYS)
+              (core-startup-mark! "warm-keys")
               (warm (+ n 1))))
           (display (string-append "signal-overdrive: renderer warm-up "
                                   (number->string (exact (round (* 1000 (- (current-second) t0)))))
@@ -118,11 +126,13 @@
               (when (< n 4) (core-startup-mark! (string-append "present-" (number->string n))))
               (window-scaler-frame! scaler)
               (pad-poll! (core-pad))
+              (when (< n 4) (core-startup-mark! (string-append "scaler-and-pad-" (number->string n))))
               (let ((focused? (window-focused?)))
                 (core-focus! focused?)
                 (if focused?
                     (keys-poll! (core-keys) KEYS)
                     (keys-clear! (core-keys))))
+              (when (< n 4) (core-startup-mark! (string-append "focus-and-keys-" (number->string n))))
               (when (keys-pressed? (core-keys) 'escape) (request-quit))
               (when (and quit-after (> (- (current-second) t0) quit-after)) (request-quit))
               (core-frame! dt (frame-width) (frame-height) #t)
