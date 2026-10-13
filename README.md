@@ -17,6 +17,11 @@ through the Flux Harmonic palette and Bayer dither pass.
 
 ## What is in it
 
+- Before the title, the Flux Harmonic card: the mark lies on the road seen from
+  above, then the camera tilts down to the driving angle as it slides away and
+  the picture's interference locks clean, to a radio's tuning-in sound (on the
+  web, a TAP TO TUNE IN gate first: the browser needs a gesture before sound).
+  The CARD knobs; any start skips it; `?card=0` leaves it out.
 - A title screen: the camera wanders the track by itself while the CORRUPT
   logo glitches on the beat; a start fades out into the race's countdown and
   fades back in (the TITLE knobs; `?title=0` skips it).
@@ -181,6 +186,13 @@ The knobs, from `signal-overdrive --knobs` (units are world texels, seconds and 
 | `title-speed` TITLE CAMERA SPEED | title | 240 | 0 to 400 | 10 |
 | `title-height` TITLE CAMERA HEIGHT | title | 96 | 6 to 200 | 1 |
 | `title-dist` TITLE CAMERA DIST | title | 150 | 20 to 200 | 2 |
+| `card` CARD | card | 1 | 0 to 1 | 1 |
+| `card-len` CARD LENGTH | card | 4 | 1 to 10 | 0.1 |
+| `card-hold` CARD HOLD (FLAT) | card | 0.5 | 0 to 3 | 0.05 |
+| `card-tilt` CARD TILT EASE | card | 2 | 1 to 5 | 0.1 |
+| `tone-lo` TONE FROM HZ | card | 180 | 60 to 600 | 10 |
+| `tone-hi` TONE TO HZ | card | 880 | 200 to 2000 | 10 |
+| `tone-lock` TONE LOCKS AT | card | 2.2 | 0.5 to 6 | 0.1 |
 
 ## How it's built
 
