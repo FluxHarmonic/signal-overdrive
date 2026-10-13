@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signal Overdrive: the logo</title>
+<link rel="icon" href="corrupt/favicon.ico">
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #17122E; color: #CCE6FF; font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 1500px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 18px; margin: 40px 0 8px; border-bottom: 1px solid #2E1C4D; padding-bottom: 4px; }
+  h3 { font-size: 15px; margin: 0 0 6px; color: #4DF2D9; }
+  p { max-width: 900px; color: #93A4BA; margin: 6px 0; }
+  .note { font-size: 13px; }
+  img, canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
+  .cols { display: grid; grid-template-columns: repeat(1, minmax(0, 1fr)); gap: 20px; align-items: start; }
+  .col { min-width: 0; }
+  .ground { padding: 16px; overflow-x: auto; display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; }
+  .dark { background: #0D0A1A; }
+  .light { background: #F0F0F0; }
+  .row4 { margin: 12px 0; }
+  .label { font-size: 12px; color: #7380A6; margin-top: 4px; }
+  .light .label { color: #636D81; }
+  figure { margin: 0; }
+  .tabbar { display: flex; gap: 2px; padding: 8px 8px 0; font: 13px system-ui, sans-serif; }
+  .tabbar .tab { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 8px 8px 0 0; width: 190px; }
+  .tabbar .tab span { flex: 1; white-space: nowrap; overflow: hidden; }
+  .tabbar .tab b { font-weight: normal; opacity: .6; }
+  .tabbar.dark { background: #1F1F23; } .tabbar.dark .tab { background: #35363A; color: #E8EAED; } .tabbar.dark .dim { background: none; color: #9AA0A6; }
+  .tabbar.light { background: #DEE1E6; } .tabbar.light .tab { background: #FFFFFF; color: #202124; } .tabbar.light .dim { background: none; color: #5F6368; }
+  .frame { margin: 8px 0 24px; }
+  .frame canvas { width: 960px; max-width: 100%; height: auto; }
+  label { font-size: 13px; color: #93A4BA; margin-right: 16px; }
+  .desc { min-height: 7.5em; }
+  code { color: #CCE6FF; }
+</style>
+</head>
+<body>
+<main>
+<h1>Signal Overdrive: the logo (CORRUPT)</h1>
+<p class="note">Sources at 76688a4390ea. Every letter and every mark is drawn by hand as text, one character a pixel (the <a href="src/">sources</a>); <code>scripts/art/gen-logo.mjs</code> lays them out and shades them in the game's palette through the same 4x4 Bayer matrix as its post pass. No image generation and no fonts. Each image is shown at whole multiples of its size, nearest neighbour.</p>
+
+<div class="cols"><div class="col"><h3>CORRUPT</h3><p class="desc">The cargo's integrity failing: tall condensed letters, their channels split cyan and magenta, one slice torn sideways, ICE amber and dropouts where the data broke. On the title the signal holds for a bar, then glitches hard on the downbeat and snaps back.</p></div></div>
+
+
+<h2>Wordmark at 1x</h2>
+<p class="note">1x is the size in the game's 480x270 frame; the site would use 2x or more. Dark ground is the game's own #0D0A1A.</p>
+<div class="cols"><div class="col"><h3>CORRUPT</h3><div class="ground dark"><figure><img src="corrupt/wordmark.png" width="336" height="48" alt="1x"></figure></div><div class="ground light"><figure><img src="corrupt/wordmark.png" width="336" height="48" alt="1x"></figure></div></div></div>
+
+<h2>Wordmark at 2x</h2>
+<div class="row4"><h3>CORRUPT</h3><div class="ground dark"><figure><img src="corrupt/wordmark.png" width="672" height="96" alt="2x"></figure></div><div class="ground light"><figure><img src="corrupt/wordmark.png" width="672" height="96" alt="2x"></figure></div></div>
+
+<h2>Wordmark at 4x</h2>
+<div class="row4"><h3>CORRUPT</h3><div class="ground dark"><figure><img src="corrupt/wordmark.png" width="1344" height="192" alt="4x"></figure></div><div class="ground light"><figure><img src="corrupt/wordmark.png" width="1344" height="192" alt="4x"></figure></div></div>
+
+<h2>Mark at 16, 32 and 180 px</h2>
+<p class="note">16 and 32 are separate drawings; 180 (the phone's home screen icon) is the 32 drawing on a 36 px tile at 5x. These are CSS pixels, so on a 2x display each is drawn twice as large again; the tab below picks the 16 or the 32 drawing the way a browser does.</p>
+<div class="cols"><div class="col"><h3>CORRUPT</h3><div class="ground dark"><figure><img src="corrupt/mark-16.png" width="16" height="16" alt="16"><div class="label">16</div></figure><figure><img src="corrupt/mark-32.png" width="32" height="32" alt="32"><div class="label">32</div></figure><figure><img src="corrupt/mark-180.png" width="180" height="180" alt="180"><div class="label">180</div></figure><figure><img src="corrupt/mark-16.png" width="96" height="96" alt="16 at 6x"><div class="label">16 drawing at 6x</div></figure></div><div class="ground light"><figure><img src="corrupt/mark-16.png" width="16" height="16" alt="16"><div class="label">16</div></figure><figure><img src="corrupt/mark-32.png" width="32" height="32" alt="32"><div class="label">32</div></figure><figure><img src="corrupt/mark-180.png" width="180" height="180" alt="180"><div class="label">180</div></figure><figure><img src="corrupt/mark-16.png" width="96" height="96" alt="16 at 6x"><div class="label">16 drawing at 6x</div></figure></div></div></div>
+
+<h2>In a browser tab</h2>
+<div class="cols"><div class="col"><h3>CORRUPT</h3><div class="tabbar dark"><div class="tab"><img src="corrupt/mark-16.png" srcset="corrupt/mark-32.png 2x" width="16" height="16" alt=""><span>Signal Overdrive</span><b>×</b></div><div class="tab dim"><span>New Tab</span></div></div><div class="tabbar light"><div class="tab"><img src="corrupt/mark-16.png" srcset="corrupt/mark-32.png 2x" width="16" height="16" alt=""><span>Signal Overdrive</span><b>×</b></div><div class="tab dim"><span>New Tab</span></div></div></div></div>
+
+
+<h2>The title animation, as the script renders it</h2>
+<p class="note">gen-logo.mjs's own render of the loop, two bars at 140 BPM (the tempo of <i>Carrier</i>), over a frame captured before the effects pass. The game picks its frames from the same timing.</p>
+<div class="frame"><h3>CORRUPT</h3><label><input type="checkbox" data-hud="corrupt"> today's HUD</label><label><input type="checkbox" data-pause="corrupt"> pause</label><canvas id="t-corrupt" width="480" height="270"></canvas></div>
+</main>
+<script>
+const TITLES = {"corrupt":{"w":348,"h":48,"frames":206,"cols":11,"fps":60,"bpm":140,"x":68,"y":44}};
+const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = src; });
+(async () => {
+  const [bare, hud] = await Promise.all([load("frames/title-bare.png"), load("frames/title-hud.png")]);
+  const runs = await Promise.all(Object.entries(TITLES).map(async ([n, t]) => {
+    const sheet = await load(n + "/title.png");
+    const cv = document.getElementById("t-" + n), cx = cv.getContext("2d");
+    cx.imageSmoothingEnabled = false;
+    const st = { n, t, sheet, cx, hud: false, pause: false, f: 0 };
+    document.querySelector('[data-hud="' + n + '"]').onchange = (e) => { st.hud = e.target.checked; };
+    document.querySelector('[data-pause="' + n + '"]').onchange = (e) => { st.pause = e.target.checked; };
+    return st;
+  }));
+  const t0 = performance.now();
+  const tick = (now) => {
+    const f = Math.floor((now - t0) / (1000 / 60));
+    for (const s of runs) {
+      if (!s.pause) s.f = f % s.t.frames;
+      const { t, cx } = s;
+      cx.drawImage(s.hud ? hud : bare, 0, 0);
+      const sx = (s.f % t.cols) * t.w, sy = Math.floor(s.f / t.cols) * t.h;
+      cx.drawImage(s.sheet, sx, sy, t.w, t.h, t.x, t.y, t.w, t.h);
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

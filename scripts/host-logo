@@ -1,0 +1,74 @@
+#!/bin/sh
+# scripts/host-logo         snapshot docs/logo (the logo candidates and their
+#                           review sheet) and the logo's text sources into
+#                           $HOSTDIR/site, and (re)start an https server on
+#                           $PORT (8862), wg0 only.
+# scripts/host-logo --stop  stop the server this script started.
+#
+# After scripts/host. HOSTDIR defaults to
+# ~/Projects/Code/sigil/signal-overdrive-logo-hosted (outside the repo, so a
+# re-render does not change what is served until this runs again). The
+# sources go under /src/ as text, so the hand-drawn letters can be read in
+# the browser. When build/web holds a web build, the game goes under /game/
+# too, so the title screen can be played next to the sheet.
+set -eu
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+HOSTDIR="${HOSTDIR:-$HOME/Projects/Code/sigil/signal-overdrive-logo-hosted}"
+PORT="${PORT:-8862}"
+mkdir -p "$HOSTDIR"
+cd "$HOSTDIR"
+HERE="$(pwd)"
+
+live_pid() {   # the PID in host-PORT.pid if it is our node serve.mjs, else nothing
+  f="host-$1.pid"; [ -f "$f" ] || return 0
+  pid="$(cat "$f")"
+  exe="$(readlink "/proc/$pid/exe" 2>/dev/null || true)"
+  cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || true)"
+  [ "$(basename "${exe% (deleted)}")" = node ] || return 0
+  [ "$cwd" = "$HERE" ] || return 0
+  tr '\0' ' ' < "/proc/$pid/cmdline" | grep -q "serve.mjs site $1" || return 0
+  echo "$pid"
+}
+pid="$(live_pid "$PORT")"
+if [ -n "$pid" ]; then kill "$pid" && echo "host-logo: stopped pid $pid (port $PORT)"; fi
+rm -f "host-$PORT.pid"
+[ "${1:-}" = "--stop" ] && exit 0
+
+[ -f "$REPO/docs/logo/index.html" ] || { echo "host-logo: docs/logo/index.html missing; run scripts/art/gen-logo.mjs and logo-sheet.mjs"; exit 1; }
+rm -rf site
+mkdir -p site/src/marks
+cp -r "$REPO/docs/logo/." site/
+for f in "$REPO"/assets/src/logo/*.txt; do cp "$f" site/src/; done
+for f in "$REPO"/assets/src/logo/*.spec; do cp "$f" "site/src/$(basename "$f").txt"; done
+for f in "$REPO"/assets/src/logo/marks/*.txt; do cp "$f" site/src/marks/; done
+{
+  echo '<!doctype html><meta charset="utf-8"><title>Signal Overdrive logo sources</title>'
+  echo '<style>body{font:15px/1.6 system-ui,sans-serif;background:#17122E;color:#CCE6FF;margin:24px}a{color:#4DF2D9}</style>'
+  echo '<h1>Logo sources, drawn by hand as text</h1><p>Alphabets (one character a pixel), the specs that lay them out, and the marks.</p><ul>'
+  for f in site/src/*.txt site/src/marks/*.txt; do r="${f#site/src/}"; echo "<li><a href=\"$r\">$r</a></li>"; done
+  echo '</ul>'
+} > site/src/index.html
+WEB="$REPO/build/web"
+if [ -f "$WEB/signal-overdrive.wasm" ] && [ -f "$WEB/index.html" ]; then
+  mkdir -p site/game
+  cp -r "$WEB/index.html" "$WEB/signal-overdrive.wasm" "$WEB/assets" site/game/
+  for f in "$WEB"/sigil-wasm-bridges.* "$WEB/build.txt"; do [ -f "$f" ] && cp "$f" site/game/; done
+fi
+cp "$REPO/scripts/serve.mjs" serve.mjs
+printf 'signal-overdrive logo sheet\ncommit %s\ngame %s\nhosted %s\n' \
+  "$(git -C "$REPO" rev-parse --short HEAD; git -C "$REPO" status --porcelain -- assets/src/logo scripts/art docs/logo | grep -q . && echo '(with uncommitted logo files)' || true)" \
+  "$(cat site/game/build.txt 2>/dev/null || echo none)" \
+  "$(date -u +%FT%TZ)" | tr -s '\n' > site/version.txt
+
+HOST="$(ip -4 -o addr show dev wg0 | awk '{print $4}' | cut -d/ -f1)"
+[ -n "$HOST" ] || { echo "host-logo: no wg0 address"; exit 1; }
+if [ ! -f tls/cert.pem ]; then
+  mkdir -p tls
+  guix shell openssl -- openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+    -keyout tls/key.pem -out tls/cert.pem -subj "/CN=$HOST" -addext "subjectAltName=IP:$HOST" 2>/dev/null
+fi
+nohup node serve.mjs site "$PORT" --tls > "host-$PORT.log" 2>&1 &
+echo $! > "host-$PORT.pid"
+sleep 1
+cat "host-$PORT.log"
+cat site/version.txt
