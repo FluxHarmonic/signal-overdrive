@@ -1,0 +1,427 @@
+;;; (theme sketches) - Round 1: three directions for the main theme
+;;;
+;;; Three short sketches (about 30 s each), all energetic and dark, all in
+;;; Carrier's sound world, each with the overdriven lead. They differ in
+;;; groove, tempo and what carries the identity:
+;;;
+;;;   redline     140 BPM, D minor. The anthem: the overdriven lead sings
+;;;               an eight-bar hook over a falling i-VII-VI-V bass (Dm C
+;;;               Bb A), four-on-the-floor kick, octave-pumping grit bass.
+;;;               The hook bends up into its high notes like a guitar.
+;;;   night-wire  170 BPM, D Phrygian. The chase: a two-bar chip ostinato
+;;;               on a D pedal leans on E-flat (Gibson's colour, the wire
+;;;               he owns) over a two-step breakbeat. The overdriven lead
+;;;               breaks in with a stabbing riff, climbs out of the
+;;;               Phrygian, and the ostinato swaps E-flat for E natural
+;;;               (the air) under a held, bent-up high D.
+;;;   uplink      140 BPM, D minor. The slow burn: half-time drums, and
+;;;               Carrier's call at half speed in Carrier's own hollow
+;;;               lead, reharmonised darker (its hopeful B natural becomes
+;;;               B-flat over G minor, then E-flat). The overdriven lead
+;;;               answers; then it takes the call itself, the B natural
+;;;               returns over G major, and Carrier's own groove kicks in.
+;;;
+;;; Channels follow the race songs' layout: 1 kick, 2 snare, 3 ticks,
+;;; 4 bass, 5 pad, 6 lead, 7 arp or ostinato, 8 crash (and, in redline,
+;;; Carrier's lead doubling the hook an octave down at the climax).
+;;;
+;;;   (sketch-text name) -> .cts text;  (sketch-tempo name) -> BPM
+
+(define-library (theme sketches)
+  (import (sigil core) (sigil string) (sigil list)
+          (theme notation) (theme bank))
+  (export sketch-text sketch-tempo SKETCHES)
+  (begin
+    (define SKETCHES '(redline night-wire uplink))
+
+    (define (cat-map f xs) (apply append (map f xs)))
+    (define (range a b) (if (>= a b) '() (cons a (range (+ a 1) b))))
+
+    ;; ------------------------------------------------------------
+    ;; Pitches and chords. A chord is (letter . quality), quality m or M.
+    ;; ------------------------------------------------------------
+    ;; bass register G#1..G2, as Carrier's bass
+    (define (bass-root letter)
+      (let ((m (midi letter 2))) (if (> m (midi 'G 2)) (- m 12) m)))
+    ;; pad and arp register F3..E4, so the pad's top stays under the lead
+    (define (pad-root letter)
+      (let ((m (midi letter 3))) (if (< m (midi 'F 3)) (+ m 12) m)))
+    (define (third chord) (if (eq? (cdr chord) 'm) 3 4))
+
+    ;; ------------------------------------------------------------
+    ;; Parts
+    ;; ------------------------------------------------------------
+    (define KICK-PITCH (midi 'D 2))
+    (define SNARE-PITCH (midi 'D 3))
+    (define TICK-PITCH (midi 'C 8))
+
+    ;; entries: ((pos vol) ...)
+    (define (kick at entries) (cat-map (lambda (e) (note 1 (+ at (car e)) 1 KICK-PITCH I-KICK (cadr e))) entries))
+    (define (snare at entries) (cat-map (lambda (e) (note 2 (+ at (car e)) 1 SNARE-PITCH I-SNARE (cadr e))) entries))
+    (define (crash at vol) (note 8 at 8 TICK-PITCH I-CRASH vol))
+
+    ;; ticks on the positions in `where` (16ths in the bar); accent on
+    ;; `accents`; open: a position that gets the open tick instead
+    (define (ticks at where accents accent soft . open)
+      (cat-map (lambda (i)
+                 (if (and (pair? open) (= i (car open)))
+                     (note 3 (+ at i) 1 TICK-PITCH I-TICK-OPEN (+ accent 2))
+                     (note 3 (+ at i) 0.5 TICK-PITCH I-TICK (if (memv i accents) accent soft))))
+               where))
+
+    (define (pad at chord len vol)
+      (note 5 at len (pad-root (car chord)) (if (eq? (cdr chord) 'm) I-MINOR-PAD I-MAJOR-PAD) vol))
+
+    ;; root, third, fifth, octave, up, four times a bar (Carrier's arp)
+    (define (arp-bar at chord vol)
+      (let* ((r (pad-root (car chord)))
+             (tones (list r (+ r (third chord)) (+ r 7) (+ r 12))))
+        (cat-map (lambda (i) (note 7 (+ at i) 0.75 (list-ref tones (modulo i 4)) I-ARP
+                                   (if (= 0 (modulo i 4)) (+ vol 4) vol)))
+                 (range 0 16))))
+
+    ;; A lead line: entries (pos len letter octave vol [bend|slide from-letter from-octave speed])
+    (define (line ch inst at entries)
+      (cat-map (lambda (e)
+                 (let ((pos (+ at (list-ref e 0))) (len (list-ref e 1))
+                       (m (midi (list-ref e 2) (list-ref e 3))) (vol (list-ref e 4)))
+                   (if (> (length e) 5)
+                       (let ((from (midi (list-ref e 6) (list-ref e 7))) (spd (list-ref e 8)))
+                         (case (list-ref e 5)
+                           ((bend) (bend ch pos len from m inst vol spd))
+                           ((slide) (slide ch pos len from m spd))
+                           (else (error "line: unknown articulation" e))))
+                       (note ch pos len m inst vol))))
+               entries))
+
+    ;; the same line, plain (no bends), transposed: for doubling
+    (define (line-plain ch inst at entries shift vol)
+      (cat-map (lambda (e) (note ch (+ at (list-ref e 0)) (list-ref e 1)
+                                 (+ shift (midi (list-ref e 2) (list-ref e 3))) inst vol))
+               entries))
+
+    ;; ================================================================
+    ;; REDLINE: the anthem. 140 BPM, D minor, 19 bars.
+    ;;   bar 0     a hit: kick, crash, the pad and the pumping bass
+    ;;   bar 1     four on the floor, a snare roll, the lead's pickup
+    ;;   bars 2-9  the hook over Dm C Bb A, twice
+    ;;   bars 10-17 the hook again; the arp enters, and for the second
+    ;;            half Carrier's hollow lead doubles it an octave down
+    ;;   bar 18    the landing on D
+    ;; ================================================================
+    (define REDLINE-CHORDS '((D . m) (C . M) (Bb . M) (A . M)))
+
+    ;; the hook, bar by bar. Its rhythm (6 2 4 4, then 8 2 2 4) repeats;
+    ;; the high note of each odd bar is bent up into, like a guitar.
+    (define HOOK
+      (list
+       '((0 6 D 5 46) (6 2 E 5 40) (8 4 F 5 44) (12 4 A 5 46 bend G 5 8))
+       '((0 8 G 5 46) (8 2 F 5 40) (10 2 E 5 40) (12 4 C 5 42))
+       '((0 6 D 5 46) (6 2 E 5 40) (8 4 F 5 44) (12 4 Bb 5 46 bend A 5 4))
+       '((0 8 A 5 46) (8 2 G 5 40) (10 2 F 5 40) (12 2 E 5 42) (14 2 Cs 5 42))
+       '((0 6 D 5 46) (6 2 E 5 40) (8 4 F 5 44) (12 4 A 5 46 bend G 5 8))
+       '((0 8 G 5 46) (8 2 A 5 40) (10 2 Bb 5 42) (12 4 C 6 46 slide Bb 5 8))
+       '((0 12 D 6 48 bend C 6 4) (12 2 C 6 40) (14 2 Bb 5 40))
+       '((0 2 A 5 46) (2 2 Bb 5 42) (4 10 A 5 44) (14 2 Cs 5 42))))
+
+    ;; 8th-note octave pump; into a D minor bar the last 8th splits and
+    ;; steps up through C sharp
+    (define (redline-bass at chord into-d? vol)
+      (let ((r (bass-root (car chord))))
+        (cat-map (lambda (k)
+                   (let ((pos (* 2 k)) (m (if (even? k) r (+ r 12)))
+                         (v (cond ((= k 0) (+ vol 6)) ((even? k) vol) (else (- vol 4)))))
+                     (if (and into-d? (= k 7))
+                         (append (note 4 (+ at 14) 1 (+ r 12) I-BASS v)
+                                 (note 4 (+ at 15) 1 (midi 'Cs 2) I-BASS (- vol 2)))
+                         (note 4 (+ at pos) 1.5 m I-BASS v))))
+                 (range 0 8))))
+
+    (define FOUR '((0 46) (4 40) (8 44) (12 40)))
+    (define OFFBEATS '(2 6 10 14))
+
+    (define (redline-bar b)
+      (let ((at (* BAR b)))
+        (cond
+          ;; the hit
+          ((= b 0)
+           (append (kick at '((0 48))) (crash at 30)
+                   (ticks at (range 0 16) OFFBEATS 16 8)
+                   (redline-bass at '(D . m) #f 38)
+                   (pad at '(D . m) 16 36)))
+          ;; the build, and the pickup
+          ((= b 1)
+           (append (kick at '((0 44) (4 38) (8 42) (12 38)))
+                   (snare at '((8 20) (10 24) (12 28) (13 30) (14 34) (15 40)))
+                   (ticks at (range 0 16) OFFBEATS 22 10)
+                   (redline-bass at '(D . m) #f 40)
+                   (pad at '(D . m) 16 36)
+                   (line 6 I-OVERDRIVE at '((14 2 A 4 40)))))
+          ;; the landing
+          ((= b 18)
+           (append (kick at '((0 44))) (snare at '((0 36))) (crash at 32)
+                   (note 4 at 8 (bass-root 'D) I-BASS 48)
+                   (pad at '(D . m) 16 36)
+                   (line 6 I-OVERDRIVE at '((0 12 D 5 46)))))
+          ;; the hook
+          (else
+           (let* ((hb (modulo (- b 2) 8))
+                  (chord (list-ref REDLINE-CHORDS (modulo hb 4)))
+                  (second? (>= b 10))
+                  (into-d? (memv hb '(3 7))))
+             (append
+              (kick at (if into-d? (append FOUR '((14 32))) FOUR))
+              (snare at (cond ((= hb 7) '((4 44) (12 40) (13 30) (14 36) (15 42)))
+                              ((= hb 3) '((4 44) (12 46) (14 18) (15 24)))
+                              ((odd? hb) '((4 44) (12 46) (15 14)))
+                              (else '((4 44) (12 46)))))
+              (if into-d?
+                  (ticks at (range 0 14) OFFBEATS 28 (if second? 14 12) )
+                  (ticks at (range 0 16) OFFBEATS 28 (if second? 14 12)))
+              (if into-d? (note 3 (+ at 14) 1 TICK-PITCH I-TICK-OPEN 26) '())
+              (if (memv b '(2 10)) (crash at 30) '())
+              (redline-bass at chord into-d? 40)
+              (pad at chord 16 34)
+              (line 6 I-OVERDRIVE at (list-ref HOOK hb))
+              (if second? (arp-bar at chord 22) '())
+              (if (>= b 14) (line-plain 8 I-SIGNAL at (list-ref HOOK hb) -12 26) '())))))))
+
+    (define (redline-events) (cat-map redline-bar (range 0 19)))
+
+    ;; ================================================================
+    ;; NIGHT WIRE: the chase. 170 BPM, D Phrygian, 21 bars.
+    ;;   bars 0-1   the ostinato alone
+    ;;   bars 2-3   ticks and the bass's pedal join; a snare build
+    ;;   bars 4-7   the break, the bass and the pad (Dm Dm Bb Eb)
+    ;;   bars 8-15  the overdriven lead's riff, twice round the cycle
+    ;;   bars 16-19 the climb: Bb, C, then D minor with E natural, the lead
+    ;;              bent up to a high D and held
+    ;;   bar 20     the landing
+    ;; ================================================================
+    ;; the ostinato: 16ths in groups of 3+3+2+3+3+2, each group starting
+    ;; on the D pedal (so its accents are Carrier's 3+3+2, twice a bar)
+    (define WIRE-GROUPS
+      '((phrygian (D 4 A 4 D 5) (D 4 A 4 Eb 5) (D 4 C 5) (D 4 A 4 D 5) (D 4 A 4 F 5) (D 4 Eb 5))
+        (bb       (D 4 Bb 4 D 5) (D 4 Bb 4 F 5) (D 4 C 5) (D 4 Bb 4 D 5) (D 4 Bb 4 F 5) (D 4 Eb 5))
+        (eb       (D 4 Bb 4 Eb 5) (D 4 Bb 4 G 5) (D 4 Eb 5) (D 4 Bb 4 Eb 5) (D 4 G 4 Bb 4) (D 4 C 5))
+        (c        (D 4 G 4 C 5) (D 4 G 4 E 5) (D 4 C 5) (D 4 G 4 C 5) (D 4 G 4 E 5) (D 4 D 5))
+        (air      (D 4 A 4 D 5) (D 4 A 4 E 5) (D 4 F 5) (D 4 A 4 D 5) (D 4 A 4 E 5) (D 4 C 5))))
+
+    (define (pairs xs) (if (null? xs) '() (cons (midi (car xs) (cadr xs)) (pairs (cddr xs)))))
+
+    (define (ostinato at kind accent soft . only-first)
+      (let loop ((groups (cdr (assq kind WIRE-GROUPS))) (pos 0) (acc '()))
+        (if (or (null? groups) (and (pair? only-first) (> pos 0)))
+            acc
+            (let* ((ps (pairs (car groups)))
+                   (evs (let inner ((ps ps) (i 0) (out '()))
+                          (if (null? ps) out
+                              (inner (cdr ps) (+ i 1)
+                                     (append out (note 7 (+ at pos i) 0.75 (car ps) I-ARP
+                                                       (if (= i 0) accent soft))))))))
+              (loop (cdr groups) (+ pos (length ps)) (append acc evs))))))
+
+    ;; per bar: (ostinato kind, pad chord, bass letter)
+    (define (wire-harmony b)
+      (cond ((= b 16) '(bb (Bb . M) Bb))
+            ((= b 17) '(c (C . M) C))
+            ((>= b 18) '(air (D . m) D))
+            (else (case (modulo b 4)
+                    ((0 1) '(phrygian (D . m) D))
+                    ((2) '(bb (Bb . M) Bb))
+                    (else '(eb (Eb . M) Eb))))))
+
+    ;; the riff's rhythm is 2 2 3 3 4 (two stabs, 3+3, a held note, a breath)
+    (define RIFF
+      (list
+       '((0 2 D 5 46) (2 2 D 5 40) (4 3 F 5 44) (7 3 Eb 5 42) (10 4 D 5 46))
+       '((0 2 C 5 42) (2 2 D 5 40) (4 3 F 5 44) (7 3 G 5 42) (10 4 A 5 46 slide G 5 8))
+       '((0 2 D 5 46) (2 2 D 5 40) (4 3 F 5 44) (7 3 Eb 5 42) (10 4 D 5 46))
+       '((0 2 G 5 46) (2 2 G 5 40) (4 3 F 5 44) (7 3 Eb 5 42) (10 4 D 5 46))
+       '((0 2 D 5 46) (2 2 D 5 40) (4 3 F 5 44) (7 3 Eb 5 42) (10 4 D 5 46))
+       '((0 2 C 5 42) (2 2 D 5 40) (4 3 F 5 44) (7 3 A 5 42) (10 4 C 6 46 slide A 5 12))
+       '((0 2 D 6 46) (2 2 C 6 40) (4 3 Bb 5 44) (7 3 A 5 42) (10 4 F 5 44))
+       '((0 2 G 5 46) (2 2 F 5 40) (4 3 Eb 5 44) (7 3 D 5 42) (10 4 Eb 5 46))
+       ;; the climb
+       '((0 2 D 5 46) (2 2 D 5 40) (4 3 F 5 44) (7 3 G 5 42) (10 4 A 5 46))
+       '((0 2 E 5 46) (2 2 E 5 40) (4 3 G 5 44) (7 3 A 5 42) (10 6 C 6 46))
+       '((0 32 D 6 48 bend C 6 4))))
+
+    (define BREAK-A-KICK '((0 46) (10 42)))
+    (define BREAK-B-KICK '((0 46) (6 26) (10 42)))
+    (define BREAK-A-SNARE '((4 44) (7 12) (12 46) (15 14)))
+    (define BREAK-B-SNARE '((4 44) (9 12) (11 10) (12 46)))
+    (define EIGHTHS '(0 2 4 6 8 10 12 14))
+
+    (define (wire-bass at letter vol)
+      (let ((r (bass-root letter)))
+        (append
+         (if (eq? letter 'Eb)
+             ;; into E-flat from the D under it: a scoop up a half step
+             (bend 4 at 6 (bass-root 'D) r I-BASS (+ vol 6) 3)
+             (note 4 at 6 r I-BASS (+ vol 6)))
+         (note 4 (+ at 6) 2 (+ r 12) I-BASS (- vol 4))
+         (note 4 (+ at 10) 3 r I-BASS (+ vol 2))
+         (note 4 (+ at 13) 1 r I-BASS (- vol 6))
+         (note 4 (+ at 14) 2 (+ r 12) I-BASS (- vol 2)))))
+
+    (define (night-wire-bar b)
+      (let* ((at (* BAR b))
+             (h (wire-harmony b))
+             (kind (car h)) (chord (cadr h)) (letter (caddr h)))
+        (cond
+          ((< b 2) (ostinato at kind 42 32))
+          ((< b 4)
+           (append (ostinato at kind 42 32)
+                   (ticks at EIGHTHS '(2 6 10 14) 18 12)
+                   (note 4 at 8 (bass-root 'D) I-BASS 40)
+                   (note 4 (+ at 8) 8 (bass-root 'D) I-BASS 36)
+                   (if (= b 3)
+                       (append (kick at '((0 40)))
+                               (snare at '((8 20) (10 24) (12 28) (13 30) (14 34) (15 40))))
+                       '())))
+          ((= b 20)
+           (append (kick at '((0 44))) (snare at '((0 36))) (crash at 32)
+                   (note 4 at 8 (bass-root 'D) I-BASS 48)
+                   (pad at '(D . m) 16 32)
+                   (ostinato at 'air 42 32 'first-group-only)
+                   (line 6 I-OVERDRIVE at '((0 8 D 6 46)))))
+          (else
+           (let ((a? (even? b)) (climb? (>= b 16)))
+             (append
+              (ostinato at kind 42 32)
+              (kick at (cond ((= b 19) BREAK-A-KICK)
+                             (climb? (append (if a? BREAK-A-KICK BREAK-B-KICK) '((14 30))))
+                             (a? BREAK-A-KICK)
+                             (else BREAK-B-KICK)))
+              (snare at (cond ((= b 19) '((4 44) (8 30) (10 34) (12 38) (13 40) (14 42) (15 46)))
+                              (a? BREAK-A-SNARE)
+                              (else BREAK-B-SNARE)))
+              (if a?
+                  (ticks at EIGHTHS '(2 6 10 14) 26 16)
+                  (ticks at '(0 2 4 6 8 10 12 13 14 15) '(2 10 14) 26 14 6))
+              (if (memv b '(4 8 12 16)) (crash at 30) '())
+              (wire-bass at letter 40)
+              (pad at chord 16 30)
+              ;; bar 19 has no new lead note: bar 18's high D is held through it
+              (if (<= 8 b 18) (line 6 I-OVERDRIVE at (list-ref RIFF (- b 8))) '())))))))
+
+    (define (night-wire-events) (cat-map night-wire-bar (range 0 21)))
+
+    ;; ================================================================
+    ;; UPLINK: the slow burn. 140 BPM, D minor, 17 bars.
+    ;;   bars 0-3   half time: Carrier's call at half speed in Carrier's
+    ;;              hollow lead, darkened: Bb Gm Eb Eb
+    ;;   bars 4-7   the overdriven lead answers: Bb C Dm A
+    ;;   bars 8-11  the overdriven lead takes the call, its B natural back
+    ;;              over G major (Bb G Eb Eb); Carrier's drums, bass and
+    ;;              arp kick in
+    ;;   bars 12-15 the answer again, higher, to a high D
+    ;;   bar 16     the landing
+    ;; ================================================================
+    (define UPLINK-CHORDS
+      '((Bb . M) (G . m) (Eb . M) (Eb . M)
+        (Bb . M) (C . M) (D . m) (A . M)
+        (Bb . M) (G . M) (Eb . M) (Eb . M)
+        (Bb . M) (C . M) (D . m) (A . M)
+        (D . m)))
+
+    ;; Carrier's call, D A C | B . A | G, at half speed (its 3+3+2 is now
+    ;; 6+6+4). Its B is B-flat here, over G minor.
+    (define CALL-SLOW-DARK
+      '((0 0 6 D 5 44) (0 6 6 A 5 42) (0 12 4 C 6 44) (1 0 12 Bb 5 46) (1 12 4 A 5 40) (2 0 20 G 5 44)))
+    (define CALL-SLOW-HOPE
+      '((0 0 6 D 5 46) (0 6 6 A 5 42) (0 12 4 C 6 44) (1 0 12 B 5 48 bend A 5 4) (1 12 4 A 5 40) (2 0 20 G 5 44)
+        (3 12 2 Bb 4 36) (3 14 2 D 5 40)))
+    ;; the answer keeps the call's rhythm (6 6 4 | 12 4) and falls in steps
+    (define ANSWER
+      '((0 0 6 F 5 44) (0 6 6 G 5 42) (0 12 4 A 5 44) (1 0 12 G 5 46 bend F 5 4) (1 12 4 E 5 40)
+        (2 0 12 F 5 44) (2 12 4 D 5 40) (3 0 12 E 5 44) (3 12 4 Cs 5 42)))
+    (define ANSWER-HIGH
+      '((0 0 6 F 5 44) (0 6 6 G 5 42) (0 12 4 A 5 44) (1 0 12 C 6 46 bend Bb 5 4) (1 12 4 A 5 40)
+        (2 0 12 D 6 48 bend C 6 4) (2 12 2 C 6 40) (2 14 2 Bb 5 40) (3 0 12 Cs 6 46) (3 12 4 A 5 40)))
+
+    ;; entries (bar pos len letter octave vol ...) from bar `at-bar`
+    (define (phrase ch inst at-bar entries)
+      (cat-map (lambda (e) (line ch inst (* BAR (+ at-bar (car e))) (list (cdr e)))) entries))
+
+    ;; Carrier's lap-2 groove: its kick phrase, backbeat and 3+3+2 ticks
+    (define KICK-A '((0 46) (6 40) (10 44)))
+    (define KICK-B '((0 46) (3 36) (8 44) (11 40)))
+    (define KICK-PUSH '((0 46) (6 40) (10 44) (13 30) (14 42)))
+    (define CARRIER-ACCENTS '(0 3 6 8 11 14))
+    (define SNARE-FILL-LONG '((4 44) (8 26) (10 30) (12 34) (13 36) (14 38) (14.5 40) (15 42) (15.5 46)))
+
+    ;; Carrier's bass bar: 16ths, octave jumps on the 3+3+2 accents, the
+    ;; last two 16ths leading to the next root
+    (define (carrier-bass-bar at r next-r loud)
+      (let* ((same (= r next-r))
+             (n14 (if same (+ r 12) r))
+             (n15 (if same (+ r 10) (if (> next-r r) (- next-r 2) (+ next-r 2)))))
+        (cat-map (lambda (i)
+                   (let ((m (cond ((= i 14) n14) ((= i 15) n15)
+                                  ((memv i '(3 6 11)) (+ r 12)) (else r))))
+                     (note 4 (+ at i) 1 m I-BASS
+                           (cond ((memv i '(0 8)) (+ loud 6))
+                                 ((memv i '(3 6 11 14)) (+ loud 3))
+                                 (else loud)))))
+                 (range 0 16))))
+
+    (define (half-time-bass at r vol last?)
+      (append (note 4 at 1.5 r I-BASS (+ vol 6))
+              (cat-map (lambda (k) (note 4 (+ at (* 2 k)) 1.5 (if (and last? (= k 7)) (+ r 12) r) I-BASS
+                                         (if (= k 4) (+ vol 2) (- vol 4))))
+                       (range 1 8))))
+
+    (define (uplink-bar b)
+      (let* ((at (* BAR b))
+             (chord (list-ref UPLINK-CHORDS b))
+             (next (list-ref UPLINK-CHORDS (min 16 (+ b 1))))
+             (r (bass-root (car chord))))
+        (cond
+          ((= b 16)
+           (append (kick at '((0 44))) (snare at '((0 36))) (crash at 32)
+                   (note 4 at 8 r I-BASS 48)
+                   (pad at chord 16 34)))
+          ((< b 8)
+           (append
+            (kick at (if (memv b '(3 7)) '((0 46) (10 30) (14 34)) '((0 46) (10 30))))
+            (snare at (if (= b 7) '((8 46) (12 30) (13 34) (14 38) (15 42)) '((8 46))))
+            (ticks at '(0 2 4 6 8 10 12 14) '(0 4 8 12) 24 14)
+            (if (= b 0) (crash at 30) '())
+            (half-time-bass at r 38 #t)
+            (pad at chord 16 34)))
+          (else
+           (let ((k (modulo (- b 8) 4)))
+             (append
+              (kick at (cond ((= k 3) KICK-PUSH) ((odd? k) KICK-B) (else KICK-A)))
+              (snare at (if (= b 15) SNARE-FILL-LONG '((4 44) (12 46))))
+              (if (= b 15)
+                  (ticks at (range 0 12) CARRIER-ACCENTS 30 14)
+                  (ticks at (range 0 16) CARRIER-ACCENTS 30 14))
+              (if (= b 8) (crash at 32) '())
+              (carrier-bass-bar at r (bass-root (car next)) 40)
+              (pad at chord 16 34)
+              (arp-bar at chord 24)))))))
+
+    (define (uplink-events)
+      (append (cat-map uplink-bar (range 0 17))
+              (phrase 6 I-SIGNAL 0 CALL-SLOW-DARK)
+              (phrase 6 I-OVERDRIVE 4 ANSWER)
+              (phrase 6 I-OVERDRIVE 8 CALL-SLOW-HOPE)
+              (phrase 6 I-OVERDRIVE 12 ANSWER-HIGH)
+              (line 6 I-OVERDRIVE (* BAR 16) '((0 8 D 6 46)))))
+
+    ;; ================================================================
+    (define (sketch-tempo name)
+      (case name ((redline uplink) 140) ((night-wire) 170) (else (error "unknown sketch" name))))
+
+    (define (sketch-text name)
+      ;; overdrive 0.5 and pad 1.2: set from the first round's stems (the
+      ;; lead 4 dB under Carrier's, the pad's RMS 23 dB under the mix's)
+      (let ((bank (bank-text 0.5 1.2)) (bus (bus-text)))
+        (case name
+          ((redline) (events->tune-text "Signal Overdrive theme, sketch A: Redline" 140 19 (redline-events) bus bank))
+          ((night-wire) (events->tune-text "Signal Overdrive theme, sketch B: Night Wire" 170 21 (night-wire-events) bus bank))
+          ((uplink) (events->tune-text "Signal Overdrive theme, sketch C: Uplink" 140 17 (uplink-events) bus bank))
+          (else (error "unknown sketch" name)))))))

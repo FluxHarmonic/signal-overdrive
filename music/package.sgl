@@ -7,6 +7,7 @@
 ;;;   build/dev/bin/carrier probe          the insert probe (a gate: last line GREEN/RED)
 ;;;   build/dev/bin/carrier tune OUT.cts   write the composed tune
 ;;;   build/dev/bin/carrier render ...     offline renders (see (carrier main))
+;;;   build/dev/bin/carrier theme ...      the main theme's tools (see (theme main))
 
 (package
   name: "carrier-music"
@@ -15,7 +16,7 @@
   description: "Signal Overdrive's 0.1 song, its insert probe and its offline renders"
   license: "GPL-3.0-or-later"
   authors: (list "David Wilson <david@daviwil.com>")
-  entry: '(carrier main)
+  entry: '(music main)
   bundle-name: "carrier"
   configs: (list
     (config name: 'dev output-dir: "build/dev" debug?: #t optimize: 0 bundle?: #t)

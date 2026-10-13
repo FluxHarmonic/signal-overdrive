@@ -1,0 +1,71 @@
+;;; (theme bank) - The main theme's instruments and bus
+;;;
+;;; Carrier's bank (ids 1-9, the patches exactly as Carrier has them, so
+;;; the theme lives in the same sound world) plus the theme's own:
+;;;
+;;;   10 overdrive    the theme's voice: two detuned saws driven hard into
+;;;                   a fixed low-pass (a guitar amp and cabinet, roughly),
+;;;                   with Carrier's hollow FM lead layered quietly inside
+;;;                   it, so the signal is still in there, run hot
+;;;   11 minor-pad    additive triads (fm4 algorithm 7, every operator a
+;;;   12 major-pad    carrier at a chord interval) through unison and chorus
+;;;   13 crash        crushed noise with a metallic ring, for section starts
+;;;
+;;; Ids are instrument numbers in the tune; the score names them below.
+
+(define-library (theme bank)
+  (import (sigil core) (sigil string))
+  (export I-KICK I-SNARE I-TICK I-TICK-OPEN I-BASS I-MINOR-STAB I-MAJOR-STAB
+          I-SIGNAL I-ARP I-OVERDRIVE I-MINOR-PAD I-MAJOR-PAD I-CRASH
+          bank-text bus-text)
+  (begin
+    (define I-KICK 1) (define I-SNARE 2) (define I-TICK 3) (define I-TICK-OPEN 4)
+    (define I-BASS 5) (define I-MINOR-STAB 6) (define I-MAJOR-STAB 7) (define I-SIGNAL 8)
+    (define I-ARP 9) (define I-OVERDRIVE 10) (define I-MINOR-PAD 11) (define I-MAJOR-PAD 12)
+    (define I-CRASH 13)
+
+    ;; Carrier's hollow FM lead, as a patch body (used alone and as a layer)
+    (define SIGNAL-PATCH
+      (string-append
+       "fm4-lead alg: 2 amp-attack: 0.003 amp-decay: 0.45 amp-release: 0.22 amp-sustain: 0.72 chorus-mix: 0 fb: 0.15 index: 1.7"
+       " op1: (1 1 0.002 0.35 0.75 0.15) op2: (2 0.55 0.002 0.3 0.35 0.15) op3: (2 0.35 0.002 0.12 0.2 0.1) op4: (3.5 0.45 0.001 0.04 0 0.05) unison: 1 vel-depth: 0.35"))
+
+    (define (pad-patch third)
+      (string-append
+       "fm4-pad alg: 7 fb: 0.25 index: 1 vel-depth: 0.2"
+       " op1: (1 1 0.25 0.8 0.85 0.6) op2: (" third " 0.7 0.3 0.8 0.85 0.6)"
+       " op3: (1.4983071 0.7 0.3 0.8 0.85 0.6) op4: (2 0.22 0.3 0.8 0.7 0.6)"
+       " amp-attack: 0.3 amp-decay: 0.5 amp-sustain: 0.85 amp-release: 0.7"
+       " unison: 3 spread: 12 chorus-rate: 0.35 chorus-depth: 3 chorus-mix: 0.4"))
+
+    ;; gains are mix trims (instrument gain:, which leaves the performance
+    ;; velocities alone); set by measurement, see the theme's notes
+    (define (bank-text overdrive-gain pad-gain)
+      (string-append
+       "  (instruments\n"
+       ;; --- Carrier's bank, verbatim ---
+       "    (instrument id: 1 name: \"thud\" patch: (chip-kick decay: 0.17 drive: 0.6 index: 1.3 sweep: 2.6 sweep-decay: 0.018) volume: 46 pan: 0)\n"
+       "    (instrument id: 2 name: \"snare-clap\" patch: (chip-snare body: 0.6 crush-bits: 12 hp: 1500 noise: 0.6 noise-decay: 0.12) volume: 40 gain: 0.7 send: 0.06 pan: 0"
+       " layers: ((chip-clap cutoff: 5600 decay: 0.045 gain: 0.85 hp: 1200 spacing: 0.006 octave: 0 volume: 0.55) (chip-hat crush-bits: 12 decay: 0.018 hp: 6500 metal: 0.7 noise: 0.1 octave: 0 volume: 0.3)))\n"
+       "    (instrument id: 3 name: \"tick\" patch: (chip-hat crush-bits: 14 decay: 0.022 hp: 5600 metal: 0.4 noise: 0.18) volume: 20 pan: 0.2)\n"
+       "    (instrument id: 4 name: \"tick-open\" patch: (chip-hat crush-bits: 14 decay: 0.09 hp: 5600 metal: 0.35 noise: 0.2) volume: 18 pan: 0.2)\n"
+       "    (instrument id: 5 name: \"carrier-bass\" patch: (fm4-grit-bass amp-attack: 0.002 amp-decay: 0.14 amp-release: 0.03 amp-sustain: 0.6 attack-index: 4.8 crush-bits: 12 drive: 1.1 index: 1.6 index-decay: 0.11) volume: 40 gain: 0.62 pan: 0)\n"
+       "    (instrument id: 6 name: \"minor-stab\" patch: (fm4-stab cutoff: 1150 decay: 0.24 index: 0.5 release: 0.14) volume: 24 send: 0.16 pan: -0.3"
+       " layers: ((fm4-stab cutoff: 1000 decay: 0.3 index: 0.4 ratio: 1.1892071 release: 0.14 octave: 0 volume: 0.55) (fm4-stab cutoff: 950 decay: 0.3 index: 0.4 ratio: 1.4983071 release: 0.14 octave: 0 volume: 0.4)))\n"
+       "    (instrument id: 7 name: \"major-stab\" patch: (fm4-stab cutoff: 1150 decay: 0.24 index: 0.5 release: 0.14) volume: 24 send: 0.16 pan: -0.3"
+       " layers: ((fm4-stab cutoff: 1000 decay: 0.3 index: 0.4 ratio: 1.259921 release: 0.14 octave: 0 volume: 0.55) (fm4-stab cutoff: 950 decay: 0.3 index: 0.4 ratio: 1.4983071 release: 0.14 octave: 0 volume: 0.4)))\n"
+       "    (instrument id: 8 name: \"signal\" patch: (" SIGNAL-PATCH ") volume: 42 gain: 0.5 send: 0.36 pan: 0.04)\n"
+       "    (instrument id: 9 name: \"chip-arp\" patch: (chip-pulse attack: 0.002 crush-bits: 10 decay: 0.09 osc-amp: 0.45 release: 0.04 sustain: 0.25 unison: 1 width: 0.25) volume: 22 gain: 0.6 send: 0.1 pan: 0.34)\n"
+       ;; --- the theme's own ---
+       "    (instrument id: 10 name: \"overdrive\" patch: (saw-reese attack: 0.003 decay: 0.3 sustain: 0.85 release: 0.12 cutoff: 3400 resonance: 0.18 drive: 3 spread: 10 index: 0.001 index-motion: 0.0005 motion-rate: 0.3)"
+       " volume: 40 gain: " (number->string overdrive-gain) " send: 0.2 pan: 0"
+       " layers: ((" SIGNAL-PATCH " octave: 0 volume: 0.3)))\n"
+       "    (instrument id: 11 name: \"minor-pad\" patch: (" (pad-patch "1.1892071") ") volume: 24 gain: " (number->string pad-gain) " send: 0.25 pan: -0.15)\n"
+       "    (instrument id: 12 name: \"major-pad\" patch: (" (pad-patch "1.259921") ") volume: 24 gain: " (number->string pad-gain) " send: 0.25 pan: -0.15)\n"
+       "    (instrument id: 13 name: \"crash\" patch: (chip-noise attack: 0.001 crush-bits: 12 cutoff: 11000 decay: 1.2 hp: 3500 osc-amp: 0.6 release: 0.4 sustain: 0) volume: 26 gain: 0.6 send: 0.25 pan: 0.1"
+       " layers: ((chip-hat crush-bits: 10 decay: 0.6 hp: 5000 metal: 0.8 noise: 0.2 octave: 0 volume: 0.35)))\n"
+       "  )\n"))
+
+    ;; Carrier's bus
+    (define (bus-text)
+      "  (bus reverb: zitarev size: 0.8 damp: 0.55 mix: 0.3 comp: on threshold: -12 ratio: 3 attack: 8 release: 110 makeup: 1)\n")))

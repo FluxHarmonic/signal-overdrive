@@ -1,0 +1,16 @@
+;;; (music main) - The music package's entry point
+;;;
+;;;   carrier theme ...    the main theme's tools, (theme main)
+;;;   carrier ...          everything else is Carrier's, (carrier main)
+
+(define-library (music main)
+  (import (sigil core) (sigil process)
+          (rename (carrier main) (main carrier-main))
+          (theme main))
+  (export main)
+  (begin
+    (define (main)
+      (let ((args (cdr (command-line))))
+        (if (and (pair? args) (equal? (car args) "theme"))
+            (exit (theme-main (cdr args)))
+            (carrier-main))))))

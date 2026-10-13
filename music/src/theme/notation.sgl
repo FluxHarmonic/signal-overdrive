@@ -1,0 +1,199 @@
+;;; (theme notation) - Note events, compiled to a canonical motif tune
+;;;
+;;; A score is a list of events, one per note, on the grid every Signal
+;;; song uses: speed 3, meter (8 4), so a bar is 32 rows and a sixteenth
+;;; is 2 rows. Positions and lengths are in sixteenths from the start of
+;;; the arrangement (a bar is 16); halves are 32nds.
+;;;
+;;;   (note ch at len midi inst vol)        a plain note
+;;;   (bend ch at len from to inst vol spd) picks `from` for one row, then
+;;;                                         slides up (or down) to `to`
+;;;   (slide ch at len to spd)              slides the sounding note to `to`
+;;;                                         without a new attack (legato)
+;;;
+;;; A slide is tracker effect 3xx (tone portamento, xx/16 semitone per
+;;; tick); motif applies an effect only on rows that carry it, so the
+;;; slide's later rows get an effect-only cell until the pitch arrives.
+;;;
+;;;   (events->tune-text name tempo nbars events bus instruments
+;;;                      [order] [marks]) -> .cts text
+;;;
+;;; One pattern per bar. `order` defaults to bars 0..nbars-1 in sequence;
+;;; `marks` is a list of (name . order-position), written `(marks calm: 0 ...)`;
+;;; motif requires a `calm` mark whenever there are marks.
+
+(define-library (theme notation)
+  (import (sigil core) (sigil string) (sigil list))
+  (export midi pitch->name
+          note bend slide events-shift
+          ev-ch ev-start ev-len ev-midi
+          events->tune-text BAR)
+  (begin
+    (define BAR 16)
+
+    (define NAMES '#("C-" "C#" "D-" "D#" "E-" "F-" "F#" "G-" "G#" "A-" "A#" "B-"))
+    (define (pitch->name m)
+      (string-append (vector-ref NAMES (modulo m 12)) (number->string (- (quotient m 12) 1))))
+
+    (define SEMITONES
+      '((C . 0) (Cs . 1) (Db . 1) (D . 2) (Ds . 3) (Eb . 3) (E . 4) (F . 5) (Fs . 6)
+        (Gb . 6) (G . 7) (Gs . 8) (Ab . 8) (A . 9) (As . 10) (Bb . 10) (B . 11)))
+
+    ;; (midi 'D 5) -> 74; C-4 is 60
+    (define (midi letter octave)
+      (let ((s (assq letter SEMITONES)))
+        (unless s (error "midi: unknown pitch letter" letter))
+        (+ (* 12 (+ octave 1)) (cdr s))))
+
+    ;; ------------------------------------------------------------
+    ;; Events: #(ch start len midi inst vol fx). midi #f is an
+    ;; effect-only cell (note column "..."); inst 0 and vol 0 leave the
+    ;; channel's instrument and volume as they are.
+    ;; ------------------------------------------------------------
+    (define (ev ch start len m inst vol fx) (vector ch start len m inst vol fx))
+    (define (ev-ch e) (vector-ref e 0)) (define (ev-start e) (vector-ref e 1))
+    (define (ev-len e) (vector-ref e 2)) (define (ev-midi e) (vector-ref e 3))
+    (define (ev-inst e) (vector-ref e 4)) (define (ev-vol e) (vector-ref e 5))
+    (define (ev-fx e) (vector-ref e 6))
+
+    (define (note ch at len m inst vol) (list (ev ch at len m inst vol "000")))
+
+    (define HEX "0123456789ABCDEF")
+    (define (hex2 n)
+      (string (string-ref HEX (quotient n 16)) (string-ref HEX (modulo n 16))))
+
+    ;; rows a 3xx slide needs to cover `semis` at speed `spd`: two steps a
+    ;; row (ticks 1 and 2 of 3), spd/16 semitone a step
+    (define (slide-rows semis spd)
+      (exact (ceiling (/ (* 16 (abs semis)) (* 2 spd)))))
+
+    ;; the target note with 3xx, and effect-only cells on the rows after it
+    ;; until the pitch has arrived (all inside the note)
+    (define (slide-events ch at len from to spd)
+      (let* ((fx (string-append "3" (hex2 spd)))
+             (rows (slide-rows (- to from) spd))
+             (max-rows (exact (floor (* 2 len)))))
+        (when (> rows max-rows)
+          (error "slide: the note ends before the slide arrives" (list ch at len from to spd)))
+        (cons (ev ch at len to 0 0 fx)
+              (let loop ((k 1) (acc '()))
+                (if (>= k rows) (reverse acc)
+                    (loop (+ k 1) (cons (ev ch (+ at (* 0.5 k)) 0 #f 0 0 fx) acc)))))))
+
+    ;; pick `from` for one row (a 32nd), then slide to `to`
+    (define (bend ch at len from to inst vol spd)
+      (cons (ev ch at 0.5 from inst vol "000")
+            (slide-events ch (+ at 0.5) (- len 0.5) from to spd)))
+
+    ;; slide the note sounding on ch (pitch `from`) to `to`, no new attack
+    (define (slide ch at len from to spd)
+      (slide-events ch at len from to spd))
+
+    (define (events-shift events by)
+      (map (lambda (e) (ev (ev-ch e) (+ (ev-start e) by) (ev-len e) (ev-midi e)
+                           (ev-inst e) (ev-vol e) (ev-fx e)))
+           events))
+
+    ;; ------------------------------------------------------------
+    ;; Events -> cells -> .cts
+    ;; cell: (row channel note-text inst vol fx)
+    ;; ------------------------------------------------------------
+    (define (row-of x) (exact (round (* 2 x))))
+    ;; a note's end rounds down, so a note shorter than its grid step
+    ;; releases before the next onset instead of running on
+    (define (end-row-of x) (exact (floor (* 2 x))))
+
+    (define (events->cells events)
+      (let* ((notes (filter ev-midi events))
+             (onsets (map (lambda (e) (cons (ev-ch e) (row-of (ev-start e)))) notes))
+             (note-cells (map (lambda (e) (list (row-of (ev-start e)) (ev-ch e) (pitch->name (ev-midi e))
+                                                (ev-inst e) (ev-vol e) (ev-fx e)))
+                              notes))
+             (fx-cells (map (lambda (e) (list (row-of (ev-start e)) (ev-ch e) "..." 0 0 (ev-fx e)))
+                            (filter (lambda (e) (not (ev-midi e))) events)))
+             (offs (filter (lambda (x) x)
+                           (map (lambda (e)
+                                  (let ((end (end-row-of (+ (ev-start e) (ev-len e)))))
+                                    (and (not (member (cons (ev-ch e) end) onsets))
+                                         (list end (ev-ch e) "===" 0 0 "000"))))
+                                notes))))
+        (append note-cells fx-cells offs)))
+
+    (define (cell-key c) (list (car c) (cadr c)))
+    (define (off? c) (equal? (caddr c) "==="))
+    (define (fx-only? c) (equal? (caddr c) "..."))
+
+    ;; one cell per (row, channel). A note or an effect-only cell beats a
+    ;; note-off there (a slide's last effect row can share the row its note
+    ;; would release on only if the note is longer, which slide-events
+    ;; checks); two note-offs are one; anything else is a composing error.
+    (define (uniq-cells cells)
+      (let* ((solid (filter (lambda (c) (not (off? c))) cells))
+             (offs (filter off? cells)))
+        (let check ((cs solid) (seen '()))
+          (unless (null? cs)
+            (when (member (cell-key (car cs)) seen)
+              (error "score: two cells in one slot (row, channel)" (cell-key (car cs))))
+            (check (cdr cs) (cons (cell-key (car cs)) seen))))
+        (let loop ((os offs) (seen (map cell-key solid)) (acc (reverse solid)))
+          (cond ((null? os) (reverse acc))
+                ((member (cell-key (car os)) seen) (loop (cdr os) seen acc))
+                (else (loop (cdr os) (cons (cell-key (car os)) seen) (cons (car os) acc)))))))
+
+    (define (cell->string c)
+      (string-append "(" (number->string (cadr c)) " \"" (caddr c) "\" "
+                     (number->string (list-ref c 3)) " " (number->string (list-ref c 4))
+                     " \"" (list-ref c 5) "\")"))
+
+    (define (pattern-text id rows cells)
+      (let* ((sorted (list-sort (lambda (a b) (or (< (car a) (car b))
+                                                   (and (= (car a) (car b)) (< (cadr a) (cadr b)))))
+                                cells))
+             (by-row (let loop ((cs sorted) (acc '()))
+                       (cond ((null? cs) (reverse acc))
+                             ((and (pair? acc) (= (car (car acc)) (car (car cs))))
+                              (loop (cdr cs) (cons (cons (car (car acc)) (append (cdr (car acc)) (list (car cs)))) (cdr acc))))
+                             (else (loop (cdr cs) (cons (list (car (car cs)) (car cs)) acc)))))))
+        (string-append
+         "    (pattern id: " (number->string id) " rows: " (number->string rows) "\n"
+         (apply string-append
+                (map (lambda (r)
+                       (string-append "      (row " (number->string (car r))
+                                      (apply string-append (map (lambda (c) (string-append " " (cell->string c))) (cdr r)))
+                                      ")\n"))
+                     by-row))
+         "    )\n")))
+
+    (define (range n) (let loop ((i (- n 1)) (acc '())) (if (< i 0) acc (loop (- i 1) (cons i acc)))))
+
+    ;; Cells past the last bar are a composing error (a note off the end).
+    (define (events->tune-text name tempo nbars events bus instruments . opt)
+      (let* ((order (if (and (pair? opt) (car opt)) (car opt) (range nbars)))
+             (marks (if (and (pair? opt) (pair? (cdr opt))) (cadr opt) '()))
+             (cells (uniq-cells (events->cells events)))
+             (_ (for-each (lambda (c)
+                            (when (or (< (car c) 0) (> (car c) (* 32 nbars))
+                                      (and (= (car c) (* 32 nbars)) (not (off? c))))
+                              (error "score: a cell outside the bars" c)))
+                          cells))
+             ;; a release on the row just past the last bar is dropped:
+             ;; the tune's end releases every voice
+             (cells (filter (lambda (c) (< (car c) (* 32 nbars))) cells))
+             (in-bar (lambda (b) (filter (lambda (c) (and (>= (car c) (* 32 b)) (< (car c) (* 32 (+ b 1))))) cells)))
+             (shift (lambda (b cs) (map (lambda (c) (cons (- (car c) (* 32 b)) (cdr c))) cs))))
+        (string-append
+         "(tune version: 1 name: \"" name "\" tempo: " (number->string tempo)
+         " speed: 3 channels: 8 meter: (8 4)\n"
+         bus
+         instruments
+         "  (patterns\n"
+         (apply string-append (map (lambda (b) (pattern-text b 32 (shift b (in-bar b)))) (range nbars)))
+         "  )\n"
+         "  (order" (apply string-append (map (lambda (p) (string-append " " (number->string p))) order)) ")"
+         (if (null? marks) ""
+             (string-append "\n  (marks"
+                            (apply string-append
+                                   (map (lambda (m) (string-append " " (symbol->string (car m)) ": " (number->string (cdr m))))
+                                        marks))
+                            ")"))
+         ")\n")))))

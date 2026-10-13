@@ -1,0 +1,101 @@
+;;; (theme main) - The main theme's tools
+;;;
+;;;   carrier theme sketch NAME OUT.cts     write a round-1 sketch (redline,
+;;;                                         night-wire, uplink)
+;;;   carrier theme render IN.cts OUT.wav [dry]
+;;;                                         render through the live player with
+;;;                                         the theme's inserts (dry: none), 48 kHz
+;;;   carrier theme stems IN.cts [DIR [CH ...]] each channel (or those named)
+;;;                                         soloed: peak and RMS,
+;;;                                         and a WAV per channel into DIR
+;;;
+;;; The theme's one insert is a feedback delay on the lead (channel 6),
+;;; a dotted eighth at the tune's tempo: the game opens the theme's player
+;;; with (theme-inserts tempo) for the lead to sound as rendered here.
+
+(define-library (theme main)
+  (import (sigil core) (sigil io) (sigil string) (sigil math) (sigil fs)
+          (motif tune) (motif tune player) (motif graph)
+          (carrier render) (carrier analysis)
+          (theme sketches))
+  (export theme-main theme-inserts lead-delay-insert)
+  (begin
+    (define (say . xs) (for-each display xs) (newline))
+    (define SR 48000)
+
+    (define (fixed x d)
+      (let* ((k (expt 10.0 d)) (r (/ (round (* x k)) k)))
+        (number->string r)))
+    (define (dbfs x) (fixed (* 20 (/ (log (max x 1e-9)) (log 10.0))) 2))
+
+    ;; dry plus the delayed signal: a dotted eighth, feedback 0.35, at 0.25
+    (define (lead-delay-insert tempo)
+      (let ((t (* 0.75 (/ 60.0 tempo))))
+        (lambda (in) (g:add in (g:mul (g:delay in t 0.35) 0.25)))))
+
+    (define (theme-inserts tempo) (list (cons 6 (lead-delay-insert tempo))))
+
+    (define (open t dry?)
+      (open-tune-player t SR inserts: (if dry? '() (theme-inserts (tune-tempo t)))))
+
+    ;; the larger of the two channels' peaks, and the mid's RMS
+    (define (levels bv frames)
+      (let ((l (bv->channel bv frames 0)) (r (bv->channel bv frames 1)))
+        (values (max (peak l 0 frames) (peak r 0 frames))
+                (rms (bv->mid bv frames) 0 frames))))
+
+    (define (cmd-sketch name out)
+      (let* ((sym (string->symbol name)))
+        (if (not (memq sym SKETCHES))
+            (begin (say "theme: no sketch " name "; there are " SKETCHES) 1)
+            (let* ((t (validate-tune (read-tune-string (sketch-text sym))))
+                   (text (tune->string t)))
+              (write-file-string out text)
+              (say "theme: wrote " out " (" (number->string (length (tune-order t))) " bars at "
+                   (number->string (tune-tempo t)) " BPM)")
+              0))))
+
+    (define (cmd-render in out dry?)
+      (let* ((t (read-tune-file in))
+             (p (open t dry?))
+             (r (render-player p SR '() (* SR 150)))
+             (bv (car r)) (frames (cdr r)))
+        (player-close! p)
+        (write-wav16 out bv frames SR 1.0)
+        (call-with-values (lambda () (levels bv frames))
+          (lambda (pk lv)
+            (say "theme: rendered " in " -> " out ": " (fixed (/ frames (* 1.0 SR)) 2) " s, "
+                 (if dry? "no inserts, " "lead delay, ")
+                 "sample peak " (dbfs pk) " dBFS, mid RMS " (dbfs lv) " dBFS")))
+        0))
+
+    ;; chs: the channels to solo (all eight when empty)
+    (define (cmd-stems in dir chs)
+      (let ((t (read-tune-file in)))
+        (for-each
+         (lambda (ch)
+           (let* ((p (open t #f))
+                  (_ (player-solo! p ch))
+                  (r (render-player p SR '() (* SR 150)))
+                  (frames (cdr r)))
+             (player-close! p)
+             (call-with-values (lambda () (levels (car r) frames))
+               (lambda (pk lv)
+                 (say "ch" (number->string ch) "  peak " (dbfs pk) "  rms " (dbfs lv))))
+             (when dir
+               (write-wav16 (string-append dir "/stem-ch" (number->string ch) ".wav") (car r) frames SR 1.0))))
+         (if (null? chs) '(1 2 3 4 5 6 7 8) chs))
+        0))
+
+    (define (theme-main args)
+      (cond
+        ((and (= (length args) 3) (equal? (car args) "sketch")) (cmd-sketch (cadr args) (caddr args)))
+        ((and (>= (length args) 3) (equal? (car args) "render"))
+         (cmd-render (cadr args) (caddr args) (and (= (length args) 4) (equal? (cadddr args) "dry"))))
+        ((and (>= (length args) 2) (equal? (car args) "stems"))
+         (cmd-stems (cadr args) (if (>= (length args) 3) (caddr args) #f)
+                    (if (> (length args) 3) (map string->number (cdddr args)) '())))
+        (else
+         (say "usage: carrier theme sketch NAME OUT.cts | carrier theme render IN.cts OUT.wav [dry]"
+              " | carrier theme stems IN.cts [DIR [CH ...]]")
+         1)))))
