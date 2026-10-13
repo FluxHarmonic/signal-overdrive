@@ -131,7 +131,7 @@ ${col(([n]) => tab(n, "dark") + tab(n, "light"))}
 
 ${GAME.length ? `
 <h2>The title screen, in the game</h2>
-<p class="note"><a href="game/">Play it</a> (the web build hosted beside this sheet). The camera wanders the track by itself while the logo glitches on the beat and the prompt asks for a start; a start (Enter, Space, a pad's Start or A, a tap) fades out, begins the race's countdown and fades back in. These are captures of that build in headless Chrome, at 2x; the logo in the first is the atlas's frame pixel for pixel.</p>
+<p class="note"><a href="drive/">Play it</a> (the web build hosted beside this sheet). The camera wanders the track by itself while the logo glitches on the beat and the prompt asks for a start; a start (Enter, Space, a pad's Start or A, a tap) fades out, begins the race's countdown and fades back in. These are captures of that build in headless Chrome, at 2x; the logo in the first is the atlas's frame pixel for pixel.</p>
 <div class="ground dark">${GAME.map(([f, cap]) => `<figure>${img(`frames/${f}`, 2, cap)}<div class="label">${esc(cap)}</div></figure>`).join("")}</div>
 ` : ""}
 <h2>The title animation, as the script renders it</h2>

@@ -9,8 +9,11 @@
 # ~/Projects/Code/sigil/signal-overdrive-logo-hosted (outside the repo, so a
 # re-render does not change what is served until this runs again). The
 # sources go under /src/ as text, so the hand-drawn letters can be read in
-# the browser. When build/web holds a web build, the game goes under /game/
-# too, so the title screen can be played next to the sheet.
+# the browser. When build/web holds a web build, the game goes under /drive/
+# too (the site's game path), so the title screen can be played next to the
+# sheet; /game/, its old path, forwards there. serve.mjs sends the
+# cross-origin isolation headers on everything, so the game gets its
+# SharedArrayBuffer here as it does under the site's /drive/.
 set -eu
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 HOSTDIR="${HOSTDIR:-$HOME/Projects/Code/sigil/signal-overdrive-logo-hosted}"
@@ -50,14 +53,20 @@ for f in "$REPO"/assets/src/logo/marks/*.txt; do cp "$f" site/src/marks/; done
 } > site/src/index.html
 WEB="$REPO/build/web"
 if [ -f "$WEB/signal-overdrive.wasm" ] && [ -f "$WEB/index.html" ]; then
-  mkdir -p site/game
-  cp -r "$WEB/index.html" "$WEB/signal-overdrive.wasm" "$WEB/assets" site/game/
-  for f in "$WEB"/sigil-wasm-bridges.* "$WEB/build.txt"; do [ -f "$f" ] && cp "$f" site/game/; done
+  mkdir -p site/drive site/game
+  cp -r "$WEB/index.html" "$WEB/signal-overdrive.wasm" "$WEB/assets" site/drive/
+  for f in "$WEB"/sigil-wasm-bridges.* "$WEB/build.txt"; do [ -f "$f" ] && cp "$f" site/drive/; done
+  cat > site/game/index.html <<'HTML'
+<!doctype html><meta charset="utf-8"><title>Signal Overdrive: moved to /drive/</title>
+<meta http-equiv="refresh" content="0; url=../drive/">
+<script>location.replace("../drive/" + location.search + location.hash);</script>
+<p>The game is at <a href="../drive/">/drive/</a>.</p>
+HTML
 fi
 cp "$REPO/scripts/serve.mjs" serve.mjs
 printf 'signal-overdrive logo sheet\ncommit %s\ngame %s\nhosted %s\n' \
   "$(git -C "$REPO" rev-parse --short HEAD; git -C "$REPO" status --porcelain -- assets/src/logo scripts/art docs/logo | grep -q . && echo '(with uncommitted logo files)' || true)" \
-  "$(cat site/game/build.txt 2>/dev/null || echo none)" \
+  "$(cat site/drive/build.txt 2>/dev/null || echo none)" \
   "$(date -u +%FT%TZ)" | tr -s '\n' > site/version.txt
 
 HOST="$(ip -4 -o addr show dev wg0 | awk '{print $4}' | cut -d/ -f1)"
