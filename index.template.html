@@ -142,6 +142,13 @@
       app.dispatch("param", "touch-scheme=" + scheme);
       // the start gate's line: TAP TO TUNE IN on a touch screen
       app.dispatch("param", "pointer=" + (matchMedia("(pointer: coarse)").matches ? "coarse" : "fine"));
+      // the reduced-motion preference, now and whenever it changes: the
+      // card before the title then shows no tearing, only its fade (a
+      // ?motion=reduce|full in the URL overrides it)
+      var rm = matchMedia("(prefers-reduced-motion: reduce)");
+      var motion = function () { if (!params.has("motion")) app.dispatch("param", "motion=" + (rm.matches ? "reduce" : "full")); };
+      motion();
+      if (rm.addEventListener) rm.addEventListener("change", motion);
       // the audio bridge's stream mode, as the bridge itself decides it
       // (sigil-wasm-audio.js): an AudioWorklet and a SharedArrayBuffer
       // (cross-origin isolation) give worklet-sab; a worklet alone,

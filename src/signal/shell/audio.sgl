@@ -17,7 +17,18 @@
 ;;;   (audio-readout)               for F3: underruns, depth, cue mode and lag
 ;;;   (audio-tune! lo hi lock secs) the tuning-in sound's sweep, before the start
 ;;;   (audio-tune-in!)              play it ((signal tunein), as a cue): the
-;;;                                 card before the title
+;;;                                 card before the title. It is rendered
+;;;                                 once, when the sound starts, from the
+;;;                                 knobs then: a CARD knob changed later in
+;;;                                 the overlay (a dev tool) is heard on the
+;;;                                 next load
+;;;   (audio-stop-tune-in!)         a skip: the cue gain falls to 0 over
+;;;                                 FADE-FRAMES frames, then every cue stops
+;;;                                 (only the sweep plays then) and the gain
+;;;                                 comes back. The gain reaches a playing
+;;;                                 cue natively and on the web's worklet
+;;;                                 path; on the web's buffer-source path
+;;;                                 the sweep plays on until the stop
 ;;;
 ;;; Two paths, after David heard hitching in pass 3:
 ;;;   - the engine and the wind are a continuous stream, rendered here on
@@ -38,7 +49,7 @@
           (signal tunein))
 
   (export audio-mute! audio-depth! audio-cues! audio-start! audio-frame! audio-started? audio-readout
-          audio-context audio-pause! audio-tune! audio-tune-in!)
+          audio-context audio-pause! audio-tune! audio-tune-in! audio-stop-tune-in!)
 
   (begin
     (define RATE 22050)
@@ -51,6 +62,7 @@
     (define *stream* #f)
     (define *cues* '())              ; ((kind . cue) ...) once loaded
     (define *cue-plays* 0)
+    (define *cue-stops* 0)
     (define *synth* (make-synth RATE))
     (define *buf* (make-bytevector (* 8 PUSH) 0))
 
@@ -84,6 +96,20 @@
         (when c
           (guard (e (#t #f)) (play-audio-cue (cdr c) volume: 0.8 pan: 0.0))
           (set! *cue-plays* (+ *cue-plays* 1)))))
+
+    (define FADE-FRAMES 5)
+    (define *fade* #f)            ; frames left in a skip's fade, or #f
+    (define (audio-stop-tune-in!)
+      (when (and (assq 'tune-in *cues*) (not *fade*)) (set! *fade* FADE-FRAMES)))
+    (define (fade-step!)
+      (when *fade*
+        (set! *fade* (- *fade* 1))
+        (guard (e (#t #f)) (set-audio-cue-volume! (/ (exact->inexact *fade*) FADE-FRAMES)))
+        (when (<= *fade* 0)
+          (guard (e (#t #f)) (stop-audio-cues!))
+          (guard (e (#t #f)) (set-audio-cue-volume! 1.0))
+          (set! *fade* #f)
+          (set! *cue-stops* (+ *cue-stops* 1)))))
 
     (define (audio-start!)
       (unless (or *muted* *paused*)
@@ -120,6 +146,7 @@
             (synth-event! *synth* kind strength))))
 
     (define (audio-frame! speed throttle boost events)
+      (fade-step!)
       (synth-set! *synth* speed throttle boost)
       (unless *paused*
        (for-each (lambda (e)
@@ -144,4 +171,5 @@
             (if (null? *cues*) (if *cues-on* 'none 'off) (or (guard (e (#t #f)) (audio-cue-mode)) 'unknown))
             (or (guard (e (#t #f)) (audio-cue-lag)) 0)
             (length *cues*)
-            *cue-plays*))))
+            *cue-plays*
+            *cue-stops*))))

@@ -23,10 +23,16 @@
 ;;;         exactly where the title's attract camera begins (title-camera
 ;;;         of a new title), which then speeds up from rest: no cut and no
 ;;;         jolt
-;;; The picture's interference (the palette pass's tearing) and the sound's
-;;; static lock clean together as the zoom arrives on the mark. card-ease
-;;; shapes every beat's ease. The mark stays on the road until the attract
-;;; camera has passed it.
+;;; The picture locks clean as the zoom arrives on the mark, with the
+;;; sound's static: it fades up from dim, and its interference (the
+;;; palette pass's tearing, across the road) comes as the game's own
+;;; glitches do, under P15: bursts of at most GLITCH-MAX-TICKS, starting at
+;;; least GLITCH-REST ticks apart, each weaker than the last. The shell
+;;; scales them by the fx-glitch knob as the effects see it (0 when another
+;;; effect is solo) and passes 0 for the reduced-motion preference: then
+;;; there is no tearing at all, only the fade. card-ease shapes every
+;;; beat's ease. The mark stays on the road until the attract camera has
+;;; passed it.
 ;;;
 ;;; Pure, on the race's fixed tick: (intro-step i tuning race gesture? skip?)
 ;;; is the next intro, and (intro-follow i cam) notes the attract camera
@@ -42,21 +48,25 @@
           (signal race)
           (signal tuning)
           (signal mode7 camera)
+          (only (signal fx state) GLITCH-MAX-TICKS GLITCH-REST)
           (signal mode7 decal)
           (signal title)
           (signal intro mark))
 
   (export intro intro? intro-new intro-none intro-skip intro-step intro-follow intro-phase intro-events
-          intro-active? intro-camera intro-fade intro-glitch intro-mark-shown? intro-draw-mark!
+          intro-active? intro-cut? intro-camera intro-fade intro-glitch intro-mark-shown? intro-draw-mark!
           intro-set-mark! intro-gate-line intro-beats intro-length intro-lock intro-mark MARK-S)
 
   (begin
     ;; phase: gate, card, done. tick: ticks in this phase. gone: after the
     ;; hand-off, the attract camera has passed the mark (it is not drawn).
+    ;; cut: the card ended before its length (a skip), so its sound should
+    ;; stop.
     (define-struct intro
       (phase default: 'done)
       (tick default: 0)
       (gone default: #t)
+      (cut default: #f)
       (events default: '()))
 
     (define (knob tuning k) (tuning-ref tuning k))
@@ -84,8 +94,11 @@
     ;; Done at once (the title is skipped with it, so the mark goes too); a
     ;; card that had started says it has ended.
     (define (intro-skip i)
-      (intro phase: 'done tick: 0 gone: #t
-             events: (if (and (eq? (intro-phase i) 'card) (> (intro-tick i) 0)) (list 'card-end) '())))
+      (let ((began (and (eq? (intro-phase i) 'card) (> (intro-tick i) 0))))
+        (intro phase: 'done tick: 0 gone: #t cut: began
+               events: (if began (list 'card-end) '()))))
+    ;; Did the card just end before its length?
+    (define (intro-cut? i) (intro-cut i))
 
     (define (intro-active? i) (not (eq? (intro-phase i) 'done)))
 
@@ -109,7 +122,8 @@
                    ((or (not (on? tuning))
                         (>= t (ticks (intro-length tuning)))
                         (and skip? (> t SKIP-AFTER)))
-                    (intro i phase: 'done tick: 0 gone: #f events: (append ev (list 'card-end))))
+                    (intro i phase: 'done tick: 0 gone: #f events: (append ev (list 'card-end))
+                           cut: (< t (ticks (intro-length tuning)))))
                    (else (intro i tick: t events: ev)))))
           (else i))))
 
@@ -230,15 +244,31 @@
         ((card) (card-camera tuning (race-track race) (/ (intro-tick i) 60.0) w h))
         (else #f)))
 
-    ;; Black behind the gate; nothing after.
-    (define (intro-fade i) (if (eq? (intro-phase i) 'gate) 1.0 0.0))
+    ;; How far the card is to its lock, 0..1, at card tick t.
+    (define (locking tuning t) (min 1.0 (/ (/ t 60.0) (max 0.001 (intro-lock tuning)))))
 
-    ;; The picture's interference 0..1: strong as the card starts, locking
-    ;; clean as the zoom arrives, as the sound does.
-    (define (intro-glitch i tuning)
-      (if (eq? (intro-phase i) 'card)
-          (let ((u (min 1.0 (/ (/ (intro-tick i) 60.0) (max 0.001 (intro-lock tuning))))))
-            (* 0.9 (- 1.0 u) (- 1.0 u)))
+    ;; How dark the frame is: black behind the gate; the card fades up from
+    ;; DIM, clean at the lock; nothing after.
+    (define DIM 0.6)
+    (define (intro-fade i tuning)
+      (case (intro-phase i)
+        ((gate) 1.0)
+        ((card) (let ((u (locking tuning (intro-tick i)))) (* DIM (- 1.0 u) (- 1.0 u))))
+        (else 0.0)))
+
+    ;; The picture's tearing, 0..1, at most k (the shell's: the fx-glitch
+    ;; knob as the effects see it, 0 for reduced motion). A burst starts
+    ;; every GLITCH-REST ticks before the lock, with the power the lock's
+    ;; ease gives at its start (0.9 at the card's start), and lasts as the
+    ;; game's glitch does for that power: 2 ticks, up to GLITCH-MAX-TICKS.
+    (define (intro-glitch i tuning k)
+      (if (and (eq? (intro-phase i) 'card) (> k 0.0))
+          (let* ((t (intro-tick i))
+                 (start (* GLITCH-REST (quotient t GLITCH-REST)))
+                 (u (locking tuning start))
+                 (p (* 0.9 (- 1.0 u) (- 1.0 u)))
+                 (n (min GLITCH-MAX-TICKS (+ 2 (exact (round (* 4.0 p)))))))
+            (if (and (< u 1.0) (< (- t start) n)) (* (min 1.0 k) p) 0.0))
           0.0))
 
     ;; The mark is on the road through the card, and after the hand-off

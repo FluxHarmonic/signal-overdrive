@@ -5,8 +5,11 @@
 ;;; (the mark whole in frame throughout), tilting into perspective (still
 ;;; whole in frame), then pulling back and down as the mark recedes, to
 ;;; rest exactly on the title's first camera, which speeds up from rest:
-;;; no cut and no jolt. Its interference locks with the sound as the zoom
-;;; arrives; the mark sits on clear road and leaves it only once the
+;;; no cut and no jolt. The picture locks clean with the sound as the zoom
+;;; arrives: it fades up from dim, and its tearing comes as the game's
+;;; glitches do under P15 (bursts of at most 6 ticks, 30 apart), scaled by
+;;; what the shell allows (none with the glitch off, another effect solo,
+;;; or reduced motion: then only the fade). A skip cuts its sound; the mark sits on clear road and leaves it only once the
 ;;; attract camera has passed it, for good. PRESENTS is part of the same
 ;;; picture, under the mark, whole in frame through the zoom and the tilt
 ;;; and tall enough to read as the zoom arrives. Its events pair. And the
@@ -22,6 +25,7 @@
         (signal title)
         (signal intro)
         (signal intro mark)
+        (only (signal fx state) GLITCH-MAX-TICKS GLITCH-REST)
         (signal tunein))
 
 (define TUNING (tuning-defaults))
@@ -92,7 +96,7 @@
     (let ((res (run (intro-new TUNING #t) 300 #f #f)))
       (assert-equal 'gate (intro-phase (car res)))
       (assert-equal '() (cdr res))
-      (assert-true (near? (intro-fade (car res)) 1.0 1e-9))
+      (assert-true (near? (intro-fade (car res) TUNING) 1.0 1e-9))
       (assert-true (cam? (intro-camera (car res) TUNING RACE W H)))))
   (test "the gesture starts the card, which starts its sound on its first tick"
     (let ((res (run (intro-new TUNING #t) 3 2 #f)))
@@ -174,18 +178,54 @@
     (let ((res (run (intro-new TUNING #f) 30 #f 30)))
       (assert-equal 'done (intro-phase (car res)))
       (assert-equal '(card-start card-end) (cdr res))))
-  (test "every frame of it is lit, and its interference locks clean as the zoom arrives"
+  (test "a skip cuts it, so its sound stops; its own end does not"
+    (assert-false (intro-cut? (car (run (intro-new TUNING #f) (ticks (intro-length TUNING)) #f #f))))
+    (assert-true (intro-cut? (car (run (intro-new TUNING #f) 30 #f 30))))
+    (assert-true (intro-cut? (intro-skip (car (run (intro-new TUNING #f) 3 #f #f)))))
+    (assert-false (intro-cut? (intro-skip (intro-new TUNING #t))))))
+
+;; The card's frames, one a tick: (fade . tearing with k).
+(define (interference k)
+  (let loop ((i (intro-new TUNING #f)) (acc '()))
+    (if (eq? (intro-phase i) 'card)
+        (loop (intro-step i TUNING RACE #f #f) (cons (cons (intro-fade i TUNING) (intro-glitch i TUNING k)) acc))
+        (reverse acc))))
+(define LOCK (ticks (intro-lock TUNING)))
+
+(test-group "the card's interference"
+  (test "it locks as the zoom arrives, and the picture is never black: it fades up clean by then"
     (assert-true (near? (intro-lock TUNING) (+ (knob 'card-hold) (knob 'card-zoom)) 1e-9))
-    (let ((lock (ticks (intro-lock TUNING))))
-      (let loop ((k 1) (i (intro-new TUNING #f)) (last 2.0))
-        (when (eq? (intro-phase i) 'card)
-          (let ((g (intro-glitch i TUNING)))
-            (assert-true (near? (intro-fade i) 0.0 1e-9))
-            (assert-true (<= g last))
-            (when (= k 2) (assert-true (> g 0.8)))
-            (when (< k (- lock 10)) (assert-true (> g 0.0)))
-            (when (>= k (+ lock 1)) (assert-true (near? g 0.0 1e-9)))
-            (loop (+ k 1) (intro-step i TUNING RACE #f #f) g)))))))
+    (let ((fs (map car (interference 1.0))))
+      (assert-true (> (car fs) 0.5))
+      (let loop ((fs fs) (k 0) (last 1.0))
+        (unless (null? fs)
+          (assert-true (< (car fs) 1.0))
+          (assert-true (<= (car fs) (+ last 1e-9)))
+          (when (>= k LOCK) (assert-true (near? (car fs) 0.0 1e-9)))
+          (loop (cdr fs) (+ k 1) (car fs))))))
+  (test "its tearing obeys P15: bursts of at most 6 ticks, starting 30 or more apart, each weaker, none after the lock"
+    (let loop ((gs (map cdr (interference 1.0))) (k 0) (run 0) (start #f) (last-start #f) (last-p 2.0) (bursts 0))
+      (if (null? gs)
+          (assert-true (>= bursts 3))
+          (let ((g (car gs)))
+            (when (>= k LOCK) (assert-true (near? g 0.0 1e-9)))
+            (cond ((> g 0.0)
+                   (if (= run 0)
+                       (begin
+                         ;; a new burst: far enough from the last, and weaker
+                         (when last-start (assert-true (>= (- k last-start) GLITCH-REST)))
+                         (assert-true (<= g last-p))
+                         (when (= k 0) (assert-true (> g 0.8)))
+                         (loop (cdr gs) (+ k 1) 1 k k g (+ bursts 1)))
+                       (begin
+                         (assert-true (< run GLITCH-MAX-TICKS))
+                         (loop (cdr gs) (+ k 1) (+ run 1) start last-start last-p bursts))))
+                  (else (loop (cdr gs) (+ k 1) 0 #f last-start last-p bursts)))))))
+  (test "with the glitch off (the knob at 0, another effect solo, reduced motion) no tearing, only the fade; and it scales"
+    (let ((off (interference 0.0)) (full (interference 1.0)) (half (interference 0.5)))
+      (for-each (lambda (e) (assert-true (near? (cdr e) 0.0 1e-12))) off)
+      (for-each (lambda (a b) (assert-true (near? (car a) (car b) 1e-12))) off full)
+      (for-each (lambda (a b) (assert-true (near? (cdr a) (* 0.5 (cdr b)) 1e-9))) half full))))
 
 (test-group "the hand-off"
   (test "it rests exactly on the title's first camera, which speeds up from rest: no cut, no jolt"

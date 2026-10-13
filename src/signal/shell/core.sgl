@@ -63,6 +63,7 @@
     (define *intro* (intro-none))
     (define *gestured* #f)        ; the gate is open: a gesture the browser counts, or a pad press
     (define *touch-device* #f)    ; the page says the pointer is coarse
+    (define *reduce-motion* #f)   ; the page says the player prefers reduced motion
     (define *clock* (clock-new))
     (define *pacing* (pacing-new))
     (define *paused* #f)
@@ -312,6 +313,8 @@
             ((string=? kv "start") (set! *start-now* #t) (intro-skip!) (title-skip!))
             ((string=? kv "pointer=coarse") (set! *touch-device* #t))
             ((string=? kv "pointer=fine") (set! *touch-device* #f))
+            ((string=? kv "motion=reduce") (set! *reduce-motion* #t))
+            ((string=? kv "motion=full") (set! *reduce-motion* #f))
             ;; the effects panel's triggers: fx-fire=wall|ice|drop|tier
             ((and (> (string-length kv) 8) (string=? (substring kv 0 8) "fx-fire="))
              (fx-fire! (string->symbol (substring kv 8 (string-length kv)))))
@@ -430,10 +433,19 @@
         (set! *intro* (intro-step *intro* *tuning* r *gestured* start))
         (title-emit! (intro-events *intro*))
         (when (memq 'card-start (intro-events *intro*)) (audio-tune-in!))
+        (card-cut!)
         (not (eq? was (intro-phase *intro*)))))
     (define (intro-skip!)
       (set! *intro* (intro-skip *intro*))
-      (title-emit! (intro-events *intro*)))
+      (title-emit! (intro-events *intro*))
+      (card-cut!))
+    ;; A card cut short (a skip) takes its sound with it.
+    (define (card-cut!)
+      (when (and (memq 'card-end (intro-events *intro*)) (intro-cut? *intro*)) (audio-stop-tune-in!)))
+    ;; The card's tearing: as much as the glitch effect may show (the
+    ;; fx-glitch knob, 0 when another effect is solo), none for reduced
+    ;; motion.
+    (define (card-glitch) (intro-glitch *intro* *tuning* (if *reduce-motion* 0.0 (fx-knob 'fx-glitch))))
 
     ;; One tick's controls: the player's (signal handling) input.
     (define (controls)
@@ -587,6 +599,8 @@
                        " phase " (symbol->string (race-phase *race*))
                        " title " (symbol->string (title-phase *title*)) " fade " (r3 (title-fade *title* *tuning*))
                        " intro " (symbol->string (intro-phase *intro*))
+                       " glitch " (r3 (max *glitch* (card-glitch))) " card-fade " (r3 (intro-fade *intro* *tuning*))
+                       " motion " (if *reduce-motion* "reduce" "full")
                        ;; the sound, for the audio check
                        (let ((a (audio-readout)))
                          (string-append " audio " (if (car a) "on" "off") " depth " (number->string (cadr a))
@@ -594,6 +608,7 @@
                                         " mode " *audio-mode*
                                         " cues " (let ((m (list-ref a 4))) (if (symbol? m) (symbol->string m) "?"))
                                         " cue-lag " (number->string (list-ref a 5)) " cue-plays " (number->string (list-ref a 7))
+                                        " cue-stops " (number->string (list-ref a 8))
                                         " hitches " (number->string *hitch-count*) " audio-ms " (r3 *audio-ms*)))
                        (music-text)
                        " paused " (if (core-paused?) "1" "0"))))
@@ -779,7 +794,7 @@
                           (cons 'flash *flash*)
                           (cons 'spark *spark*)
                           (cons 'kick *kick*)
-                          (cons (quote glitch) (max *glitch* (intro-glitch *intro* *tuning*)))
+                          (cons (quote glitch) (max *glitch* (card-glitch)))
                           (cons (quote fx) *fx*)
                           (cons (quote fx-knob) fx-knob)
                           (cons (quote fx-caption) *fx-caption*)
@@ -789,7 +804,7 @@
                           (cons (quote hud) (and (not *no-hud*) (title-hud? *title*) (not (intro-active? *intro*))))
                           (cons (quote camera) (or (intro-camera *intro* *tuning* *race* VIEW-W VIEW-H)
                                                    (title-camera *title* *tuning* (race-track *race*) VIEW-W VIEW-H)))
-                          (cons (quote fade) (max (intro-fade *intro*) (title-fade *title* *tuning*)))
+                          (cons (quote fade) (max (intro-fade *intro* *tuning*) (title-fade *title* *tuning*)))
                           (cons (quote draw-ground) (and (intro-mark-shown? *intro*)
                                                          (or (intro-active? *intro*) (memq (title-phase *title*) '(attract out)))
                                                          (lambda (c) (intro-draw-mark! c *race*))))
