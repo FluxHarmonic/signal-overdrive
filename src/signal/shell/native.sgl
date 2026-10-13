@@ -92,10 +92,24 @@
         (title-set-logo! (texture "title-logo.png"))
         (decal-init! VIEW-W VIEW-H)
         (intro-set-mark! (texture "fh-mark.png"))
-        ;; Exercise deferred shader/draw setup before publishing music.
-        ;; This zero-dt frame cannot advance the simulation or open audio.
-        (core-frame! 0.0 (frame-width) (frame-height) #t)
-        ;; Device/streams start after window, textures and first drawing.
+        ;; Warm the renderer before publishing music: draw AND present two
+        ;; zero-dt frames. A drawn frame is only recorded; the driver
+        ;; compiles and runs it at the present, and under software GL that
+        ;; first present took 2-4 s. Done after audio start, it drained the
+        ;; 250 ms music ring at the title (19695 sounding underrun frames
+        ;; in both native races measured). Zero-dt frames cannot advance
+        ;; the simulation or open audio.
+        (let ((t0 (current-second)))
+          (let warm ((n 0))
+            (when (< n 2)
+              (core-frame! 0.0 (frame-width) (frame-height) #t)
+              (wait-frame)
+              (warm (+ n 1))))
+          (display (string-append "signal-overdrive: renderer warm-up "
+                                  (number->string (exact (round (* 1000 (- (current-second) t0)))))
+                                  " ms"))
+          (newline))
+        ;; Device/streams start after window, textures and warm drawing.
         (core-audio-start!)
         (let ((t0 (current-second)))
           (let frame ((n 0))
