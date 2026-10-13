@@ -199,6 +199,10 @@ const good = (r) => !r.failed && r.status !== null && r.status >= 200 && r.statu
 // a URL is bad when no request for it succeeded (a request the page
 // abandoned and made again is not a missing file)
 const badRequests = (list) => { const g = new Set(list.filter(good).map((r) => r.url)); return list.filter((r) => !good(r) && !g.has(r.url) && !/^data:/.test(r.url || "")); };
+// the 404 leg's page answers 404 on purpose: its document request, and
+// Chrome's log line about it, are not errors (its subresources still are)
+const MISSING = "/no-such-page";
+const expected404 = (line) => line.endsWith(` ${BASE}${MISSING}`) && /status of 404/.test(line);
 const fmtReq = (r) => `${(r.url || "(no url)").replace(BASE, "")} ${r.status ?? ""}${r.failed ?? ""}`;
 // what each page's analytics saw: its URL -> the event statuses it got back
 const seen = new Map();
@@ -213,7 +217,9 @@ const visit = async (p, { fonts = true } = {}) => {
   return r;
 };
 const errorsAt = {};
-const note = (p, e0, n0) => { errorsAt[p] = [...consoleErrors.slice(e0), ...badRequests(netSince(n0)).map((r) => `request ${fmtReq(r)}`)]; };
+const errorsSince = (e0, n0) => [...consoleErrors.slice(e0).filter((l) => !expected404(l)),
+  ...badRequests(netSince(n0).filter((r) => !(r.status === 404 && r.url === BASE + MISSING))).map((r) => `request ${fmtReq(r)}`)];
+const note = (p, e0, n0) => { errorsAt[p] = errorsSince(e0, n0); };
 
 try {
   // ---- landing ---------------------------------------------------------------------------
@@ -299,6 +305,7 @@ try {
                caption: cap ? cap.textContent : null, labels: dots.map((b) => b.getAttribute("aria-label")),
                alts: imgs.every((i) => (i.getAttribute("alt") || "").length > 10),
                every: Number(c.getAttribute("data-interval")) }; })()`);
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 1, y: 1 });
     await visit("/");
     const s0 = await state();
     if (!s0) detail.push("no .carousel on the landing");
@@ -333,7 +340,7 @@ try {
   {
     const detail = [], got = [];
     await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-    for (const p of ["/", "/no-such-page"]) {
+    for (const p of ["/", MISSING]) {
       await visit(p);
       await sleep(300);
       const m = await evalJS(`(() => { const d = document.documentElement;
@@ -357,13 +364,11 @@ try {
   // ---- 404 ---------------------------------------------------------------------------------
   {
     const e0 = consoleErrors.length, n0 = net.size;
-    await visit("/no-such-page");
+    await visit(MISSING);
     const f = await evalJS(`({ h1: (document.querySelector("h1") || {}).textContent, home: [...document.querySelectorAll("a")].some((a) => a.getAttribute("href") === "/"), title: document.title })`);
     f.h1 === "404" && f.home && /Signal Overdrive/.test(f.title) ? ok("404", `a missing page shows "${f.title}", its 404 and a link home`)
       : bad("404", `h1 "${f.h1}", link home ${f.home}, title "${f.title}"`);
-    // the 404's own request is a 404 by design: only its subresources count
-    const sub = netSince(n0).filter((r) => !/\/no-such-page$/.test(r.url || ""));
-    errorsAt["/no-such-page (the 404)"] = [...consoleErrors.slice(e0), ...badRequests(sub).map((r) => `request ${fmtReq(r)}`)];
+    note(`${MISSING} (the 404)`, e0, n0);
   }
 
   // ---- isolation: the game's path, and the landing as the control --------------------------
@@ -392,7 +397,7 @@ try {
     const wasm = netSince(n0).filter((r) => /\.wasm$/.test(new URL(r.url).pathname));
     if (!wasm.some(good)) detail.push(`the wasm did not load: ${wasm.map(fmtReq).join(", ") || "never asked for"}`);
     await sleep(500);
-    errorsAt[`/${SLUG}/ (the game)`] = [...consoleErrors.slice(e0), ...badRequests(netSince(n0)).map((r) => `request ${fmtReq(r)}`)];
+    note(`/${SLUG}/ (the game)`, e0, n0);
     // the control: the landing, which must NOT be isolated, so the probe above
     // is seen to tell the two apart
     await visit("/");
@@ -411,9 +416,9 @@ try {
       if (!st) detail.push(`${u.replace(BASE, "") || "/"}: no pageview reached the stub`);
       else if (!st.includes(202)) detail.push(`${u.replace(BASE, "")}: the stub answered ${st.join(", ")}`);
     }
-    const events = stub.events.filter((e) => { try { return JSON.parse(e.body).d === PLAUSIBLE_DOMAIN; } catch { return false; } });
+    const events = stub.events.filter((e) => e.body && e.body.d === PLAUSIBLE_DOMAIN);
     if (!events.length) detail.push(`no event for ${PLAUSIBLE_DOMAIN} reached the stub`);
-    const others = stub.events.filter((e) => { try { return JSON.parse(e.body).d !== PLAUSIBLE_DOMAIN; } catch { return true; } });
+    const others = stub.events.filter((e) => !(e.body && e.body.d === PLAUSIBLE_DOMAIN));
     if (others.length) detail.push(`${others.length} events for another domain`);
     detail.length ? bad("analytics", detail.join("; "))
       : ok("analytics", `${want.map((u) => u.replace(BASE, "") || "/").join(", ")} each sent a pageview for ${PLAUSIBLE_DOMAIN} the stub accepted (202)${gameTagged ? `, the game's page while isolated` : ""}; ${events.length} events in all`);
