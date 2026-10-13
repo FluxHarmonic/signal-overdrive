@@ -42,7 +42,7 @@
 
   (export core-boot! core-frame! core-keys core-sticks core-pad core-param! core-touch!
           core-tap! core-race core-tuning core-describe core-probe core-knobs-markdown GAME-NAME
-          core-audio-start! core-focus! core-paused? core-advance! core-headless-frame!)
+          core-audio-start! core-focus! core-paused? core-advance! core-headless-frame! core-gesture!)
 
   (begin
     (define GAME-NAME "signal-overdrive")
@@ -61,7 +61,7 @@
     ;; before it, the start gate and the card ((signal intro)); made at the
     ;; boot, when the platform is known
     (define *intro* (intro-none))
-    (define *gestured* #f)        ; the sound has been opened by a gesture (or the boot)
+    (define *gestured* #f)        ; the gate is open: a gesture the browser counts, or a pad press
     (define *touch-device* #f)    ; the page says the pointer is coarse
     (define *clock* (clock-new))
     (define *pacing* (pacing-new))
@@ -388,14 +388,21 @@
     (define *boost-latch* #f)
     (define *last-throttle* 0.0)
     (define *frame-events* '())   ; the player's events over this frame's ticks, for the sound
+    ;; Open the sound (again, to resume a context the browser suspended).
     (define (core-audio-start!)
       (audio-tune! (tuning-ref *tuning* 'tone-lo) (tuning-ref *tuning* 'tone-hi)
-                   (tuning-ref *tuning* 'tone-lock) (tuning-ref *tuning* 'card-len))
-      (set! *gestured* #t)
+                   (intro-lock *tuning*) (intro-length *tuning*))
       (audio-start!)
       (when (and *race* (not (core-paused?)))
         (music-start! (audio-context) (race-song *race*))
         (music-frame! (race-song *race*) #f)))
+    ;; A gesture the browser counts as one (the page checks): it may start
+    ;; the sound, and it opens the start gate. Nothing else opens the gate
+    ;; but a pad's press (a browser never counts one, so the card then
+    ;; plays silent until the next gesture resumes the sound).
+    (define (core-gesture!)
+      (set! *gestured* #t)
+      (core-audio-start!))
     ;; The title ((signal title)): while it shows, a start goes to it; it
     ;; says when the race begins. Its events, and every race's start, go to
     ;; the music through title-emit!.
@@ -413,11 +420,17 @@
       (set! *title* (title-skip *title*))
       (title-emit! (title-events *title*)))
     ;; The gate and the card: while they run, a start skips the card, and the
-    ;; title waits. The card's start plays the tuning-in sound.
+    ;; title waits. A pad's Start or A opens the gate too. The card's start
+    ;; plays the tuning-in sound. Says whether the intro changed phase.
     (define (intro-tick! r start)
-      (set! *intro* (intro-step *intro* *tuning* r *gestured* start))
-      (title-emit! (intro-events *intro*))
-      (when (memq 'card-start (intro-events *intro*)) (audio-tune-in!)))
+      (let ((was (intro-phase *intro*)))
+        (when (and (eq? was 'gate) (not *gestured*)
+                   (or (pad-pressed? *pad* 'start) (pad-pressed? *pad* 'a)))
+          (core-gesture!))
+        (set! *intro* (intro-step *intro* *tuning* r *gestured* start))
+        (title-emit! (intro-events *intro*))
+        (when (memq 'card-start (intro-events *intro*)) (audio-tune-in!))
+        (not (eq? was (intro-phase *intro*)))))
     (define (intro-skip!)
       (set! *intro* (intro-skip *intro*))
       (title-emit! (intro-events *intro*)))
@@ -506,17 +519,28 @@
           (store-write-datum! (best-key) b)
           (say "best lap " (lap-clock b)))))
 
+    ;; Every tick of a frame sees the frame's presses: once one has moved
+    ;; the gate or the card on, it is spent until the next frame (one press
+    ;; must not skip the card and then the title).
+    (define *start-spent* #f)
     (define (step! n)
+      (set! *start-spent* #f)
       (let loop ((i 0))
         (when (< i n)
           (let* ((was (race-phase *race*))
-                 (start (start-asked?))
+                 (start (and (start-asked?) (not *start-spent*)))
                  (in (controls))
                  (r (race-step *tuning* *race* in (and start (not (title-active? *title*))))))
             (set! *race* r)
             (when (and (eq? (race-phase r) 'countdown) (not (eq? was 'countdown)))
               (title-emit! (list 'race-start)))
-            (if (intro-active? *intro*) (intro-tick! r start) (title-tick! r start))
+            (if (intro-active? *intro*)
+                (when (intro-tick! r start) (set! *start-spent* #t))
+                (begin
+                  (title-tick! r start)
+                  ;; after the card: the mark goes once the attract camera passes it
+                  (set! *intro* (intro-follow *intro* (title-camera *title* *tuning* (race-track *race*) VIEW-W VIEW-H)
+                                              *race*))))
             (for-each (lambda (e) (when (eq? (car e) 'player) (set! *frame-events* (cons (cdr e) *frame-events*))))
                       (race-events r))
             (when (and (eq? (race-phase r) 'corrupt) (not (eq? was 'corrupt)))
@@ -766,7 +790,7 @@
                           (cons (quote camera) (or (intro-camera *intro* *tuning* *race* VIEW-W VIEW-H)
                                                    (title-camera *title* *tuning* (race-track *race*) VIEW-W VIEW-H)))
                           (cons (quote fade) (max (intro-fade *intro*) (title-fade *title* *tuning*)))
-                          (cons (quote draw-ground) (and (intro-mark-shown? *intro* *tuning*)
+                          (cons (quote draw-ground) (and (intro-mark-shown? *intro*)
                                                          (or (intro-active? *intro*) (memq (title-phase *title*) '(attract out)))
                                                          (lambda (c) (intro-draw-mark! c *race*))))
                           (cons (quote draw-3d) (and (title-active? *title*) (not (intro-active? *intro*))

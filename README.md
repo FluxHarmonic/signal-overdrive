@@ -17,11 +17,14 @@ through the Flux Harmonic palette and Bayer dither pass.
 
 ## What is in it
 
-- Before the title, the Flux Harmonic card: the mark lies on the road seen from
-  above, then the camera tilts down to the driving angle as it slides away and
-  the picture's interference locks clean, to a radio's tuning-in sound (on the
-  web, a TAP TO TUNE IN gate first: the browser needs a gesture before sound).
-  The CARD knobs; any start skips it; `?card=0` leaves it out.
+- Before the title, the Flux Harmonic card, in four beats: high above the
+  track looking straight down, the mark small on the road; a zoom straight
+  down until it fills the frame, as the picture's interference and a radio's
+  tuning-in sound lock clean together; a tilt into perspective; then the
+  camera pulls back and down as the mark recedes up the road, coming to rest
+  where the title's camera begins (on the web, a TAP TO TUNE IN gate first:
+  the browser needs a gesture before sound). The CARD knobs; any start skips
+  it; `?card=0` leaves it out.
 - A title screen: the camera wanders the track by itself while the CORRUPT
   logo glitches on the beat; a start fades out into the race's countdown and
   fades back in (the TITLE knobs; `?title=0` skips it).

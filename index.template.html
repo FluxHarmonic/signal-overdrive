@@ -151,6 +151,19 @@
       app.dispatch("param", "audio-mode=" + (wk ? (sab ? "worklet-sab" : "worklet-msg") : "scriptprocessor"));
     }, { once: true });
     if (globalThis.SigilWebApp && globalThis.SigilWebApp.started) app = globalThis.SigilWebApp;
+    // The start gate opens on a gesture the browser counts as one (it lets
+    // the sound start): a key but Escape, a click, a tap's end. A blur, a
+    // held key's repeat, a scripted event or the effects panel's own input
+    // (it stops its events before they get here) never opens it.
+    function gesture(e) {
+      if (e.type === "keydown" && (e.repeat || e.key === "Escape")) return;
+      var ua = navigator.userActivation;
+      if (!e.isTrusted || (ua && !ua.isActive)) return;
+      send("gesture", "");
+    }
+    ["keydown", "mousedown", "pointerup", "touchend"].forEach(function (n) {
+      document.addEventListener(n, gesture, { passive: true });
+    });
 
     var touches = {};            // id -> {x0, y0, x, y, t0}
     var boostBtn = false, boostPulse = false;

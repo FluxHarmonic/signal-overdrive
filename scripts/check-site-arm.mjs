@@ -598,9 +598,11 @@ try {
     }
     const wasm = netSince(n0).filter((r) => /\.wasm$/.test(new URL(r.url).pathname));
     if (!wasm.some(good)) detail.push(`the wasm did not load: ${wasm.map(fmtReq).join(", ") || "never asked for"}`);
-    // watch the running game a while for late errors (the race runs on the title's autostart)
+    // watch the running game a while for late errors: past the start gate
+    // (as a gesture would open it), the card and then the title run
+    if (ready) await evalJS(`(globalThis.SigilWebApp).dispatch("gesture", "")`);
     await sleep(8000);
-    note(`/${SLUG}/ (the game, 8 s after its probe)`, e0, n0);
+    note(`/${SLUG}/ (the game, 8 s after its probe and a gesture)`, e0, n0);
     // the control: the landing, which must NOT be isolated, so the probe above
     // is seen to tell the two apart
     await visit("/");

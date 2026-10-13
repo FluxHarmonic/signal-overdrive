@@ -27,6 +27,8 @@
 ;;;   (mode7-set-look! alist)                fog, colours, the far fade
 ;;;   (mode7-draw-ground! cam)               a (signal mode7 camera) cam
 ;;;   (mode7-draw-sprite! sheet x y w h u0 v0 u1 v1 fog)
+;;;   (mode7-ground-look)                    the fog and the horizon bend last
+;;;                                          set: (fog fogc bend), for a decal
 ;;;
 ;;; Nothing here knows about racing: this and (signal mode7 camera) are the
 ;;; seed of a substratic-mode7 package.
@@ -38,7 +40,7 @@
 
   (export mode7-init! mode7-set-world! mode7-set-sky! mode7-set-look! mode7-draw-ground!
           mode7-draw-sprite! mode7-ready? mode7-set-far! mode7-sprite-style!
-          mode7-set-fx! mode7-set-lights! MODE7-LIGHTS)
+          mode7-set-fx! mode7-set-lights! mode7-ground-look MODE7-LIGHTS)
 
   (begin
     (define GROUND-VERTEX
@@ -358,7 +360,16 @@ void main() {
     ;; The effects hooks: 24 floats, fx[0] to fx[5] (see GROUND-FRAGMENT).
     ;; All zero draws the plain ground and sky.
     (define (mode7-set-fx! floats)
+      (set! *bend* (f32 (car floats)))
       (set-pipeline-uniform! *ground* 'fx (map f32 floats)))
+
+    ;; What the ground was last given that a picture lying on it must
+    ;; match: the fog (fog-start fog-end fog? far-start), its colour and
+    ;; amount, and the horizon bend (fx[0].x, pixels).
+    (define *fog-v* (list 700.0 2400.0 1.0 1.6))
+    (define *fogc-v* (list 0.18 0.11 0.30 1.0))
+    (define *bend* 0.0)
+    (define (mode7-ground-look) (list *fog-v* *fogc-v* *bend*))
 
     ;; Up to MODE7-LIGHTS pools, each (x y radius colour+intensity); the
     ;; count goes in fx[3].w.
@@ -396,11 +407,12 @@ void main() {
     ;; fog-color sky-top sky-low (each (r g b) in 0..1).
     (define (mode7-set-look! look)
       (let ((get (lambda (k d) (let ((e (assq k look))) (if e (cdr e) d)))))
-        (set-pipeline-uniform! *ground* 'fog
-                               (v4 (get 'fog-start 700.0) (get 'fog-end 2400.0)
-                                   (if (get 'fog? #t) 1.0 0.0) (get 'far-start 1.6)))
+        (set! *fog-v* (v4 (get 'fog-start 700.0) (get 'fog-end 2400.0)
+                          (if (get 'fog? #t) 1.0 0.0) (get 'far-start 1.6)))
+        (set-pipeline-uniform! *ground* 'fog *fog-v*)
         (let ((fc (get 'fog-color '(0.18 0.11 0.30))))
-          (set-pipeline-uniform! *ground* 'fogc (v4 (car fc) (cadr fc) (caddr fc) (get 'fog-amount 1.0))))
+          (set! *fogc-v* (v4 (car fc) (cadr fc) (caddr fc) (get 'fog-amount 1.0)))
+          (set-pipeline-uniform! *ground* 'fogc *fogc-v*))
         (let ((t (get 'sky-top '(0.05 0.04 0.10))) (l (get 'sky-low '(0.18 0.11 0.30))))
           (set-pipeline-uniform! *ground* 'skytop (v4 (car t) (cadr t) (caddr t) 1.0))
           (set-pipeline-uniform! *ground* 'skylow (v4 (car l) (cadr l) (caddr l) 1.0)))))

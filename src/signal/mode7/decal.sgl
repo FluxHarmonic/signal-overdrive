@@ -2,12 +2,17 @@
 ;;;
 ;;; One full-screen pass: per pixel it unprojects onto the ground exactly as
 ;;; (signal mode7 render)'s ground shader does (the same camera, the same
-;;; arithmetic, the horizon bend left out), and where the ground point falls
-;;; inside the decal's rectangle it draws the picture's texel there, by
-;;; texelFetch (point sampling). A texel with alpha under a half is not
-;;; drawn, so the ground shows through. Draw it after the ground and before
-;;; anything standing on it, inside the same 3D pass, so it goes through the
-;;; palette pass like the ground does.
+;;; arithmetic, the same horizon bend), and where the ground point falls
+;;; inside the decal's rectangle it draws the picture there. Near, where a
+;;; pixel covers about a picture pixel or less, it draws the one picture
+;;; pixel under it (texelFetch, point sampling), and a pixel with alpha
+;;; under a half is not drawn, so the ground shows through. Far, where a
+;;; pixel covers many, it averages a grid of up to 8 x 8 picture pixels
+;;; across the pixel's footprint and draws their mean colour where at least
+;;; half of them are opaque: a far mark keeps a steady outline instead of
+;;; shimmering as the camera moves. Then the ground's fog. Draw it after
+;;; the ground and before anything standing on it, inside the same 3D pass,
+;;; so it goes through the palette pass like the ground does.
 ;;;
 ;;; The rectangle is centred on (x, y) in world texels, w by h texels, its
 ;;; top edge toward `heading` (the picture reads upright to a camera looking
@@ -23,7 +28,8 @@
 (define-library (signal mode7 decal)
   (import (sigil core)
           (sigil graphics)
-          (signal mode7 camera))
+          (signal mode7 camera)
+          (signal mode7 render))
 
   (export decal-init! draw-decal!)
 
@@ -38,22 +44,28 @@ void main() {
 }
 ")
 
-    ;; cam: x y height heading. proj: focal cy pitch. place: the decal's
-    ;; centre (x, y) and its heading (z); size: its width and height in
-    ;; texels (x, y) and the picture's in pixels (z, w).
+    ;; cam: x y height heading. proj: focal cy pitch horizon. place: the
+    ;; decal's centre (x, y) and its heading (z); size: its width and
+    ;; height in texels (x, y) and the picture's in pixels (z, w). fog,
+    ;; fogc: the ground's; bend.x the ground's horizon bend.
     (define DECAL-FRAGMENT
       "uniform vec4 cam;
 uniform vec4 proj;
 uniform vec4 view;
 uniform vec4 place;
 uniform vec4 size;
+uniform vec4 fog;
+uniform vec4 fogc;
+uniform vec4 bend;
 uniform sampler2D pic;
 in vec2 v_screen;
 out vec4 frag_color;
 void main() {
+  float bu = clamp((view.y - v_screen.y) / (view.y - proj.w), 0.0, 1.0);
+  float py = v_screen.y - bend.x * bu * bu;
   float f = proj.x;
   float sx = v_screen.x - 0.5 * view.x;
-  float sy = proj.y - v_screen.y;
+  float sy = proj.y - py;
   float cp = cos(proj.z);
   float sp = sin(proj.z);
   float rz = sy * cp - f * sp;
@@ -63,15 +75,47 @@ void main() {
   vec2 fw = vec2(sin(cam.w), -cos(cam.w));
   vec2 rt = vec2(cos(cam.w), sin(cam.w));
   vec2 g = cam.xy + t * (ra * fw + sx * rt);
+  // the ground under one pixel's step right and one pixel's step down
+  vec2 gx = t * rt;
+  vec2 gy = -(t * t / cam.z) * (f * fw + sx * cp * rt);
+  // into picture pixels: across, and down from the top edge
   vec2 dfw = vec2(sin(place.z), -cos(place.z));
   vec2 drt = vec2(cos(place.z), sin(place.z));
+  vec2 k = size.zw / size.xy;
   vec2 d = g - place.xy;
-  float u = dot(d, drt) / size.x + 0.5;
-  float v = -dot(d, dfw) / size.y + 0.5;
-  if (u < 0.0 || u >= 1.0 || v < 0.0 || v >= 1.0) discard;
-  vec4 c = texelFetch(pic, ivec2(floor(vec2(u * size.z, v * size.w))), 0);
-  if (c.a < 0.5) discard;
-  frag_color = vec4(c.rgb, 1.0);
+  vec2 q = vec2(dot(d, drt), -dot(d, dfw)) * k + 0.5 * size.zw;
+  vec2 qx = vec2(dot(gx, drt), -dot(gx, dfw)) * k;
+  vec2 qy = vec2(dot(gy, drt), -dot(gy, dfw)) * k;
+  float foot = max(length(qx), length(qy));
+  float m = 0.5 * foot;
+  if (q.x < -m || q.y < -m || q.x >= size.z + m || q.y >= size.w + m) discard;
+  vec3 c;
+  if (foot < 1.5) {
+    if (q.x < 0.0 || q.y < 0.0 || q.x >= size.z || q.y >= size.w) discard;
+    vec4 p = texelFetch(pic, ivec2(floor(q)), 0);
+    if (p.a < 0.5) discard;
+    c = p.rgb;
+  } else {
+    int n = int(clamp(ceil(foot), 4.0, 8.0));
+    float fn = float(n);
+    vec3 sum = vec3(0.0);
+    float hit = 0.0;
+    for (int j = 0; j < 8; j++) {
+      if (j >= n) break;
+      for (int i = 0; i < 8; i++) {
+        if (i >= n) break;
+        vec2 s = q + ((float(i) + 0.5) / fn - 0.5) * qx + ((float(j) + 0.5) / fn - 0.5) * qy;
+        if (s.x >= 0.0 && s.y >= 0.0 && s.x < size.z && s.y < size.w) {
+          vec4 p = texelFetch(pic, ivec2(floor(s)), 0);
+          if (p.a >= 0.5) { sum += p.rgb; hit += 1.0; }
+        }
+      }
+    }
+    if (hit < 0.5 * fn * fn) discard;
+    c = sum / hit;
+  }
+  if (fog.z > 0.5) c = mix(c, fogc.rgb, smoothstep(fog.x, fog.y, t * ra) * fogc.a);
+  frag_color = vec4(c, 1.0);
 }
 ")
 
@@ -97,11 +141,15 @@ void main() {
                                     (list 'depth-test #f 'depth-write #f 'cull 'none))))
       (set-pipeline-uniform! *pipe* 'view (v4 w h 0 0)))
 
-    ;; tex's own size gives the picture's pixels; w h its size on the ground.
+    ;; w h its size on the ground; tw th the picture's pixels.
     (define (draw-decal! c tex x y heading w h tw th)
       (when *pipe*
-        (set-pipeline-uniform! *pipe* 'cam (v4 (cam-x c) (cam-y c) (cam-height c) (cam-heading c)))
-        (set-pipeline-uniform! *pipe* 'proj (v4 (cam-focal c) (cam-cy c) (cam-pitch c) 0))
-        (set-pipeline-uniform! *pipe* 'place (v4 x y heading 0))
-        (set-pipeline-uniform! *pipe* 'size (v4 w h tw th))
-        (draw-mesh *pipe* *tri* tex)))))
+        (let ((look (mode7-ground-look)))
+          (set-pipeline-uniform! *pipe* 'cam (v4 (cam-x c) (cam-y c) (cam-height c) (cam-heading c)))
+          (set-pipeline-uniform! *pipe* 'proj (v4 (cam-focal c) (cam-cy c) (cam-pitch c) (cam-horizon c)))
+          (set-pipeline-uniform! *pipe* 'place (v4 x y heading 0))
+          (set-pipeline-uniform! *pipe* 'size (v4 w h tw th))
+          (set-pipeline-uniform! *pipe* 'fog (car look))
+          (set-pipeline-uniform! *pipe* 'fogc (cadr look))
+          (set-pipeline-uniform! *pipe* 'bend (v4 (caddr look) 0 0 0))
+          (draw-mesh *pipe* *tri* tex))))))

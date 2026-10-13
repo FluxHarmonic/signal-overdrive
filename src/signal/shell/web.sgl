@@ -83,10 +83,13 @@
       (gles3-start-loop "signal-overdrive-tick")
       0)
 
-    ;; the sound starts on the first user gesture (autoplay policy), and
-    ;; every later gesture resumes a context the browser suspended
+    ;; the sound starts on a gesture the browser counts (autoplay policy):
+    ;; the page sends ("gesture", "") for one, which also opens the start
+    ;; gate. Every key, pointer or touch message tries to resume the sound
+    ;; too (a context the browser suspended), but opens nothing.
     (define (gesture! type)
-      (when (member type '("keydown" "pointerdown" "touch" "tap")) (core-audio-start!)))
+      (cond ((string=? type "gesture") (core-gesture!))
+            ((member type (quote ("keydown" "pointerdown" "touch" "tap"))) (core-audio-start!))))
 
     (define (web-dispatch type payload)
       (gesture! type)
@@ -105,6 +108,7 @@
             ;; the touch check's question: what is the player doing now?
             ((string=? type "probe") (say (core-probe)) 1)
             ((string=? type "tap") (core-tap!) 1)
+            ((string=? type "gesture") 1)
             ((string=? type "pointerdown") (core-tap!) 0)
             ((pad-dispatch! (core-pad) type payload) 1)
             ((input-dispatch! (core-keys) (core-sticks) type payload) 1)

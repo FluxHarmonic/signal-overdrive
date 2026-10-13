@@ -1,9 +1,10 @@
 ;;; (signal title) - The title screen: an attract mode, then the start.
 ;;;
 ;;; While the title shows, the camera wanders the track by itself. It flies
-;;; the racing line at a calm speed, higher and further back than the race
-;;; camera, its heading easing toward the road ahead, past the grid where
-;;; the machines wait. The logo glitches on the beat and a prompt asks for
+;;; the racing line at a calm speed (coming up to it from rest over its
+;;; first second), higher and further back than the race camera, its
+;;; heading easing toward the road ahead, past the grid where the machines
+;;; wait. The logo glitches on the beat and a prompt asks for
 ;;; a start. On a start the frame fades out (the title-out knob, seconds),
 ;;; the race begins its countdown, and the frame fades back in behind the
 ;;; race camera (title-in); then the title is done and the HUD returns.
@@ -101,10 +102,18 @@
       (let ((d (- a b)))
         (- d (* 2.0 PI (floor (/ (+ d PI) (* 2.0 PI)))))))
 
+    ;; The flight starts from rest (the card before the title comes to rest
+    ;; where the flight begins) and comes up to speed over RAMP seconds,
+    ;; easing in and out; age is the title's ticks.
+    (define RAMP 1.0)
+    (define (ramp age)
+      (let ((u (min 1.0 (/ age (* 60.0 RAMP)))))
+        (* u u (- 3.0 (* 2.0 u)))))
+
     ;; One tick of flight: on along the line at title-speed texels a second,
     ;; the heading easing toward the aim (about a second to settle).
     (define (fly t tuning tr)
-      (let* ((s (wrap-s tr (+ (title-s t) (/ (knob tuning 'title-speed) 60.0))))
+      (let* ((s (wrap-s tr (+ (title-s t) (* (ramp (title-age t)) (/ (knob tuning 'title-speed) 60.0)))))
              (want (aim tr s))
              (h (title-heading t))
              (h (if h (+ h (* 0.05 (angle-diff want h))) want)))

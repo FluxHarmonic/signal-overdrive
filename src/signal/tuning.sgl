@@ -86,19 +86,23 @@
         (title-dist   title    20.0   200.0  2.0   150.0   "TITLE CAMERA DIST")))
 
     ;; The card before the title ((signal intro)): 0 skips it (and the web's
-    ;; start gate); its length and the flat hold before the tilt, in
-    ;; seconds; the tilt's ease (1 linear, higher steeper in the middle);
-    ;; and the tuning-in sound's sweep ((signal tunein)): from tone-lo to
-    ;; tone-hi Hz, locking at tone-lock seconds, when the picture's
-    ;; interference locks clean too.
+    ;; start gate); the camera's height to begin, in texels; its four beats
+    ;; in seconds (holding high, zooming straight down onto the mark,
+    ;; tilting into perspective, pulling back into the attract camera); the
+    ;; beats' ease (1 linear, higher steeper in the middle); and the
+    ;; tuning-in sound's sweep ((signal tunein)) from tone-lo to tone-hi Hz.
+    ;; The sound and the picture's interference lock clean as the zoom
+    ;; arrives; the card's length is the four beats.
     (define CARD-KNOBS
       '((card         card     0.0    1.0    1.0   1.0     "CARD")
-        (card-len     card     1.0    10.0   0.1   4.0     "CARD LENGTH")
-        (card-hold    card     0.0    3.0    0.05  0.5     "CARD HOLD (FLAT)")
-        (card-tilt    card     1.0    5.0    0.1   2.0     "CARD TILT EASE")
+        (card-height  card     200.0  4000.0 50.0  1600.0  "CARD START HEIGHT")
+        (card-hold    card     0.0    3.0    0.05  0.4     "CARD HOLD (HIGH)")
+        (card-zoom    card     0.2    5.0    0.05  1.6     "CARD ZOOM TIME")
+        (card-tilt    card     0.2    5.0    0.05  1.4     "CARD TILT TIME")
+        (card-move    card     0.2    5.0    0.05  1.4     "CARD MOVE TIME")
+        (card-ease    card     1.0    5.0    0.1   2.0     "CARD EASE")
         (tone-lo      card     60.0   600.0  10.0  180.0   "TONE FROM HZ")
-        (tone-hi      card     200.0  2000.0 10.0  880.0   "TONE TO HZ")
-        (tone-lock    card     0.5    6.0    0.1   2.2     "TONE LOCKS AT")))
+        (tone-hi      card     200.0  2000.0 10.0  880.0   "TONE TO HZ")))
 
     (define HANDLING-KNOBS
       '((accel        handling 50.0   1200.0 10.0  "ACCEL")

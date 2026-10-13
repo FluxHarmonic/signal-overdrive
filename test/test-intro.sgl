@@ -1,10 +1,15 @@
 ;;; Before the title: the start gate holds until a gesture (the sound needs
 ;;; one), the card starts its sound on its first tick, a start skips it
-;;; (but not the gesture's own), it hands into the title's first camera
-;;; with no cut and no black frame, its interference locks with the sound,
-;;; the mark leaves the road only once the attract camera has passed it,
-;;; and its events pair. And the tuning-in sound: a glide with no steps
-;;; that ends on its tone, with the static gone after the lock.
+;;; (but not the gesture's own). The card's four beats: high and looking
+;;; down with the mark small, zooming down until the mark fills the frame
+;;; (the mark whole in frame throughout), tilting into perspective (still
+;;; whole in frame), then pulling back and down as the mark recedes, to
+;;; rest exactly on the title's first camera, which speeds up from rest:
+;;; no cut and no jolt. Its interference locks with the sound as the zoom
+;;; arrives; the mark sits on clear road and leaves it only once the
+;;; attract camera has passed it, for good; its events pair. And the
+;;; tuning-in sound: a glide with no steps that ends on its tone, with the
+;;; static gone after the lock.
 
 (import (sigil test)
         (sigil math)
@@ -18,8 +23,13 @@
 
 (define TUNING (tuning-defaults))
 (define RACE (race-new TUNING))
+(define TR (race-track RACE))
 (define (near? a b eps) (< (abs (- a b)) eps))
+(define (last-of l) (car (reverse l)))
 (define (ticks s) (exact (round (* 60.0 s))))
+(define (knob k) (tuning-ref TUNING k))
+(define W 480)
+(define H 270)
 
 ;; n steps from i; gesture-at, skip-at: the step (1-based) that gestures or
 ;; presses start (#f: never). Returns (intro . events, in order).
@@ -31,13 +41,44 @@
           (let ((i (intro-step i tn RACE (and gesture-at (>= k gesture-at)) (and skip-at (= k skip-at)))))
             (loop (+ k 1) i (append (reverse (intro-events i)) evs)))))))
 
+;; The card's cameras, one a tick, from its first tick to its last, as the
+;; shell asks for them: a list of (seconds . cam).
+(define CAMS
+  (let loop ((k 0) (i (intro-new TUNING #f)) (acc '()))
+    (if (eq? (intro-phase i) 'card)
+        (loop (+ k 1) (intro-step i TUNING RACE #f #f)
+              (cons (cons (/ k 60.0) (intro-camera i TUNING RACE W H)) acc))
+        (reverse acc))))
+(define BEATS (intro-beats TUNING))
+(define (in-beat lo hi) (filter (lambda (e) (and (>= (car e) lo) (< (car e) hi))) CAMS))
+
+;; The mark's corners and centre on the ground.
+(define MARK (intro-mark TR))
+(define (mark-point a b)        ; a across, b along, each -0.5..0.5 of its size
+  (let* ((hd (caddr MARK)) (w (cadddr MARK)) (h (list-ref MARK 4)))
+    (list (+ (car MARK) (* a w (cos hd)) (* b h (sin hd)))
+          (+ (cadr MARK) (* a w (sin hd)) (* b h (- (cos hd)))))))
+(define CORNERS (map (lambda (ab) (apply mark-point ab)) '((-0.5 -0.5) (0.5 -0.5) (-0.5 0.5) (0.5 0.5))))
+(define CENTRE (mark-point 0.0 0.0))
+(define (on-screen c pt)
+  (let ((p (camera-project c (car pt) (cadr pt) 0.0 1.0)))
+    (and p (>= (projected-x p) 0.0) (< (projected-x p) W) (>= (projected-y p) 0.0) (< (projected-y p) H) p)))
+(define (whole-in-frame? c) (let loop ((cs CORNERS)) (or (null? cs) (and (on-screen c (car cs)) (loop (cdr cs))))))
+;; the mark's width on screen, across its far edge
+(define (mark-px c)
+  (let ((a (camera-project c (car (mark-point -0.5 0.5)) (cadr (mark-point -0.5 0.5)) 0.0 1.0))
+        (b (camera-project c (car (mark-point 0.5 0.5)) (cadr (mark-point 0.5 0.5)) 0.0 1.0)))
+    (and a b (abs (- (projected-x b) (projected-x a))))))
+(define (dist c1 c2) (sqrt (+ (expt (- (cam-x c1) (cam-x c2)) 2) (expt (- (cam-y c1) (cam-y c2)) 2)
+                              (expt (- (cam-height c1) (cam-height c2)) 2))))
+
 (test-group "the gate"
   (test "on the web it holds, black and silent, until a gesture"
     (let ((res (run (intro-new TUNING #t) 300 #f #f)))
       (assert-equal 'gate (intro-phase (car res)))
       (assert-equal '() (cdr res))
       (assert-true (near? (intro-fade (car res)) 1.0 1e-9))
-      (assert-true (cam? (intro-camera (car res) TUNING RACE 480 270)))))
+      (assert-true (cam? (intro-camera (car res) TUNING RACE W H)))))
   (test "the gesture starts the card, which starts its sound on its first tick"
     (let ((res (run (intro-new TUNING #t) 3 2 #f)))
       (assert-equal 'card (intro-phase (car res)))
@@ -45,71 +86,164 @@
   (test "natively there is no gate"
     (let ((res (run (intro-new TUNING #f) 1 #f #f)))
       (assert-equal 'card (intro-phase (car res)))
-      (assert-equal '(card-start) (cdr res)))))
+      (assert-equal '(card-start) (cdr res))))
+  (test "a card turned off before its first tick (a native --card=0 after the boot) never began"
+    (for-each (lambda (k)
+                (let ((res (run (intro-new TUNING #f) 1 #f #f (tuning-set TUNING k 0.0))))
+                  (assert-equal 'done (intro-phase (car res)))
+                  (assert-equal '() (cdr res))
+                  (assert-false (intro-mark-shown? (car res)))))
+              '(card title))))
 
-(test-group "the card"
-  (test "it runs card-len seconds, then ends"
-    (let* ((n (ticks (tuning-ref TUNING 'card-len)))
+(test-group "the card's beats"
+  (test "its length is its four beats, and then it ends"
+    (assert-true (near? (intro-length TUNING)
+                        (+ (knob 'card-hold) (knob 'card-zoom) (knob 'card-tilt) (knob 'card-move)) 1e-9))
+    (assert-true (< 4.0 (intro-length TUNING) 5.5))
+    (let* ((n (ticks (intro-length TUNING)))
            (a (run (intro-new TUNING #f) (- n 1) #f #f))
            (b (run (car a) 1 #f #f)))
       (assert-equal 'card (intro-phase (car a)))
       (assert-equal 'done (intro-phase (car b)))
       (assert-equal '(card-end) (cdr b))))
+  (test "hold and zoom: straight down from card-height, the mark small, then filling the frame"
+    (let ((cs (in-beat 0.0 (cadr BEATS))))
+      (assert-true (> (length cs) 60))
+      (assert-true (near? (cam-height (cdar cs)) (knob 'card-height) 1e-6))
+      (assert-true (< (mark-px (cdar cs)) 60.0))
+      (assert-true (> (mark-px (cdr (last-of cs))) 280.0))
+      (let loop ((cs cs) (last-h 1e9) (last-w 0.0))
+        (unless (null? cs)
+          (let ((c (cdar cs)))
+            (assert-true (> (cam-pitch c) 1.5))              ; looking straight down
+            (assert-true (<= (cam-height c) (+ last-h 1e-9)))  ; only ever down
+            (assert-true (>= (mark-px c) (- last-w 1e-9)))     ; the mark only grows
+            (assert-true (whole-in-frame? c))
+            (loop (cdr cs) (cam-height c) (mark-px c)))))))
+  (test "the tilt: into perspective, the mark whole in frame all through it"
+    (let ((cs (in-beat (cadr BEATS) (caddr BEATS))))
+      (assert-true (> (length cs) 30))
+      (let loop ((cs cs) (last-p 10.0))
+        (unless (null? cs)
+          (let ((c (cdar cs)))
+            (assert-true (<= (cam-pitch c) (+ last-p 1e-9)))  ; only ever tilting up
+            (assert-true (whole-in-frame? c))
+            (loop (cdr cs) (cam-pitch c)))))
+      ;; it ends at the attract camera's angle
+      (assert-true (near? (cam-pitch (cdr (last-of cs))) (+ (knob 'pitch) 0.05) 0.02))))
+  (test "the move: back and down, the mark receding up the road, rising and shrinking"
+    (let* ((cs (in-beat (caddr BEATS) 100.0))
+           (hd (caddr MARK))
+           (behind (lambda (c) (+ (* (- (car MARK) (cam-x c)) (sin hd)) (* (- (cadr MARK) (cam-y c)) (- (cos hd)))))))
+      (assert-true (> (length cs) 30))
+      (let loop ((cs cs) (last-y 1e9) (last-w 1e9) (last-b 0.0) (last-h 1e9))
+        (unless (null? cs)
+          (let* ((c (cdar cs)) (p (on-screen c CENTRE)))
+            (assert-true p)
+            (assert-true (<= (projected-y p) (+ last-y 0.01)))
+            (assert-true (<= (mark-px c) (+ last-w 0.01)))
+            (assert-true (>= (behind c) (- last-b 0.01)))
+            (assert-true (<= (cam-height c) (+ last-h 1e-9)))
+            (loop (cdr cs) (projected-y p) (mark-px c) (behind c) (cam-height c)))))))
+  (test "no cut anywhere in it: no tick's step changes by 3 texels, nor its pitch by 0.06 rad"
+    ;; measured: steps up to 34 texels a tick mid-zoom, changing by at most
+    ;; 1.3; the pitch by at most 0.035 rad a tick mid-tilt
+    (let loop ((cs CAMS) (last-d #f))
+      (unless (null? (cdr cs))
+        (let* ((a (cdar cs)) (b (cdadr cs)) (d (dist a b)))
+          (when last-d (assert-true (< (abs (- d last-d)) 3.0)))
+          (assert-true (< (abs (- (cam-pitch a) (cam-pitch b))) 0.06))
+          (loop (cdr cs) d)))))
   (test "a start skips it, but not in its first ticks (the gesture's own press)"
     (assert-equal 'card (intro-phase (car (run (intro-new TUNING #f) 5 #f 5))))
     (let ((res (run (intro-new TUNING #f) 30 #f 30)))
       (assert-equal 'done (intro-phase (car res)))
       (assert-equal '(card-start card-end) (cdr res))))
-  (test "every frame of it is lit, and its interference locks clean with the sound"
-    (let ((lock (ticks (tuning-ref TUNING 'tone-lock))))
+  (test "every frame of it is lit, and its interference locks clean as the zoom arrives"
+    (assert-true (near? (intro-lock TUNING) (+ (knob 'card-hold) (knob 'card-zoom)) 1e-9))
+    (let ((lock (ticks (intro-lock TUNING))))
       (let loop ((k 1) (i (intro-new TUNING #f)) (last 2.0))
         (when (eq? (intro-phase i) 'card)
           (let ((g (intro-glitch i TUNING)))
             (assert-true (near? (intro-fade i) 0.0 1e-9))
             (assert-true (<= g last))
             (when (= k 2) (assert-true (> g 0.8)))
+            (when (< k (- lock 10)) (assert-true (> g 0.0)))
             (when (>= k (+ lock 1)) (assert-true (near? g 0.0 1e-9)))
-            (loop (+ k 1) (intro-step i TUNING RACE #f #f) g))))))
-  (test "the mark stays on screen all through the card, sliding only up toward the horizon"
-    (let* ((tr (race-track RACE))
-           (m (track-point tr MARK-S 0.0)))
-      (let loop ((i (intro-new TUNING #f)) (last 1000.0) (k 0))
-        (when (eq? (intro-phase i) 'card)
-          (let* ((c (intro-camera i TUNING RACE 480 270))
-                 (p (camera-project c (car m) (cadr m) 0.0 1.0)))
-            (assert-true (and p (>= (projected-x p) 0.0) (< (projected-x p) 480.0)
-                              (>= (projected-y p) 0.0) (< (projected-y p) 270.0)))
-            (assert-true (<= (projected-y p) (+ last 0.01)))
-            (loop (intro-step i TUNING RACE #f #f) (projected-y p) (+ k 1)))))))
-  (test "it hands into the title's first camera with no cut"
-    (let* ((n (ticks (tuning-ref TUNING 'card-len)))
-           (last (car (run (intro-new TUNING #f) (- n 1) #f #f)))
-           (c1 (intro-camera last TUNING RACE 480 270))
-           ;; the next tick: the card is done and the title takes its first step
-           (t (title-step (title-new) TUNING RACE #f))
-           (c2 (title-camera t TUNING (race-track RACE) 480 270))
-           (dh (- (cam-heading c1) (cam-heading c2))))
-      (assert-true (< (sqrt (+ (expt (- (cam-x c1) (cam-x c2)) 2) (expt (- (cam-y c1) (cam-y c2)) 2))) 8.0))
-      (assert-true (near? (cam-height c1) (cam-height c2) 0.5))
-      (assert-true (near? (cam-pitch c1) (cam-pitch c2) 0.01))
-      (assert-true (near? (cam-horizon c1) (cam-horizon c2) 1.0))
-      (assert-true (< (abs (atan (sin dh) (cos dh))) 0.05))
-      (assert-true (near? (title-fade t TUNING) 0.0 1e-9))))
-  (test "the mark leaves the road only once the attract camera has passed it"
-    (let* ((tr (race-track RACE))
-           (m (track-point tr MARK-S 0.0))
-           (ahead (lambda (c) (+ (* (- (car m) (cam-x c)) (sin (cam-heading c)))
-                                 (* (- (cadr m) (cam-y c)) (- (cos (cam-heading c))))))))
-      (let loop ((k 0) (i (intro-step (intro-new TUNING #f) TUNING RACE #f #t))
-                 (t (title-new)) (was #t))
-        (let* ((i (if (eq? (intro-phase i) 'done) (intro-step i TUNING RACE #f #f) (intro-step i TUNING RACE #f #t)))
-               (t (if (eq? (intro-phase i) 'done) (title-step t TUNING RACE #f) t))
-               (shown (intro-mark-shown? i TUNING)))
-          (cond ((and was (not shown))
-                 ;; the camera is past it the moment it goes
-                 (assert-true (< (ahead (title-camera t TUNING tr 480 270)) 0.0)))
-                ((< k 2000) (loop (+ k 1) i t shown))
-                (else (assert-true #f))))))))
+            (loop (+ k 1) (intro-step i TUNING RACE #f #f) g)))))))
+
+(test-group "the hand-off"
+  (test "it rests exactly on the title's first camera, which speeds up from rest: no cut, no jolt"
+    (let* ((tail (let ((n (length CAMS))) (list-tail CAMS (- n 12))))
+           (card (map cdr tail))
+           ;; the tick the card ends, the frame shows the new title's camera;
+           ;; then the title flies
+           (titles (let loop ((k 0) (t (title-new)) (acc (list (title-camera (title-new) TUNING TR W H))))
+                     (if (= k 12) (reverse acc)
+                         (let ((t (title-step t TUNING RACE #f)))
+                           (loop (+ k 1) t (cons (title-camera t TUNING TR W H) acc))))))
+           (cams (append card titles))
+           (steps (let loop ((cs cams) (acc '()))
+                    (if (null? (cdr cs)) (reverse acc) (loop (cdr cs) (cons (dist (car cs) (cadr cs)) acc))))))
+      (let ((a (last-of card)) (b (car titles)))
+        (assert-true (< (dist a b) 0.5))
+        (assert-true (near? (cam-pitch a) (cam-pitch b) 0.001))
+        (assert-true (near? (cam-horizon a) (cam-horizon b) 0.5))
+        (assert-true (< (abs (atan (sin (- (cam-heading a) (cam-heading b))) (cos (- (cam-heading a) (cam-heading b))))) 0.002)))
+      ;; at rest across the hand-off (steps 11 to 13, counting from 0: into
+      ;; the hand-off, then the title's first two), and no tick's speed
+      ;; jumps (the old card stopped dead, then the title jumped to 4
+      ;; texels a tick)
+      (for-each (lambda (k) (assert-true (< (list-ref steps k) 0.1))) (quote (11 12 13)))
+      (let loop ((ds steps))
+        (unless (null? (cdr ds))
+          (assert-true (< (abs (- (car ds) (cadr ds))) 0.3))
+          (loop (cdr ds))))))
+  (test "the mark leaves the road only once the attract camera has passed it, and for good"
+    (for-each
+     (lambda (tk)
+       (let* ((tn (tuning-set TUNING 'track tk))
+              (r (race-new tn))
+              (tr (race-track r))
+              (m (intro-mark tr))
+              (hd (caddr m)))
+         ;; the shell's order: the card to its end, then per tick the title
+         ;; steps and the intro follows its camera
+         (let loop ((k 0) (i (car (run (intro-new tn #f) (ticks (intro-length tn)) #f #f tn))) (t (title-new)) (gone-at #f))
+           (assert-equal 'done (intro-phase i))
+           (let* ((t (title-step t tn r #f))
+                  (c (title-camera t tn tr W H))
+                  (i (intro-follow i c r)))
+             (cond ((and (not gone-at) (not (intro-mark-shown? i)))
+                    ;; the camera is past it the moment it goes, and it was
+                    ;; already off the screen
+                    (assert-true (> (+ (* (- (cam-x c) (car m)) (sin hd)) (* (- (cam-y c) (cadr m)) (- (cos hd))))
+                                    (* 0.5 (list-ref m 4))))
+                    (assert-false (on-screen c (list (car m) (cadr m))))
+                    (loop (+ k 1) i t k))
+                   ((and gone-at (intro-mark-shown? i)) (assert-true #f))
+                   ((< k (* 60 130)) (loop (+ k 1) i t gone-at))
+                   (else (assert-true gone-at)))))))
+     '(0.0 1.0)))
+  (test "a skip takes the mark with it; a start in the card leaves it for the attract to pass"
+    (assert-false (intro-mark-shown? (intro-skip (car (run (intro-new TUNING #f) 30 #f #f)))))
+    (assert-true (intro-mark-shown? (car (run (intro-new TUNING #f) 30 #f 30))))))
+
+(test-group "the mark"
+  (test "on every track it sits on the road with room each side, clear of every pad and strip"
+    (for-each
+     (lambda (tk)
+       (let* ((tr (race-track (race-new (tuning-set TUNING 'track tk))))
+              (m (intro-mark tr))
+              (w (cadddr m)) (h (list-ref m 4))
+              (hw (track-hw tr (track-index-at tr MARK-S))))
+         (assert-true (<= w (- (* 2.0 hw) 12.0)))
+         (assert-true (near? (/ w h) (/ 170.0 84.0) 1e-6))
+         (for-each (lambda (z)
+                     (assert-true (or (< (cadr z) (- MARK-S (* 0.5 h) 8.0))
+                                      (> (car z) (+ MARK-S (* 0.5 h) 8.0)))))
+                   (append (track-boost tr) (track-repair tr) (track-ice tr)))))
+     '(0.0 1.0))))
 
 (test-group "events and skips"
   (test "the title or the card off: nothing at all"
@@ -130,10 +264,13 @@
           (loop (+ k 1) f))))
     (assert-true (near? (tune-in-carrier-hz 0.0 180.0 880.0 2.2) 180.0 1e-6))
     (assert-true (near? (tune-in-carrier-hz 3.0 180.0 880.0 2.2) 880.0 1e-6)))
-  (test "its PCM: the right length, its tone after the lock, and the static gone"
-    (let* ((rate 44100) (buf (render-tune-in rate 180.0 880.0 2.2 4.0))
+  (test "the card's PCM: its length, its tone after the lock, and the static gone"
+    (let* ((rate 44100)
+           (lock (intro-lock TUNING)) (secs (intro-length TUNING))
+           (buf (render-tune-in rate (knob 'tone-lo) (knob 'tone-hi) lock secs))
            (n (quotient (bytevector-length buf) 8))
            (x (lambda (i) (bytevector-ieee-single-ref buf (* 8 i) 'little)))
+           (at (lambda (s) (exact (floor (* s rate)))))
            (crossings (lambda (a b) (let loop ((i (+ a 1)) (c 0))
                                       (if (>= i b) c
                                           (loop (+ i 1) (if (not (eq? (< (x i) 0.0) (< (x (- i 1)) 0.0))) (+ c 1) c))))))
@@ -141,15 +278,14 @@
            (rough (lambda (a b) (let loop ((i (+ a 1)) (d 0.0) (l 0.0))
                                   (if (>= i b) (/ d (max 1e-9 l))
                                       (loop (+ i 1) (+ d (abs (- (x i) (x (- i 1))))) (+ l (abs (x i)))))))))
-      (assert-equal (* 4 rate) n)
-      ;; after the lock: two crossings a cycle at 880 Hz, within 5 percent
-      (let ((c (crossings (* 25 (quotient rate 10)) (* 30 (quotient rate 10)))))
-        (assert-true (near? (/ c 2.0 0.5) 880.0 44.0)))
+      (assert-equal (at secs) n)
+      ;; half a second after the lock: two crossings a cycle at tone-hi, within 5 percent
+      (let ((c (crossings (at (+ lock 0.3)) (at (+ lock 0.8)))))
+        (assert-true (near? (/ c 2.0 0.5) (knob 'tone-hi) (* 0.05 (knob 'tone-hi)))))
       ;; the static: the first fifth of a second is far rougher, for its
-      ;; level, than the clean tone after the lock (at 44.1 kHz a pure 880 Hz
-      ;; tone steps little between samples; noise does not). Measured 0.77
-      ;; against 0.12.
-      (assert-true (> (rough 0 (quotient rate 5)) (* 3.0 (rough (* 25 (quotient rate 10)) (* 27 (quotient rate 10))))))
+      ;; level, than the clean tone after the lock (at 44.1 kHz a pure tone
+      ;; steps little between samples; noise does not)
+      (assert-true (> (rough 0 (at 0.2)) (* 3.0 (rough (at (+ lock 0.3)) (at (+ lock 0.5))))))
       ;; nothing leaves -1..1
       (let loop ((i 0))
         (when (< i n)

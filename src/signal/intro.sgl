@@ -7,18 +7,29 @@
 ;;; ((signal tunein)): a carrier sweeping up through static to a clean tone.
 ;;; Natively there is no gate; the card starts at once.
 ;;;
-;;; The card (card-len seconds, about 4; any start press or tap skips it):
-;;; the Flux Harmonic mark lies flat on the road (a (signal mode7 decal)),
-;;; seen from straight above. After card-hold seconds the camera tilts down
-;;; to the driving angle, lowering and pulling back, so the mark slides away
-;;; up the road toward the horizon, while the picture's interference (the
-;;; palette pass's tearing) locks clean at tone-lock seconds, as the sound
-;;; does. The camera ends exactly where the title's attract camera begins
-;;; (title-camera of a new title), so the card hands into the title with no
-;;; cut; the mark stays on the road until the attract camera has passed it.
+;;; The card (about 5 seconds; any start press or tap skips it) is four
+;;; beats, each its own knob, with the Flux Harmonic mark lying flat on the
+;;; road (a (signal mode7 decal)):
+;;;   hold  card-hold seconds high above the road (card-height texels),
+;;;         looking straight down: the mark small in a wide view of the track
+;;;   zoom  card-zoom seconds straight down onto the mark, still looking
+;;;         down, until it fills the frame
+;;;   tilt  card-tilt seconds tilting into perspective, to the attract
+;;;         camera's angle a little above its height, swinging back so the
+;;;         mark stays in frame and comes to lie on the road ahead
+;;;   move  card-move seconds pulling back along the racing line and
+;;;         lowering, so the mark recedes up the road, coming to rest
+;;;         exactly where the title's attract camera begins (title-camera
+;;;         of a new title), which then speeds up from rest: no cut and no
+;;;         jolt
+;;; The picture's interference (the palette pass's tearing) and the sound's
+;;; static lock clean together as the zoom arrives on the mark. card-ease
+;;; shapes every beat's ease. The mark stays on the road until the attract
+;;; camera has passed it.
 ;;;
 ;;; Pure, on the race's fixed tick: (intro-step i tuning race gesture? skip?)
-;;; is the next intro. Events, for the music: card-start (the gesture, or
+;;; is the next intro, and (intro-follow i cam) notes the attract camera
+;;; after the hand-off. Events, for the music: card-start (the gesture, or
 ;;; the boot natively) and card-end (the hand-off or a skip). The title knob
 ;;; at 0, the card knob at 0 or the shell's start parameter skip all of it.
 
@@ -33,33 +44,45 @@
           (signal mode7 decal)
           (signal title))
 
-  (export intro intro? intro-new intro-none intro-skip intro-step intro-phase intro-events intro-active?
-          intro-camera intro-fade intro-glitch intro-mark-shown? intro-draw-mark! intro-set-mark!
-          intro-gate-line MARK-S)
+  (export intro intro? intro-new intro-none intro-skip intro-step intro-follow intro-phase intro-events
+          intro-active? intro-camera intro-fade intro-glitch intro-mark-shown? intro-draw-mark!
+          intro-set-mark! intro-gate-line intro-beats intro-length intro-lock intro-mark MARK-S)
 
   (begin
-    ;; phase: gate, card, done. tick: ticks in this phase. after: ticks since
-    ;; the hand-off (the mark stays on the road until the attract camera has
-    ;; passed it).
+    ;; phase: gate, card, done. tick: ticks in this phase. gone: after the
+    ;; hand-off, the attract camera has passed the mark (it is not drawn).
     (define-struct intro
       (phase default: 'done)
       (tick default: 0)
-      (after default: 0)
+      (gone default: #t)
       (events default: '()))
 
     (define (knob tuning k) (tuning-ref tuning k))
     (define (on? tuning) (and (>= (knob tuning 'title) 0.5) (>= (knob tuning 'card) 0.5)))
 
+    ;; The beats' ends, in seconds from the card's start: (hold zoom tilt move).
+    (define (intro-beats tuning)
+      (let* ((a (knob tuning 'card-hold))
+             (b (+ a (knob tuning 'card-zoom)))
+             (c (+ b (knob tuning 'card-tilt)))
+             (d (+ c (knob tuning 'card-move))))
+        (list a b c d)))
+    ;; The card's length, and when the picture and the sound lock clean: as
+    ;; the zoom arrives on the mark.
+    (define (intro-length tuning) (cadddr (intro-beats tuning)))
+    (define (intro-lock tuning) (cadr (intro-beats tuning)))
+
     ;; web?: a gate first. With the title or the card off, done at once.
     (define (intro-new tuning web?)
       (cond ((not (on? tuning)) (intro-none))
-            (web? (intro phase: 'gate))
-            (else (intro phase: 'card))))
-    (define (intro-none) (intro phase: 'done after: 1000000))
+            (web? (intro phase: 'gate gone: #f))
+            (else (intro phase: 'card gone: #f))))
+    (define (intro-none) (intro phase: 'done gone: #t))
 
-    ;; Done at once; a card that had started says it has ended.
+    ;; Done at once (the title is skipped with it, so the mark goes too); a
+    ;; card that had started says it has ended.
     (define (intro-skip i)
-      (intro phase: 'done tick: 0 after: 1000000
+      (intro phase: 'done tick: 0 gone: #t
              events: (if (and (eq? (intro-phase i) 'card) (> (intro-tick i) 0)) (list 'card-end) '())))
 
     (define (intro-active? i) (not (eq? (intro-phase i) 'done)))
@@ -75,30 +98,55 @@
                  (gesture? (intro i phase: 'card tick: 0))
                  (else i)))
           ;; card-start on the card's first tick, however it began; card-end
-          ;; when it hands over or is skipped
+          ;; when it hands over or is skipped. Turned off before its first
+          ;; tick (a native --card=0 lands after the boot), it never began.
           ((card)
            (let* ((t (+ (intro-tick i) 1))
                   (ev (if (= (intro-tick i) 0) (list 'card-start) '())))
-             (if (or (not (on? tuning))
-                     (>= t (ticks (knob tuning 'card-len)))
-                     (and skip? (> t SKIP-AFTER)))
-                 (intro i phase: 'done tick: 0 after: 0 events: (append ev (list 'card-end)))
-                 (intro i tick: t events: ev))))
-          (else (intro i after: (+ (intro-after i) 1))))))
+             (cond ((and (not (on? tuning)) (= (intro-tick i) 0)) (intro-none))
+                   ((or (not (on? tuning))
+                        (>= t (ticks (intro-length tuning)))
+                        (and skip? (> t SKIP-AFTER)))
+                    (intro i phase: 'done tick: 0 gone: #f events: (append ev (list 'card-end))))
+                   (else (intro i tick: t events: ev)))))
+          (else i))))
 
-    ;; --- the card's camera ------------------------------------------------------------
+    ;; After the hand-off, once a tick with the frame's camera (#f when the
+    ;; title no longer flies its own): the mark is gone for good once that
+    ;; camera has passed over it, or the title's camera has handed over.
+    (define (intro-follow i cam race)
+      (if (or (intro-active? i) (intro-gone i))
+          i
+          (let* ((m (intro-mark (race-track race)))
+                 (hd (caddr m))
+                 (past (and cam (+ (* (- (cam-x cam) (car m)) (sin hd))
+                                   (* (- (cam-y cam) (cadr m)) (- (cos hd)))))))
+            (if (or (not past) (> past (* 0.5 (list-ref m 4))))
+                (intro i gone: #t)
+                i))))
+
+    ;; --- the mark ------------------------------------------------------------------
 
     ;; The mark: on the centre line MARK-S texels down the track from the
-    ;; start, MARK-W x MARK-H texels, its top toward the road ahead.
-    (define MARK-S 700.0)
+    ;; start (clear of every pad on both tracks), its top toward the road
+    ;; ahead, MARK-W x MARK-H texels or narrower to keep MARK-EDGE texels of
+    ;; road each side. (x y heading w h).
+    (define MARK-S 560.0)
     (define MARK-W 170.0)
     (define MARK-H 84.0)
-    (define (mark-place tr)
-      (let ((p (track-point tr MARK-S 0.0)))
-        (list (car p) (cadr p) (atan (caddr p) (- (cadddr p))))))
+    (define MARK-EDGE 8.0)
+    (define (intro-mark tr)
+      (let* ((p (track-point tr MARK-S 0.0))
+             (hw (track-hw tr (track-index-at tr MARK-S)))
+             (w (min MARK-W (- (* 2.0 hw) (* 2.0 MARK-EDGE)))))
+        (list (car p) (cadr p) (atan (caddr p) (- (cadddr p))) w (* w (/ MARK-H MARK-W)))))
+
+    ;; --- the card's camera ----------------------------------------------------------
 
     (define TOP-PITCH 1.52)      ; nearly straight down
-    (define TOP-HEIGHT 190.0)    ; the mark about 340 px wide
+    (define TOP-HEIGHT 190.0)    ; the zoom's end: the mark about 330 px wide
+    (define NEAR 330.0)          ; the tilt's end: the camera this far behind the mark,
+    (define LIFT 30.0)           ; and this much above the attract camera's height
 
     (define (lerp a b k) (+ a (* k (- b a))))
     (define PI 3.141592653589793)
@@ -106,47 +154,71 @@
       (let ((d (- b a)))
         (+ a (* k (- d (* 2.0 PI (floor (/ (+ d PI) (* 2.0 PI)))))))))
 
-    ;; The tilt's progress at card time t: held flat for card-hold seconds,
-    ;; then an ease in and out whose steepness is card-tilt.
-    (define (tilt tuning t)
-      (let* ((hold (knob tuning 'card-hold))
-             (len (knob tuning 'card-len))
-             (u (max 0.0 (min 1.0 (/ (- t hold) (max 0.001 (- len hold))))))
-             (a (knob tuning 'card-tilt))
-             (ua (expt u a)) (va (expt (- 1.0 u) a)))
+    ;; A beat's eased progress at card time t, from a for len seconds: an
+    ;; ease in and out whose steepness is card-ease (1 linear).
+    (define (ease tuning t a len)
+      (let* ((u (max 0.0 (min 1.0 (/ (- t a) (max 0.001 len)))))
+             (e (knob tuning 'card-ease))
+             (ua (expt u e)) (va (expt (- 1.0 u) e)))
         (if (= (+ ua va) 0.0) 0.0 (/ ua (+ ua va)))))
 
-    ;; The card's camera at its time; the end pose is the title's first.
-    ;; Position, height, heading and the optical centre's row ease from
-    ;; straight above the mark to the title camera's. The pitch is solved
-    ;; so the mark sits on a row that eases from the middle of the screen to
-    ;; the row it has under the title camera: the mark's depression below
-    ;; level, plus the angle that row sits above the optical centre. So the
-    ;; mark recedes along the road, rising only a little on the screen,
-    ;; while the horizon tilts down into view; at both ends the pitch is
-    ;; exactly the start's and the title camera's.
+    ;; Looking straight down on the mark from height ht, the mark at the
+    ;; middle of the screen.
+    (define (top-camera tuning m ht w h)
+      (let* ((hd (caddr m))
+             (back (/ ht (tan TOP-PITCH)))
+             (f (/ (* 0.5 w) (tan (* 0.5 (knob tuning 'fov))))))
+        (make-cam (- (car m) (* back (sin hd))) (+ (cadr m) (* back (cos hd))) ht hd TOP-PITCH
+                  (knob tuning 'fov) (- (* 0.5 h) (* f (tan TOP-PITCH))) w h)))
+
+    ;; The title's attract camera with its point s along the line, lift
+    ;; texels above its height.
+    (define (line-camera tuning tr s lift w h)
+      (title-camera (title s: (wrap-s tr s))
+                    (tuning-set tuning 'title-height (+ (knob tuning 'title-height) lift))
+                    tr w h))
+    ;; The tilt's end: the attract camera NEAR texels behind the mark.
+    (define (near-s tuning) (- (+ MARK-S (knob tuning 'title-dist)) NEAR))
+
+    ;; The tilt: from the zoom's end (straight above) to the attract camera
+    ;; NEAR behind the mark and LIFT above its height. Position, height,
+    ;; heading and the optical centre's row ease between the two; the
+    ;; pitch is solved so the mark sits on a row easing from the middle of
+    ;; the screen to its row at the end (its depression below level, plus
+    ;; the angle that row sits above the optical centre), so it stays in
+    ;; frame while the horizon tilts down into view. At both ends the pitch
+    ;; is exactly the pose's own.
+    (define (tilt-camera tuning tr m k w h)
+      (let* ((a (top-camera tuning m TOP-HEIGHT w h))
+             (b (line-camera tuning tr (near-s tuning) LIFT w h))
+             (f (cam-focal b))
+             (dep (lambda (cx cy hd ht)
+                    (atan ht (max 1.0 (+ (* (- (car m) cx) (sin hd)) (* (- (cadr m) cy) (- (cos hd))))))))
+             (row-b (- (cam-cy b) (* f (tan (- (cam-pitch b) (dep (cam-x b) (cam-y b) (cam-heading b) (cam-height b)))))))
+             (x (lerp (cam-x a) (cam-x b) k)) (y (lerp (cam-y a) (cam-y b) k))
+             (ht (lerp (cam-height a) (cam-height b) k))
+             (hd (angle-lerp (cam-heading a) (cam-heading b) k))
+             (cy (lerp (cam-cy a) (cam-cy b) k))
+             (row (lerp (* 0.5 h) row-b k))
+             (pitch (+ (dep x y hd ht) (atan (- cy row) f))))
+        (make-cam x y ht hd pitch (cam-fov b) (- cy (* f (tan pitch))) w h)))
+
+    ;; The card's camera at card time t.
     (define (card-camera tuning tr t w h)
-      (let* ((end (title-camera (title-new) tuning tr w h))
-             (m (mark-place tr))
-             (f (cam-focal end))
-             (h0 (caddr m))
-             (k (tilt tuning t))
-             ;; the start: the camera straight above the mark, its centre on it
-             (back (/ TOP-HEIGHT (tan TOP-PITCH)))
-             (x0 (- (car m) (* back (sin h0))))
-             (y0 (+ (cadr m) (* back (cos h0))))
-             (x (lerp x0 (cam-x end) k)) (y (lerp y0 (cam-y end) k))
-             (height (lerp TOP-HEIGHT (cam-height end) k))
-             (heading (angle-lerp h0 (cam-heading end) k))
-             (cy (lerp (* 0.5 h) (cam-cy end) k))
-             ;; the mark's depression below level, along the camera's view
-             (dep (lambda (cx cy* hd ht)
-                    (atan ht (max 1.0 (+ (* (- (car m) cx) (sin hd)) (* (- (cadr m) cy*) (- (cos hd))))))))
-             (dep-end (dep (cam-x end) (cam-y end) (cam-heading end) (cam-height end)))
-             (row-end (- (cam-cy end) (* f (tan (- (cam-pitch end) dep-end)))))
-             (row (lerp (* 0.5 h) row-end k))
-             (pitch (+ (dep x y heading height) (atan (- cy row) f))))
-        (make-cam x y height heading pitch (cam-fov end) (- cy (* f (tan pitch))) w h)))
+      (let* ((bs (intro-beats tuning))
+             (m (intro-mark tr)))
+        (cond ((< t (cadr bs))
+               ;; hold, then zoom: the height eases geometrically, so the
+               ;; mark grows at an even rate
+               (let ((k (ease tuning t (car bs) (- (cadr bs) (car bs))))
+                     (h0 (max 1.0 (knob tuning 'card-height))))
+                 (top-camera tuning m (exp (lerp (log h0) (log TOP-HEIGHT) k)) w h)))
+              ((< t (caddr bs))
+               (tilt-camera tuning tr m (ease tuning t (cadr bs) (- (caddr bs) (cadr bs))) w h))
+              (else
+               ;; the move: back along the line and down, to rest at the start
+               (let ((k (ease tuning t (caddr bs) (- (cadddr bs) (caddr bs)))))
+                 (line-camera tuning tr (lerp (near-s tuning) 0.0 k) (lerp LIFT 0.0 k) w h))))))
 
     ;; The frame's camera: the card's while it runs (the gate's frame sits
     ;; on the card's first pose, under black), else #f.
@@ -160,22 +232,17 @@
     (define (intro-fade i) (if (eq? (intro-phase i) 'gate) 1.0 0.0))
 
     ;; The picture's interference 0..1: strong as the card starts, locking
-    ;; clean at tone-lock seconds, as the sound does.
+    ;; clean as the zoom arrives, as the sound does.
     (define (intro-glitch i tuning)
       (if (eq? (intro-phase i) 'card)
-          (let ((u (min 1.0 (/ (/ (intro-tick i) 60.0) (knob tuning 'tone-lock)))))
+          (let ((u (min 1.0 (/ (/ (intro-tick i) 60.0) (max 0.001 (intro-lock tuning))))))
             (* 0.9 (- 1.0 u) (- 1.0 u)))
           0.0))
 
-    ;; The mark is on the road through the card, and after the hand-off until
-    ;; the attract camera (title-dist behind its point, flying at
-    ;; title-speed from the start) has passed over it.
-    (define (intro-mark-shown? i tuning)
-      (case (intro-phase i)
-        ((card gate) #t)
-        (else (< (intro-after i)
-                 (ticks (/ (+ MARK-S (knob tuning 'title-dist) (* 0.5 MARK-H))
-                           (max 1.0 (knob tuning 'title-speed))))))))
+    ;; The mark is on the road through the card, and after the hand-off
+    ;; until the attract camera has passed over it (intro-follow).
+    (define (intro-mark-shown? i)
+      (or (intro-active? i) (not (intro-gone i))))
 
     (define *mark* #f)
     (define *mark-size* (list 380 188))
@@ -183,8 +250,8 @@
 
     (define (intro-draw-mark! c race)
       (when *mark*
-        (let ((m (mark-place (race-track race))))
-          (draw-decal! c *mark* (car m) (cadr m) (caddr m) MARK-W MARK-H
+        (let ((m (intro-mark (race-track race))))
+          (draw-decal! c *mark* (car m) (cadr m) (caddr m) (cadddr m) (list-ref m 4)
                        (car *mark-size*) (cadr *mark-size*)))))
 
     ;; The gate's line, by the pointer the page reported.
