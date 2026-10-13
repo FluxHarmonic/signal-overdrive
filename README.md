@@ -177,3 +177,12 @@ The knobs, from `signal-overdrive --knobs` (units are world texels, seconds and 
 
 Tests: `scripts/dev sigil test --sgl test/test-handling.sgl` (and
 `test-track`, `test-camera`, `test-race`, `test-sound`).
+
+Conductor checks: `scripts/test-conductor`, `scripts/test-score` and
+`scripts/test-reference`; effects state checks are in `test/test-fx.sgl`.
+The captured-audio drift gate is a separate opt-in target, currently
+**known RED**, with unchanged thresholds and reproducible evidence in
+[`scripts/drift/README.md`](scripts/drift/README.md). It does not make
+the default tests or effects gates fail. The stable song/tick interface
+for effects and title integration is in
+[`docs/CONDUCTOR.md`](docs/CONDUCTOR.md).

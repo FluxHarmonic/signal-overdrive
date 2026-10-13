@@ -33,6 +33,24 @@ miss an earlier pulse. World effects should not read the audio player,
 sink depth, intended jump log or wall time to determine musical position.
 Drawing interpolation remains a later step.
 
+Beat and bar events use successive conductors **within the tick loop**:
+a changed `conductor-bar` is a bar event, and a changed bar or beat is a
+beat event. Row zero of a new bar is its downbeat. This observes musical
+boundaries even on rows with no TRIGGER; the onset mask separately drives
+channel-specific effects. Reset observers when the song tick decreases
+or a new race starts. Effects already receive a tick-by-tick pulse through
+`(signal fx beat)`; its stub can be replaced from these reads without
+depending on the audio adapter.
+
+The title integration can observe `race-phase` transitions on the same
+race state: entering `title` means title-enter, leaving it for `countdown`
+means title-exit/race-start, and `countdown` to `race` is GO. `race-new`
+starts `calm`; `race-start` starts `grid` at song tick zero. Enter/Start
+or `core-tap!` requests the existing start path. These are observation
+seams for the forthcoming title hooks, not newly introduced callback APIs.
+Pause freezes the song; a returning focus frame discards its hidden
+interval. Keep title animation and effects reads independent of the sink.
+
 `scripts/compile-score` runs Motif's `compile-tune` before the package's
 runtime modules compile. It generates `src/signal/music/score.sgl`.
 Runtime modules read this data and never compile a tune during a race.
@@ -114,7 +132,8 @@ then published in one accepted push. A fresh tick-zero stream discards
 its initialization interval and fixed-clock remainder, so setup time is
 not counted as progress in the new song. Native drawing is warmed once
 at zero dt before audio starts. Subsequent audio service runs before
-drawing; resync projection includes the fixed clock's fractional tick.
+drawing; resync projection includes the fixed clock's fractional tick
+and elapsed work since the conductor's monotonic frame-start timestamp.
 This fraction is used for audio timing only, without drawing interpolation.
 
 `test/test-music-sink.sgl` exercises the actual native ring with the
@@ -169,3 +188,10 @@ from the audible reading), `immediate` (hand over planned marks at once)
 and `skew` (plant 1% in the shell clock and disable its nudge). `none`
 restores the normal path. Resync remains active, so each arm tests the
 actual system including its recovery behavior.
+
+The actual drift gate is **known RED** under Leader 14:58's integration
+plan. It remains a separate opt-in target with unchanged p95 30 ms,
+worst 60 ms and 95% correlation-coverage requirements. The latest full
+native headless race has zero sounding underruns, p95 49.01 ms drift,
+worst 111.40 ms and 59.43% coverage; no captured sabotage acceptance is
+claimed. See `scripts/drift/README.md` for evidence and reproduction.

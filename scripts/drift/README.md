@@ -1,5 +1,25 @@
 # Conductor drift gate
 
+**Known RED (Leader 14:58, 2026-10-13).** This is a separate opt-in
+diagnostic target; it is not part of default source tests or effects gates.
+Its thresholds and nonzero exit on a failed normal capture remain intact.
+The conductor is being prepared for integration with this failure recorded;
+a fresh worker takes the drift investigation. No captured sabotage PASS
+has been established.
+
+| Actual normal capture | p95 | Worst | Matching coverage | Sounding underruns | Resyncs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Checkpoint 33, best worst-error result with zero underruns | 55.86 ms | 83.83 ms | 62.45% | 0 | 14 |
+| Checkpoint 37, latest integrated effects runtime | 49.01 ms | 111.40 ms | 59.43% | 0 | 18 |
+
+Evidence is in `build/conductor-checkpoint33-scheduling/` and
+`build/conductor-checkpoint37-effects-normal/`: raw PCM, intended simulation
+log, byte clocks, routing metadata, collection/scheduling samples and verdicts.
+Latest live music-frame cost is p50 4.2 ms, p95 10.6 ms, worst 126.4 ms;
+the 2 ms target is not met. The 250 ms default ring completed the latest
+native headless full race without sounding underruns. A short ring under
+4x throttle has not been established and is not shipped.
+
 The capture runs an actual native autopilot race on a private Xvfb and
 the existing worker-null sink. It forces PulseAudio and verifies the
 game's own stream routing. It never starts a host or plays on speakers.
