@@ -784,16 +784,25 @@ async function exportFor(name, dir) {
     fs.writeFileSync(path.join(dir, "logo-glitch.js"), glitchScript(frames.length - 1));
   }
   fs.writeFileSync(path.join(dir, "EMBED.txt"), embedNote(name, word, glitches));
-  // og.png: the bare title frame with the still wordmark where the title
-  // animation sits, at 2x, centred on the ground
-  const t = JSON.parse(fs.readFileSync(path.join(from, "title.json"), "utf8"));
-  const frame = readRGBA(path.join(ROOT, "docs/logo/frames/title-bare.png"));
-  const still = readRGBA(path.join(from, "title.png"));
-  // the frame the animation rests on: the last of the loop, away from the beat
-  const rest = new Canvas(t.w, t.h);
-  const f = t.frames - 1, sx = (f % t.cols) * t.w, sy = Math.floor(f / t.cols) * t.h;
-  for (let y = 0; y < t.h; y++) rest.px.set(still.px.subarray(((sy + y) * still.w + sx) * 4, ((sy + y) * still.w + sx + t.w) * 4), y * t.w * 4);
-  over(frame, rest, t.x, t.y);
+  // og.png: the title screen as the game draws it, at 2x, centred on the
+  // ground. docs/logo/frames/title-og.png is a capture of the web build's
+  // title with ?nohud (the logo drawn by the game, no prompt); without one,
+  // the bare title frame with the still wordmark where the title rests.
+  const ogCapture = path.join(ROOT, "docs/logo/frames/title-og.png");
+  let frame;
+  if (fs.existsSync(ogCapture)) {
+    frame = readRGBA(ogCapture);
+    if (frame.w !== VIEW_W || frame.h !== VIEW_H) throw new Error(`${ogCapture}: ${frame.w}x${frame.h}, not the ${VIEW_W}x${VIEW_H} view`);
+  } else {
+    const t = JSON.parse(fs.readFileSync(path.join(from, "title.json"), "utf8"));
+    frame = readRGBA(path.join(ROOT, "docs/logo/frames/title-bare.png"));
+    const still = readRGBA(path.join(from, "title.png"));
+    // the frame the animation rests on: the last of the loop, away from the beat
+    const rest = new Canvas(t.w, t.h);
+    const f = t.frames - 1, sx = (f % t.cols) * t.w, sy = Math.floor(f / t.cols) * t.h;
+    for (let y = 0; y < t.h; y++) rest.px.set(still.px.subarray(((sy + y) * still.w + sx) * 4, ((sy + y) * still.w + sx + t.w) * 4), y * t.w * 4);
+    over(frame, rest, t.x, t.y);
+  }
   const og = new Canvas(1200, 630);
   og.rect(0, 0, 1200, 630, "#0D0A1A");
   over(og, scaled(frame, 2), 120, 45);

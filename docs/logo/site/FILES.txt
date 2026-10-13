@@ -16,4 +16,4 @@ logo-glitch-7.png  696x96  sha256 8cba8afd2767d966
 logo-glitch-8.png  696x96  sha256 2ef9acfc15950797
 logo-glitch.js  1911 bytes  sha256 ca8201b86e719686
 logo.png  696x96  sha256 2ec5ff2af679be83
-og.png  1200x630  sha256 62e813fa4dc74121
+og.png  1200x630  sha256 bdbbc072d9ce503e
