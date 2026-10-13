@@ -3,8 +3,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { spawn, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { analyze, parseTrace } from "./analyze.mjs";
+import { cachedTool, localProcesses, privateDisplay, sleep } from "./native.mjs";
 
 const ROOT = path.resolve(process.env.CONDUCTOR_ROOT || process.cwd());
 const RUN = path.resolve(process.argv[2]);
@@ -13,31 +14,8 @@ if (!["normal", "depth", "immediate", "skew"].includes(ARM)) throw new Error("in
 const BIN = path.resolve(process.env.CONDUCTOR_BINARY || path.join(ROOT, "build/release/bin/signal-overdrive"));
 if (!fs.existsSync(BIN)) throw new Error("no release binary");
 fs.mkdirSync(RUN, { recursive: true });
-const cpu = fs.readFileSync("/proc/self/status", "utf8").match(/^Cpus_allowed_list:\s*(\d+)/m)?.[1];
-if (!cpu) throw new Error("no allowed CPU");
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const children = new Set();
-function launch(command, args, options = {}) {
-  const child = spawn("taskset", ["-c", cpu, "nice", "-n", "15", command, ...args],
-    { cwd: ROOT, detached: true, ...options });
-  children.add(child);
-  child.on("exit", () => children.delete(child));
-  return child;
-}
-function stop(child, signal = "SIGTERM") {
-  if (child && child.exitCode === null) {
-    try { process.kill(-child.pid, signal); } catch { /* already exited */ }
-  }
-}
-function cachedTool(name, packagePrefix) {
-  try { return execFileSync("sh", ["-c", 'command -v "$1"', "sh", name], { encoding: "utf8" }).trim(); }
-  catch {
-    const file = fs.readdirSync("/gnu/store").filter(entry => entry.includes(`-${packagePrefix}-`))
-      .map(entry => `/gnu/store/${entry}/bin/${name}`).find(file => fs.existsSync(file));
-    if (!file) throw new Error(`no cached ${name}; no package fetch is permitted`);
-    return file;
-  }
-}
+const pool = localProcesses(ROOT);
+const { cpu, children, launch, stop } = pool;
 const pulse = args => execFileSync("pactl", args, { encoding: "utf8", timeout: 5000 });
 let logFD, capFD, clockFD, gameText = "", captureBytes = 0;
 let game, capture, xserver, reference;
@@ -48,18 +26,9 @@ try {
   if (!nullSink) throw new Error("worker-null is absent; refusing to initialize audio");
   if (!pulse(["list", "short", "sources"]).split("\n").some(line => line.split(/\s+/)[1] === "worker-null.monitor"))
     throw new Error("worker-null monitor is absent");
-  const xerr = fs.openSync(path.join(RUN, "xvfb.log"), "w");
-  xserver = launch(cachedTool("Xvfb", "xorg-server"), ["-displayfd", "3", "-screen", "0", "1600x1000x24", "-nolisten", "tcp", "-noreset"],
-    { stdio: ["ignore", "ignore", xerr, "pipe"] });
-  fs.closeSync(xerr);
-  let displayText = "";
-  xserver.stdio[3].on("data", bytes => { displayText += bytes; });
-  for (let i = 0; i < 100 && !/^\d+\s*$/.test(displayText); i++) {
-    if (xserver.exitCode !== null) throw new Error("Xvfb exited");
-    await sleep(50);
-  }
-  if (!/^\d+\s*$/.test(displayText)) throw new Error("Xvfb did not allocate a private display");
-  const env = { ...process.env, DISPLAY: `:${displayText.trim()}`, SIGIL_APP_PLATFORM: "x11",
+  const privateX = await privateDisplay(pool, RUN);
+  xserver = privateX.child;
+  const env = { ...process.env, DISPLAY: privateX.display, SIGIL_APP_PLATFORM: "x11",
     SIGIL_AUDIO_BACKEND: "pulseaudio", SIGIL_AUDIO_VERBOSE: "1", PULSE_SINK: "worker-null",
     PIPEWIRE_NODE: "worker-null", XDG_DATA_HOME: path.join(RUN, "xdg"),
     LIBGL_ALWAYS_SOFTWARE: "1", LP_NUM_THREADS: "1", GALLIUM_DRIVER: "llvmpipe" };
@@ -145,10 +114,6 @@ try {
   console.error(`SETUP-FAILED: ${error.message}`); process.exitCode = 125;
 } finally {
   clearTimeout(timeout);
-  for (const child of children) {
-    stop(child, "SIGKILL");
-    child.stdout?.removeAllListeners("data");
-    child.stderr?.removeAllListeners("data");
-  }
+  pool.cleanup();
   for (const fd of [logFD, capFD, clockFD]) if (fd !== undefined) fs.closeSync(fd);
 }

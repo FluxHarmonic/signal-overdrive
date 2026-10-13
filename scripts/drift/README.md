@@ -6,6 +6,11 @@ game's own stream routing. It never starts a host or plays on speakers.
 Local processes use one allowed CPU and nice 15; each arm has a ten-minute
 limit. Cached Xvfb and xdotool are required; the driver does not fetch them.
 
+`node scripts/drift/focus.mjs RUNDIR` tests native focus loss separately,
+muted. It copies the binary, opens a private Xvfb, unmaps/remaps only its
+own window and checks frozen/resumed ticks from dated clock samples.
+It has a one-minute limit and writes RESULT plus binary-hash metadata.
+
 The analyzer correlates 3 kHz amplitude envelopes, with 1.5-second windows
 at each beat across the full race. It dates each reference window from the
 simulation's clock trace, requires at least 95% matching coverage and
@@ -36,6 +41,8 @@ actual-game gate from the synthetic checks.
 checks the offline command against a 7.5-second grid→lap1 render. The
 build has a 30-minute timeout and the smoke check a two-minute timeout.
 Poll RUNDIR/RESULT; it also records the source commit and logs.
+`scripts/drift/build-candidate RUNDIR smoke` checks an existing release
+without rebuilding it.
 
 After that candidate passes, run one arm at a time from the repository root:
 

@@ -4,6 +4,7 @@
 set -u
 cd "$(dirname "$0")/../.." || exit 2
 CONDUCTOR_RUN="$1"
+CONDUCTOR_MODE="${2:-build}"
 mkdir -p "$CONDUCTOR_RUN"
 rm -f "$CONDUCTOR_RUN/RESULT" "$CONDUCTOR_RUN/RESULT.tmp"
 git rev-parse HEAD > "$CONDUCTOR_RUN/COMMIT"
@@ -13,12 +14,16 @@ export ZIG_LOCAL_CACHE_DIR=/tmp/signal-conductor-zig-local
 export ZIG_GLOBAL_CACHE_DIR=/tmp/signal-conductor-zig-global
 ulimit -v 4194304
 CONDUCTOR_CPU="$(awk '/Cpus_allowed_list/ {split($2,a,","); split(a[1],b,"-"); print b[1]}' /proc/self/status)"
-timeout 1800 taskset -c "$CONDUCTOR_CPU" nice -n 15 scripts/dev \
-  /home/daviwil/.sigil/versions/0.22.11/sigil build --config release \
-  > "$CONDUCTOR_RUN/build.log" 2>&1
-CONDUCTOR_CODE="$?"
+if [ "$CONDUCTOR_MODE" = "smoke" ]; then
+  CONDUCTOR_CODE=0
+else
+  timeout 1800 taskset -c "$CONDUCTOR_CPU" nice -n 15 scripts/dev \
+    /home/daviwil/.sigil/versions/0.22.11/sigil build --config release \
+    > "$CONDUCTOR_RUN/build.log" 2>&1
+  CONDUCTOR_CODE="$?"
+fi
 if [ "$CONDUCTOR_CODE" -eq 0 ]; then
-  printf '(#(0 0 grid) #(411 4 lap1))\n' > "$CONDUCTOR_RUN/smoke.sgv"
+  printf '(#(0 0 grid) #(412 4 lap1))\n' > "$CONDUCTOR_RUN/smoke.sgv"
   : > "$CONDUCTOR_RUN/smoke.pcm"
   env SIGIL_AUDIO_BACKEND=null SIGIL_APP_PLATFORM=x11 DISPLAY= WAYLAND_DISPLAY= \
     timeout 120 taskset -c "$CONDUCTOR_CPU" nice -n 15 scripts/dev \
@@ -36,7 +41,7 @@ if [ "$CONDUCTOR_CODE" -eq 0 ]; then
   fi
 fi
 if [ "$CONDUCTOR_CODE" -eq 0 ]; then
-  printf 'RESULT: PASS (release build and offline CLI smoke)\n' > "$CONDUCTOR_RUN/RESULT.tmp"
+  printf 'RESULT: PASS (%s; offline CLI smoke)\n' "$CONDUCTOR_MODE" > "$CONDUCTOR_RUN/RESULT.tmp"
 else
   printf 'RESULT: FAIL (exit %s)\n' "$CONDUCTOR_CODE" > "$CONDUCTOR_RUN/RESULT.tmp"
 fi
