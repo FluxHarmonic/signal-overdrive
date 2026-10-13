@@ -34,6 +34,9 @@
 //   preview    og:image and twitter:image name https://signaloverdrive.net/
 //              shots/og.png, a 1200x630 PNG in the tree; og:url and the
 //              canonical link are https://signaloverdrive.net/
+//   logo       the wordmark steps through its glitch frames by itself, and
+//              under prefers-reduced-motion stays /logo.png for a whole
+//              glitch cycle (the glitch is the positive control)
 //   play       PLAY 0.1 is a disabled button that says so, a click on it goes
 //              nowhere, the page says it is coming soon, and nothing on the
 //              landing links the game's path yet
@@ -101,7 +104,8 @@ const text = (p) => fs.readFileSync(path.join(DIR, p), "utf8");
 
 // ---- tree ------------------------------------------------------------------------------
 {
-  const want = ["index.html", "404.html", "style.css", "logo.png", "favicon.png", "favicon.ico", "mark.png", "shots/og.png",
+  const want = ["index.html", "404.html", "style.css", "logo.png", "logo-glitch.js", ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => `logo-glitch-${n}.png`),
+                "favicon.png", "favicon.ico", "apple-touch-icon.png", "mark.png", "shots/og.png",
                 "fonts/OFL.txt", "fonts/JetBrainsMono-Regular.woff2", "fonts/JetBrainsMono-Bold.woff2", "fonts/JetBrainsMono-Italic.woff2",
                 `${SLUG}/index.html`];
   const missing = want.filter((f) => !files.includes(f));
@@ -264,7 +268,7 @@ try {
     })()`);
     if (f.title !== "Signal Overdrive") detail.push(`title "${f.title}"`);
     if (!f.logo) detail.push("the h1 holds no logo image");
-    else if (f.logo[0] !== "/logo.png" || f.logo[1] !== "Signal Overdrive" || !f.logo[2] || f.logo[3] !== "291x27") detail.push(`the h1's logo is ${f.logo.join(" ")} (want /logo.png "Signal Overdrive", decoded, 291x27)`);
+    else if (f.logo[0] !== "/logo.png" || f.logo[1] !== "Signal Overdrive" || !f.logo[2] || f.logo[3] !== "696x96") detail.push(`the h1's logo is ${f.logo.join(" ")} (want /logo.png "Signal Overdrive", decoded, 696x96)`);
     for (const want of ["JetBrains Mono/normal/400/loaded", "JetBrains Mono/normal/700/loaded", "JetBrains Mono/italic/400/loaded"]) {
       if (!f.faces.includes(want)) detail.push(`font ${want.split("/").slice(0, 3).join(" ")} not loaded (${f.faces.join(", ")})`);
     }
@@ -302,6 +306,36 @@ try {
     else if (dims.join("x") !== "1200x630" || m.w !== "1200" || m.h !== "630") detail.push(`shots/og.png is ${dims.join("x")}, the page says ${m.w}x${m.h} (want 1200x630)`);
     detail.length ? bad("preview", detail.join("; "))
       : ok("preview", `og:image and twitter:image are ${want}, a 1200x630 PNG in the tree; og:url and the canonical link are ${REAL}/`);
+  }
+
+  // ---- logo: the glitch, and the still logo under reduced motion ------------------------------
+  // a MutationObserver on the logo's src for 9.5 s (one glitch cycle is 8.8 s)
+  {
+    const detail = [];
+    const watch = `new Promise((r) => { const img = document.querySelector("h1.logo img"); if (!img) return r(null);
+      const seen = [img.getAttribute("src")]; const mo = new MutationObserver(() => seen.push(new URL(img.src).pathname));
+      mo.observe(img, { attributes: true, attributeFilter: ["src"] });
+      setTimeout(() => { mo.disconnect(); r({ seen, glitch: img.dataset.glitch || null, now: new URL(img.src).pathname }); }, 9500); })`;
+    // the positive control: without the preference the observer sees a glitch frame
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 1, y: 1 });
+    await visit("/");
+    const moving = await evalJS(watch);
+    if (!moving) detail.push("no h1.logo img on the landing");
+    else {
+      if (moving.seen[0] !== "/logo.png") detail.push(`the page's own src is ${moving.seen[0]} (want /logo.png, what shows with JS off)`);
+      if (moving.glitch !== "/logo-glitch-{n}.png") detail.push(`data-glitch is ${moving.glitch}`);
+      const frames = moving.seen.filter((u) => /^\/logo-glitch-[1-8]\.png$/.test(u));
+      if (!frames.length) detail.push(`no glitch frame in 9.5 s (src went ${moving.seen.join(" ")}): the observer saw nothing to tell the two cases apart`);
+      // under prefers-reduced-motion: the still logo, and nothing else, for the whole window
+      await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+      await visit("/");
+      const still = await evalJS(watch);
+      await send("Emulation.setEmulatedMedia", { features: [] });
+      const other = still.seen.filter((u) => u !== "/logo.png");
+      if (other.length || still.now !== "/logo.png") detail.push(`under prefers-reduced-motion the logo showed ${[...new Set(other)].join(" ") || still.now}`);
+      if (!detail.length) ok("logo", `the logo glitched by itself (${frames.length} frame changes in 9.5 s: ${[...new Set(frames)].join(" ")}); under prefers-reduced-motion it stayed /logo.png for 9.5 s; the page's own src is /logo.png`);
+    }
+    if (detail.length) bad("logo", detail.join("; "));
   }
 
   // ---- play: disabled until 0.1 ------------------------------------------------------------

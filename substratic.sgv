@@ -34,7 +34,8 @@
   site: (source: "site"
          copy: tracked
          required: ("index.html" "404.html" "robots.txt" "_headers" "_redirects" "style.css"
-                    "logo.png" "favicon.png" "favicon.ico" "mark.png" "shots/og.png" "fonts/OFL.txt"))
+                    "logo.png" "logo-glitch.js" "favicon.png" "favicon.ico" "apple-touch-icon.png"
+                    "mark.png" "shots/og.png" "fonts/OFL.txt"))
   ;; the site's own legs of check-site: the landing, the disabled PLAY 0.1,
   ;; the phone width, the 404, the analytics, and the game path's isolation
   check: (arm: "scripts/check-site-arm.mjs"

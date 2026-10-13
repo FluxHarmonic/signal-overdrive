@@ -38,22 +38,23 @@ a:hover { color: var(--magenta); }
 
 main, footer { max-width: 992px; margin: 0 auto; padding: 0 16px; }
 
-/* The logo: the title screen's wordmark in the game's 5x7 font
-   (scripts/art/gen-site.mjs), 291x27, drawn at a whole scale: 1x on a
-   phone, 2x from 640 CSS px, 3x from 960. */
+/* The logo: the CORRUPT wordmark, drawn at 2x (696x96; logo-1x.png and
+   logo-4x.png are the same art at 348x48 and 1392x192). Shown at a whole
+   scale of its pixels: 348 px wide (1x) on a phone, 696 px from 728 CSS px.
+   /logo-glitch.js steps it through logo-glitch-1..8.png now and then; the
+   still logo.png stays with JS off and under prefers-reduced-motion. */
 header { text-align: center; padding: 4rem 0 2rem; }
 h1.logo { margin: 0; line-height: 0; }
 h1.logo img {
   display: block;
-  width: 291px;
+  width: 348px;
   max-width: 100%;
   height: auto;
   margin: 0 auto;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
-@media (min-width: 640px) { h1.logo img { width: 582px; } }
-@media (min-width: 960px) { h1.logo img { width: 873px; } }
+@media (min-width: 728px) { h1.logo img { width: 696px; } }
 .tagline { margin: 1.4rem 0 0; color: var(--ink-dim); font-style: italic; }
 
 /* The pictures: 480x270 frames from the game, drawn crisp at a whole scale
