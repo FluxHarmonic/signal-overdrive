@@ -252,14 +252,17 @@
 
     // the URL: every non-fx parameter kept, the fx ones that differ from the defaults
     function syncUrl() {
-      var q = new URLSearchParams(location.search);
-      Array.from(q.keys()).forEach(function (k) { if (k.indexOf("fx-") === 0 || k === "showcase") q.delete(k); });
-      FX.forEach(function (f) { if (state[f.k] !== 1) q.set(f.k, fmt(state[f.k])); });
-      if (state.solo) q.set("fx-solo", fmt(state.solo));
-      if (state.showcase) q.set("fx-showcase", "1");
-      if (state.tier >= 0) q.set("fx-tier", fmt(state.tier));
-      var s = q.toString();
-      history.replaceState(null, "", location.pathname + (s ? "?" + s.replace(/%2C/g, ",") : ""));
+      // the other parameters kept exactly as written: a bare flag (?mute)
+      // is not the same parameter to the game as ?mute=
+      var q = location.search.replace(/^\?/, "").split("&").filter(function (s) {
+        var k = s.split("=")[0];
+        return s && k.indexOf("fx-") !== 0 && k !== "showcase";
+      });
+      FX.forEach(function (f) { if (state[f.k] !== 1) q.push(f.k + "=" + fmt(state[f.k])); });
+      if (state.solo) q.push("fx-solo=" + fmt(state.solo));
+      if (state.showcase) q.push("fx-showcase=1");
+      if (state.tier >= 0) q.push("fx-tier=" + fmt(state.tier));
+      history.replaceState(null, "", location.pathname + (q.length ? "?" + q.join("&") : ""));
     }
     var KNOB = { solo: "fx-solo", showcase: "fx-showcase", tier: "fx-tier" };
     function set(k, v) { state[k] = v; send((KNOB[k] || k) + "=" + fmt(v)); syncUrl(); render(); }

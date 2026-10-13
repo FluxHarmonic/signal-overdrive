@@ -15,6 +15,7 @@
 //   {"wait": 1500}                       ms
 //   {"waitLine": "phase race", "ms": 30000}   a console line from the game
 //   {"shot": "warp.png"}                 the canvas, into --out
+//   {"screen": "panel.png"}              the whole page, DOM and all
 //   {"measure": 10, "label": "all on"}   rAF intervals for N seconds:
 //       frames, fps, mean, p50, p99, max ms, and how many intervals were
 //       over 20 ms (a missed refresh at 60 Hz) and over 33 ms (a hitch)
@@ -143,6 +144,11 @@ for (const step of STEPS) {
     const d = await evalJS(`new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => { const c = document.getElementById("stage"); r([c.width, c.height, c.toDataURL("image/png")]); })))`);
     fs.writeFileSync(path.join(OUT, step.shot), Buffer.from(d[2].split(",")[1], "base64"));
     console.log(`shot ${step.shot} (${d[0]}x${d[1]})`);
+  } else if (step.screen) {
+    // the whole page, DOM included (the effects panel)
+    const r = await send("Page.captureScreenshot", { format: "png" });
+    fs.writeFileSync(path.join(OUT, step.screen), Buffer.from(r.data, "base64"));
+    console.log(`screen ${step.screen}`);
   } else if (step.measure) {
     const iv = await evalJS(`new Promise((res) => { const iv = []; let last = null; const end = performance.now() + ${step.measure * 1000};
       function f(t) { if (last !== null) iv.push(t - last); last = t; if (t < end) requestAnimationFrame(f); else res(iv); } requestAnimationFrame(f); })`);
