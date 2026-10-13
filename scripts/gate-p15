@@ -25,7 +25,13 @@
 set -eu
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="${1:-$REPO/build/web}"
-OUT="$(mktemp -d /tmp/gate-p15-XXXXXX)"
+if [ -n "${P15_OUT:-}" ]; then
+  OUT="$P15_OUT"
+  [ ! -e "$OUT" ] || { echo "SETUP-FAILED: P15_OUT must be a fresh directory"; exit 2; }
+  mkdir -p "$OUT"
+else
+  OUT="$(mktemp -d /tmp/gate-p15-XXXXXX)"
+fi
 SCALE=2
 cat > "$OUT/steps.json" <<'EOF'
 [{"wait": 2500}, {"shot": "off1.png"}, {"wait": 700}, {"shot": "off2.png"},
@@ -43,6 +49,13 @@ done
 W=$((480 * SCALE)); H=$((270 * SCALE))
 ROAD_Y=$((82 * SCALE)); ROAD_H=$((H - ROAD_Y)); SKY_H=$((70 * SCALE))
 count() {   # count A B HEIGHT Y: differing pixels in the band
+  if [ -n "${P15_IMAGEMAGICK_BIN:-}" ]; then
+    "$P15_IMAGEMAGICK_BIN/convert" "$1" -crop "${W}x$3+0+$4" +repage "$OUT/a.png"
+    "$P15_IMAGEMAGICK_BIN/convert" "$2" -crop "${W}x$3+0+$4" +repage "$OUT/b.png"
+    ("$P15_IMAGEMAGICK_BIN/compare" -metric AE "$OUT/a.png" "$OUT/b.png" null: 2>&1 || true) |
+      tail -1 | awk '{print $1}' | grep -E '^[0-9]+$' || true
+    return
+  fi
   guix shell imagemagick -- sh -c "convert '$1' -crop ${W}x$3+0+$4 +repage png:- > '$OUT/a.png'; \
     convert '$2' -crop ${W}x$3+0+$4 +repage png:- > '$OUT/b.png'; \
     compare -metric AE '$OUT/a.png' '$OUT/b.png' null: 2>&1 || true" | tail -1 | awk '{print $1}' |
