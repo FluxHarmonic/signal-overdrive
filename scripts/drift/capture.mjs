@@ -13,6 +13,7 @@ const ARM = process.argv[3] || "normal";
 if (!["normal", "depth", "immediate", "skew"].includes(ARM)) throw new Error("invalid capture arm");
 const GL_THREADS = process.env.CONDUCTOR_GL_THREADS || "1";
 if (!["1", "2"].includes(GL_THREADS)) throw new Error("at most two software-rendering threads");
+const HEADLESS = process.env.CONDUCTOR_HEADLESS === "1";
 const BIN = path.resolve(process.env.CONDUCTOR_BINARY || path.join(ROOT, "build/release/bin/signal-overdrive"));
 if (!fs.existsSync(BIN)) throw new Error("no release binary");
 fs.mkdirSync(RUN, { recursive: true });
@@ -28,7 +29,7 @@ try {
   if (!nullSink) throw new Error("worker-null is absent; refusing to initialize audio");
   if (!pulse(["list", "short", "sources"]).split("\n").some(line => line.split(/\s+/)[1] === "worker-null.monitor"))
     throw new Error("worker-null monitor is absent");
-  const privateX = await privateDisplay(pool, RUN);
+  const privateX = HEADLESS ? { display: "", child: null } : await privateDisplay(pool, RUN);
   xserver = privateX.child;
   const env = { ...process.env, DISPLAY: privateX.display, SIGIL_APP_PLATFORM: "x11",
     SIGIL_AUDIO_BACKEND: "pulseaudio", SIGIL_AUDIO_VERBOSE: "1", PULSE_SINK: "worker-null",
@@ -51,6 +52,7 @@ try {
   await sleep(300);
   if (capture.exitCode !== null) throw new Error("parec failed to open the verified monitor");
   game = launch(path.join(ROOT, "scripts/dev"), [BIN, "--start", "--autopilot", "--track=loop", "--musiclog",
+    ...(HEADLESS ? ["--music-headless"] : []),
     `--music-sabotage=${ARM === "normal" ? "none" : ARM}`, "--quit-after", "400"],
     { env, stdio: ["ignore", "pipe", "pipe"] });
   function gameOutput(bytes) { fs.writeSync(logFD, bytes); gameText += bytes; }
@@ -74,17 +76,20 @@ try {
     await sleep(50);
   }
   if (!verifiedPID) throw new Error("no verified game stream on worker-null");
-  const xdotool = cachedTool("xdotool", "xdotool");
-  let windowID;
-  for (let i = 0; i < 300 && !windowID; i++) {
-    try { windowID = execFileSync(xdotool, ["search", "--onlyvisible", "--name", "^Signal Overdrive$"], { env, encoding: "utf8", timeout: 2000 }).trim().split("\n")[0]; }
-    catch { /* graphics still starting */ }
-    if (!windowID) await sleep(100);
+  if (!HEADLESS) {
+    const xdotool = cachedTool("xdotool", "xdotool");
+    let windowID;
+    for (let i = 0; i < 300 && !windowID; i++) {
+      try { windowID = execFileSync(xdotool, ["search", "--onlyvisible", "--name", "^Signal Overdrive$"], { env, encoding: "utf8", timeout: 2000 }).trim().split("\n")[0]; }
+      catch { /* graphics still starting */ }
+      if (!windowID) await sleep(100);
+    }
+    if (!windowID) throw new Error("no private headless game window");
+    execFileSync(xdotool, ["windowfocus", "--sync", windowID], { env, timeout: 5000 });
   }
-  if (!windowID) throw new Error("no private headless game window");
-  execFileSync(xdotool, ["windowfocus", "--sync", windowID], { env, timeout: 5000 });
   fs.writeFileSync(path.join(RUN, "meta.json"), JSON.stringify({ arm: ARM, binary: BIN, display: env.DISPLAY,
-    game_pid: verifiedPID, null_sink: nullSink[0], cpu, software_rendering_threads: GL_THREADS,
+    game_pid: verifiedPID, null_sink: nullSink[0], cpu, headless_race: HEADLESS,
+    software_rendering_threads: HEADLESS ? 0 : GL_THREADS,
     load_start: os.loadavg(), commit: execFileSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8" }).trim() }, null, 2));
   let complete = false;
   for (let i = 0; i < 400; i++) {

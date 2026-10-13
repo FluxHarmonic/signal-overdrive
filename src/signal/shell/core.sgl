@@ -40,7 +40,7 @@
 
   (export core-boot! core-frame! core-keys core-sticks core-pad core-param! core-touch!
           core-tap! core-race core-tuning core-describe core-probe core-knobs-markdown GAME-NAME
-          core-audio-start! core-focus! core-paused? core-advance!)
+          core-audio-start! core-focus! core-paused? core-advance! core-headless-frame!)
 
   (begin
     (define GAME-NAME "signal-overdrive")
@@ -723,6 +723,15 @@
                     win-w win-h integer-only)
        (set! *draw-ms* (ease *draw-ms* (ms-since t0))))
       (frame-record! (* 1000.0 dt) *sim-ms* *draw-ms*)
+      (finish-frame!))
+
+    ;; Actual race/audio path without drawing, for headless diagnostics.
+    ;; The host supplies measured wall intervals, exactly as core-frame!.
+    (define (core-headless-frame! dt)
+      (core-advance! dt)
+      (finish-frame!))
+
+    (define (finish-frame!)
       (let ((m (racer-machine (race-player *race*))) (t0 (current-jiffy)))
         (music-frame! (race-song *race*) (core-paused?))
         (audio-frame! (if (memq (race-phase *race*) '(title countdown)) 0.0

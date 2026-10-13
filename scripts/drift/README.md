@@ -8,6 +8,11 @@ limit. Cached Xvfb and xdotool are required; the driver does not fetch them.
 `CONDUCTOR_CPU_LIST=0,1` can select at most two allowed CPUs, and
 `CONDUCTOR_GL_THREADS=2` can select two llvmpipe threads for a bounded
 software-rendering capture. Both settings are recorded in run metadata.
+`CONDUCTOR_HEADLESS=1` selects the actual native race without a window or
+drawing. It shares simulation, input cleanup, audible pacing, music,
+engine and cues with the graphical shell; intervals come from the real
+monotonic clock. This isolates drawing contention and is recorded in
+metadata. Keep graphical capture evidence when comparing the two modes.
 
 `node scripts/drift/focus.mjs RUNDIR` tests native focus loss separately,
 muted. It copies the binary, opens a private Xvfb, unmaps/remaps only its

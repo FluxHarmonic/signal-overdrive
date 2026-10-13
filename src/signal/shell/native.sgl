@@ -107,6 +107,23 @@
               (when (= 0 (modulo n 300)) (display (string-append "signal-overdrive: " (core-describe))) (newline))
               (unless (quit-requested?) (frame (+ n 1))))))))
 
+    ;; A real race using the shared simulation/music/cue path, with no
+    ;; window, drawing, synthetic clock, or alternate player driver.
+    (define (headless-race! seconds)
+      (define (now) (/ (current-jiffy) (* 1.0 (jiffies-per-second))))
+      (core-audio-start!)
+      (display "signal-overdrive: headless race; drawing disabled")
+      (newline)
+      (let ((start (now)))
+        (let frame ((previous start))
+          (let ((before (now)))
+            (when (< (- before start) seconds)
+              (core-headless-frame! (- before previous))
+              (let ((remaining (- (/ 1.0 60.0) (- (now) before))))
+                (when (> remaining 0.0) (sleep remaining)))
+              (frame before)))))
+      (core-focus! #f))
+
     (define (native-main . _args)
       (let ((args (cdr (command-line))))
         ;; Offline command: exit before booting the shell, opening its
@@ -138,6 +155,20 @@
             (set! *shots* (map string->number (split-commas (cadr t))))))
         ;; The loop starts sound after graphics setup. --mute, parsed
         ;; above, still keeps the device closed.
+        (when (member "--music-headless" args)
+          (let* ((qa (member "--quit-after" args))
+                 (seconds (if (and qa (pair? (cdr qa)))
+                              (string->number (cadr qa))
+                              400)))
+            (unless (and seconds (> seconds 0))
+              (error "positive headless duration required"))
+            (headless-race! seconds)
+            (when (and (member "--mute" args) (audio-initialized?))
+              (error "muted headless race initialized audio"))
+            (display "signal-overdrive: headless race complete; audio ")
+            (display (if (audio-initialized?) "initialized" "uninitialized"))
+            (newline)
+            (exit 0)))
         (let* ((qa (member "--quit-after" args))
                (quit-after (and qa (pair? (cdr qa)) (string->number (cadr qa))))
                (scaler (make-window-scaler VIEW-W VIEW-H min-scale: 2 max-scale: 6

@@ -41,7 +41,21 @@ if [ "$CONDUCTOR_CODE" -eq 0 ]; then
   fi
 fi
 if [ "$CONDUCTOR_CODE" -eq 0 ]; then
-  printf 'RESULT: PASS (%s; offline CLI smoke)\n' "$CONDUCTOR_MODE" > "$CONDUCTOR_RUN/RESULT.tmp"
+  env SIGIL_AUDIO_BACKEND=null SIGIL_APP_PLATFORM=x11 DISPLAY= WAYLAND_DISPLAY= \
+    timeout 30 taskset -c "$CONDUCTOR_CPU" nice -n 15 scripts/dev \
+    ./build/release/bin/signal-overdrive --music-headless --mute --start \
+    --autopilot --track=loop --musiclog --quit-after 2 \
+    > "$CONDUCTOR_RUN/headless-smoke.log" 2>&1
+  CONDUCTOR_CODE="$?"
+  if [ "$CONDUCTOR_CODE" -eq 0 ]; then
+    if ! rg -q 'headless race complete; audio uninitialized' "$CONDUCTOR_RUN/headless-smoke.log" \
+        || ! rg -q 'conductor intended tick 0 bar 0 mark grid' "$CONDUCTOR_RUN/headless-smoke.log"; then
+      CONDUCTOR_CODE=1
+    fi
+  fi
+fi
+if [ "$CONDUCTOR_CODE" -eq 0 ]; then
+  printf 'RESULT: PASS (%s; offline CLI and muted headless race smokes)\n' "$CONDUCTOR_MODE" > "$CONDUCTOR_RUN/RESULT.tmp"
 else
   printf 'RESULT: FAIL (exit %s)\n' "$CONDUCTOR_CODE" > "$CONDUCTOR_RUN/RESULT.tmp"
 fi
