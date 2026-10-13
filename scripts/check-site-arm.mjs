@@ -431,7 +431,7 @@ try {
     const e1 = consoleErrors.length, n1 = net.size, sub = `/${SLUG}${MISSING}`;
     await send("Page.navigate", { url: BASE + sub });
     await waitFor(() => evalJS("document.readyState === 'complete' && document.fonts.status === 'loaded'"), 15000);
-    const g = await evalJS(`({ h1: (document.querySelector("h1") || {}).textContent, css: [...document.styleSheets].some((x) => x.href && x.cssRules.length > 0) })`);
+    const g = await evalJS(`({ h1: (document.querySelector("h1") || {}).textContent, css: [...document.styleSheets].some((x) => { try { return !!x.href && x.cssRules.length > 0; } catch { return false; } }) })`);
     if (g.h1 !== "404" || !g.css) bad("404", `${sub}: h1 "${g.h1}", stylesheet loaded ${g.css}`);
     else ok("404", `${sub} shows the same 404, styled`);
     errorsAt[`${sub} (the 404 under the game)`] = [...consoleErrors.slice(e1).filter((l) => !(l.endsWith(` ${BASE}${sub}`) && /status of 404/.test(l))),
