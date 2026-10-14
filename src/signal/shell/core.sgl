@@ -422,6 +422,9 @@
                    (intro-lock *tuning*) (intro-length *tuning*)))
     ;; Open the sound (again, to resume a context the browser suspended).
     (define (core-audio-start!)
+      ;; the time since the last step (on the web, the wait for a
+      ;; gesture), so the steps below measure the start alone
+      (core-startup-mark! "audio-start")
       (tune-audio!)
       (audio-start!)
       (core-startup-mark! "engine-and-cues")
