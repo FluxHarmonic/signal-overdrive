@@ -33,3 +33,12 @@
                 (assert-true (every? (lambda (k) (string=? "#4DF2D9" (meter-colour 30.0 0 k calm))) 0 100))
                 (assert-true (every? (lambda (k) (string=? "#FAFCFF" (meter-colour 20.0 3 k calm))) 0 100)))
               '(#t #f))))
+
+(test-group "damage popups"
+  (test "with reduced motion they stay in place, opaque, then fade over their last 20 ticks"
+    (assert-true (every? (lambda (k) (= 0 (car (popup-look k #t)))) 0 50))
+    (assert-true (every? (lambda (k) (= 1.0 (cadr (popup-look k #t)))) 0 31))
+    (assert-true (every? (lambda (k) (< (cadr (popup-look (+ k 1) #t)) (cadr (popup-look k #t)))) 30 49))
+    (assert-true (every? (lambda (k) (> (cadr (popup-look k #t)) 0.0)) 0 50)))
+  (test "in full motion they rise a row every 6 ticks, opaque, as before"
+    (assert-true (every? (lambda (k) (equal? (list (quotient k 6) 1.0) (popup-look k #f))) 0 50))))

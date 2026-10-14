@@ -36,7 +36,7 @@
           (signal music conductor))
 
   (export VIEW-W VIEW-H scene-init! scene-ready? scene-frame! scene-camera
-          scene-world-ms speed-kmh lap-clock hud-blink? meter-colour)
+          scene-world-ms speed-kmh lap-clock hud-blink? meter-colour popup-look)
 
   (begin
     (define VIEW-W 480)
@@ -176,7 +176,8 @@
     ;; rolling band, static or dropouts in the sky, no jitter, flicker or
     ;; tracking lines in the HUD. The meter is never touched either way.
     ;; Beyond the P15 family: blinking HUD text is shown steady, in its
-    ;; colour (hud-blink?, meter-colour); the camera's kick and the
+    ;; colour (hud-blink?, meter-colour); the thrusters glow steady; damage
+    ;; popups appear in place and fade (popup-look); the camera's kick and the
     ;; horizon's dip are off; the speed lines stand still (they keep their
     ;; length and their swell on a boost, so speed and boost still read).
     ;; scripts/gate-motion checks it in the browser.
@@ -283,8 +284,9 @@
              (k (cond ((< v -0.7) 0) ((< v -0.22) 1) ((<= v 0.22) 2) ((<= v 0.7) 3) (else 4))))
         (+ k (if (> (machine-boost m) 0.0) 5 0))))
 
-    ;; The thrusters' flicker: the second frame every other 3 ticks.
-    (define (flick? r) (odd? (quotient (race-tick r) 3)))
+    ;; The thrusters' flicker: the second frame every other 3 ticks; with
+    ;; reduced motion, a steady glow (the first frame).
+    (define (flick? r) (and (not *calm*) (odd? (quotient (race-tick r) 3))))
 
     (define (rival-dir c m)
       (let* ((dx (- (machine-x m) (cam-x c)))
@@ -377,16 +379,21 @@
     (define (hs) (max 1 (exact (floor (fit-scale *fit*)))))
     (define (hx vx) (+ (fit-x *fit*) (* vx (fit-scale *fit*))))
     (define (hy vy) (+ (fit-y *fit*) (* vy (fit-scale *fit*))))
-    ;; Colours by hex, parsed once each.
+    ;; Colours by hex, parsed once each; *alpha* under 1 makes them
+    ;; see-through (a fading popup).
     (define *rgb* '())
+    (define *alpha* 1.0)
     (define (rgb hex)
-      (let ((e (assoc hex *rgb*)))
-        (if e
-            (apply set-color (cdr e))
-            (let* ((d (lambda (k) (/ (string->number (substring hex k (+ k 2)) 16) 255.0)))
-                   (c (list (d 1) (d 3) (d 5))))
-              (set! *rgb* (cons (cons hex c) *rgb*))
-              (apply set-color c)))))
+      (let ((c (let ((e (assoc hex *rgb*)))
+                 (if e
+                     (cdr e)
+                     (let* ((d (lambda (k) (/ (string->number (substring hex k (+ k 2)) 16) 255.0)))
+                            (c (list (d 1) (d 3) (d 5))))
+                       (set! *rgb* (cons (cons hex c) *rgb*))
+                       c)))))
+        (if (< *alpha* 1.0)
+            (set-color (car c) (cadr c) (caddr c) *alpha*)
+            (apply set-color c))))
     (define (rect! vx vy w h hex)
       (rgb hex)
       (draw-filled-rect (hx vx) (hy vy) (* w (fit-scale *fit*)) (* h (fit-scale *fit*))))
@@ -494,6 +501,13 @@
     ;; meter-shown: the integrity the meter showed last frame, easing down to
     ;; the real one, so what a hit or a boost spent drains away in white
     (define *meter-shown* 100.0)
+    ;; A damage popup's rise (rows) and opacity at its age (ticks; it lives
+    ;; 50): rising a row every 6 ticks, opaque; with reduced motion in
+    ;; place, fading out over its last 20 ticks.
+    (define (popup-look age calm?)
+      (if calm?
+          (list 0 (max 0.0 (min 1.0 (/ (- 50 age) 20.0))))
+          (list (quotient age 6) 1.0)))
     ;; Blinking HUD text: shown on the odd halves of a 2 x half tick
     ;; period; with reduced motion (calm?), always.
     (define (hud-blink? calm? tick half) (or calm? (odd? (quotient tick half))))
@@ -543,10 +557,14 @@
         (centred! "INTEGRITY" 6 "#7380A6")
         (meter! (- (/ VIEW-W 2) 75) 15 (machine-integrity m) (cdr (assq 'flash info)) tick)
         ;; what the last moments did to the cargo: (text colour age) rising
+        ;; (with reduced motion, in place and fading: popup-look)
         (for-each (lambda (pp)
                     (let ((age (caddr pp)))
                       (when (< age 50)
-                        (text! (car pp) (+ (/ VIEW-W 2) 80) (- 15 (quotient age 6)) (cadr pp)))))
+                        (let ((look (popup-look age *calm*)))
+                          (set! *alpha* (cadr look))
+                          (text! (car pp) (+ (/ VIEW-W 2) 80) (- 15 (car look)) (cadr pp))
+                          (set! *alpha* 1.0)))))
                   (cdr (assq 'popups info)))
         (cond ((> (machine-scramble m) 0.0)
                (when (hud-blink? *calm* tick 4) (centred! "ICE: STEERING SCRAMBLED" 25 "#FF9F1A")))   ; amber: ICE (P16)

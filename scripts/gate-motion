@@ -16,9 +16,12 @@
 #   lines   (the speed lines) stand still, still drawn
 #   prompt, title, traced  (the race's title prompt, the title screen's
 #           prompt, TRACED. on the final lap) are shown steady
+#   thrust  (the machines' thrusters) glow steady, no flicker
+#   popup   (the damage popups beside the meter) appear in place and fade,
+#           without rising
 #
 # How: the web build (default build/web), with no machines (?nosprites:
-# their thrusters flicker). The effects run on the race's title phase with
+# their thrusters flicker) but for the thrusters' own case. The effects run on the race's title phase with
 # the title screen off (?title=0), where the camera and the road do not
 # move, each alone (?fx-solo=N): the glitch, the warp and the dip pinned at
 # their peak (?fx-hold=1), the interference at CRITICAL (?fx-tier=5), its
@@ -44,7 +47,15 @@
 # means at least 3/4 of the full-motion burst's fullest shot (the text's
 # own pixels; road colour under a moving camera stays well below): with
 # reduced motion every shot must show it; in full motion some shot must
-# not (the control).
+# not (the control). The thrusters: a burst on the grid with only the
+# machines able to move: with reduced motion its shots match each other
+# and one of the full-motion burst's (the machines drawn as between
+# flickers); in full motion they differ. The popup: driven over the start
+# line by a touch's throttle, a boost (?boost-lap=1, the touch's boost flag)
+# and a burst through the popup's life,
+# counting its orange above its row and in it: with reduced motion never
+# above, and shown in it; in full motion above (it rose). Its fade is
+# test/test-hud.sgl's (a see-through colour is not the exact one counted).
 # Prints GREEN, RED or SETUP-FAILED with the counts, and exits 0, 1 or 2.
 # Renders on the GPU when GPU=1 (default), SwiftShader with GPU=0.
 # MOTION_OUT names a fresh directory for the captures (default: a new
@@ -74,14 +85,14 @@ run() {
   d="$OUT/$1-$2"; mkdir -p "$d"
   printf '%s\n' "$3" > "$d/steps.json"
   if ! node "$REPO/scripts/fx-check.mjs" "$BUILD" "$d/steps.json" $GPUFLAG --scale $SCALE \
-       --query "mute&nosprites&motion=$2&$4" --out "$d" > "$d/run.log" 2>&1; then
+       --query "mute&motion=$2&$4" --out "$d" > "$d/run.log" 2>&1; then
     echo "SETUP-FAILED: the $1 capture ($2) did not run cleanly; $d/run.log:"; cat "$d/run.log"; exit 2
   fi
 }
 # capture NAME MOTION KNOB QUERY: on1, on2 and off (the knob at 0)
 capture() {
   run "$1" "$2" "[{\"wait\": 2500}, {\"shot\": \"on1.png\"}, {\"wait\": 700}, {\"shot\": \"on2.png\"},
- {\"param\": \"$3=0\"}, {\"wait\": 1500}, {\"shot\": \"off.png\"}]" "title=0&$4"
+ {\"param\": \"$3=0\"}, {\"wait\": 1500}, {\"shot\": \"off.png\"}]" "title=0&nosprites&$4"
   for f in on1 on2 off; do [ -s "$OUT/$1-$2/$f.png" ] || { echo "SETUP-FAILED: no $1-$2 $f.png"; exit 2; }; done
 }
 # burst NAME MOTION FIRST QUERY: FIRST (JSON steps), then 10 shots t0..t9
@@ -116,15 +127,23 @@ capture dip    full   fx-dip    "nohud&fx-solo=1&fx-hold=1"
 capture lines  reduce speed-lines "nohud&fx-solo=1&fx-dip=0&fx-speed=1"
 capture lines  full   speed-lines "nohud&fx-solo=1&fx-dip=0&fx-speed=1"
 KICK='[{"wait": 2500}, {"shot": "pre.png"}, {"param": "fx-fire=drop"}, {"wait": 30}, {"shot": "k1.png"}, {"wait": 60}, {"shot": "k2.png"}]'
-run kick reduce "$KICK" "title=0&nohud&fx-solo=1"
-run kick full   "$KICK" "title=0&nohud&fx-solo=1"
-burst prompt reduce '{"wait": 2500}' "title=0&fx-solo=1&fx-dip=0"
-burst prompt full   '{"wait": 2500}' "title=0&fx-solo=1&fx-dip=0"
-burst title  reduce '{"wait": 2500}' "card=0&fx-solo=1&fx-dip=0"
-burst title  full   '{"wait": 2500}' "card=0&fx-solo=1&fx-dip=0"
+run kick reduce "$KICK" "title=0&nosprites&nohud&fx-solo=1"
+run kick full   "$KICK" "title=0&nosprites&nohud&fx-solo=1"
+burst prompt reduce '{"wait": 2500}' "title=0&nosprites&fx-solo=1&fx-dip=0"
+burst prompt full   '{"wait": 2500}' "title=0&nosprites&fx-solo=1&fx-dip=0"
+burst title  reduce '{"wait": 2500}' "card=0&nosprites&fx-solo=1&fx-dip=0"
+burst title  full   '{"wait": 2500}' "card=0&nosprites&fx-solo=1&fx-dip=0"
 RACE='{"waitLine": "phase race", "ms": 30000}, {"wait": 300}'
-burst traced reduce "$RACE" "start&autopilot&laps=1&title=0&fx-solo=1&fx-dip=0"
-burst traced full   "$RACE" "start&autopilot&laps=1&title=0&fx-solo=1&fx-dip=0"
+burst traced reduce "$RACE" "start&autopilot&laps=1&title=0&nosprites&fx-solo=1&fx-dip=0"
+burst traced full   "$RACE" "start&autopilot&laps=1&title=0&nosprites&fx-solo=1&fx-dip=0"
+# the machines on the grid (their thrusters), everything else still
+burst thrust reduce '{"wait": 2500}' "title=0&nohud&fx-solo=1&fx-dip=0"
+burst thrust full   '{"wait": 2500}' "title=0&nohud&fx-solo=1&fx-dip=0"
+# a boost after the start line (a touch: throttle, then the boost flag; the
+# autopilot ignores touch, and a boost needs lap 1), for its -12 popup
+BOOST='{"waitLine": "phase race", "ms": 30000}, {"eval": "SigilWebApp.dispatch(\"touch\", \"0,1,0,0,0\")"}, {"wait": 2500}, {"eval": "SigilWebApp.dispatch(\"touch\", \"0,1,0,1,0\")"}, {"wait": 50}, {"eval": "SigilWebApp.dispatch(\"touch\", \"0,1,0,0,0\")"}'
+burst popup reduce "$BOOST" "start&title=0&boost-lap=1&nosprites&fx-solo=1&fx-dip=0"
+burst popup full   "$BOOST" "start&title=0&boost-lap=1&nosprites&fx-solo=1&fx-dip=0"
 grep -h -E "^renderer:" "$OUT/glitch-reduce/run.log" | head -1 || true
 
 G_SHOW=$(count "$OUT/glitch-reduce/on1.png" "$OUT/glitch-reduce/off.png" $H 0)
@@ -152,6 +171,21 @@ K_CTRL=$(count "$OUT/kick-full/pre.png" "$OUT/kick-full/k1.png" $H 0)
 P_R=$(texts prompt reduce 90 118 300 18 "#FFCC33"); P_F=$(texts prompt full 90 118 300 18 "#FFCC33")
 T_R=$(texts title reduce 60 204 360 18 "#FFCC33");  T_F=$(texts title full 60 204 360 18 "#FFCC33")
 R_R=$(texts traced reduce 180 34 120 18 "#FF5959"); R_F=$(texts traced full 180 34 120 18 "#FF5959")
+# the thrusters: still with reduced motion, and the machines drawn in the
+# frame full motion shows between flickers; flickering in full motion
+TH_1=$(count "$OUT/thrust-reduce/t0.png" "$OUT/thrust-reduce/t5.png" $H 0)
+TH_2=$(count "$OUT/thrust-reduce/t0.png" "$OUT/thrust-reduce/t9.png" $H 0)
+# (the flicker swaps every 3 ticks, the shots about 10 apart: nine pairs all
+# in one phase by chance is 1 in 512)
+TH_CTRL=0; for j in 1 2 3 4 5 6 7 8 9; do
+  v=$(count "$OUT/thrust-full/t0.png" "$OUT/thrust-full/t$j.png" $H 0); [ "${v:-0}" -gt "$TH_CTRL" ] && TH_CTRL=$v; done
+TH_BASE=""; for j in 0 1 2 3 4 5 6 7 8 9; do
+  v=$(count "$OUT/thrust-reduce/t0.png" "$OUT/thrust-full/t$j.png" $H 0)
+  if [ -z "$TH_BASE" ] || [ "${v:-999999}" -lt "$TH_BASE" ]; then TH_BASE=${v:-999999}; fi; done
+# the boost's -12 popup (orange, beside the meter, from row 15): never above
+# its row with reduced motion; risen in full motion
+PP_R=$(texts popup reduce 318 15 62 9 "#F2731A"); PP_RH=$(texts popup reduce 318 5 62 10 "#F2731A")
+PP_FH=$(texts popup full 318 5 62 10 "#F2731A")
 # a text is shown at 3/4 of the full-motion burst's fullest shot
 shown() { echo $(( $(max $1) * 3 / 4 )); }
 P_T=$(shown "$P_F"); T_T=$(shown "$T_F"); R_T=$(shown "$R_F")
@@ -164,13 +198,16 @@ echo "kick:   moved $K_1 then $K_2 (full: $K_CTRL)"
 echo "prompt: $P_R (full: $P_F; shown from $P_T)"
 echo "title:  $T_R (full: $T_F; shown from $T_T)"
 echo "traced: $R_R (full: $R_F; shown from $R_T)"
+echo "thrust: moved $TH_1 then $TH_2; off the full-motion frame by $TH_BASE (full: flickered $TH_CTRL)"
+echo "popup:  in its row $PP_R; above it $PP_RH (full, above its row: $PP_FH)"
 echo "(pixels at scale $SCALE; captures in $OUT)"
 for v in "$G_SHOW" "$G_STILL" "$G_CTRL" "$W_STILL" "$W_CUE" "$W_CTRL" "$I_STILL" "$I_CUE" "$I_CTRL" \
-         "$D_SHOW" "$D_STILL" "$D_CTRL" "$L_STILL" "$L_CUE" "$L_CTRL" "$K_1" "$K_2" "$K_CTRL"; do
+         "$D_SHOW" "$D_STILL" "$D_CTRL" "$L_STILL" "$L_CUE" "$L_CTRL" "$K_1" "$K_2" "$K_CTRL" \
+         "$TH_1" "$TH_2"; do
   [ -n "$v" ] || { echo "SETUP-FAILED: a count is empty (is ImageMagick reachable?)"; exit 2; }
 done
 if [ "$G_CTRL" -eq 0 ] || [ "$W_CTRL" -eq 0 ] || [ "$I_CTRL" -eq 0 ] || [ "$D_CTRL" -eq 0 ] ||
-   [ "$L_CTRL" -eq 0 ] || [ "$K_CTRL" -eq 0 ]; then
+   [ "$L_CTRL" -eq 0 ] || [ "$K_CTRL" -eq 0 ] || [ "$TH_CTRL" -eq 0 ] || [ "$(max $PP_FH)" -eq 0 ]; then
   echo "SETUP-FAILED: with full motion an effect did not move or show; the gate cannot see motion"; exit 2
 fi
 for b in "$P_F" "$T_F" "$R_F"; do
@@ -193,5 +230,11 @@ red=""
 [ "$(min $P_R)" -ge $P_T ] || red="$red; the race's title prompt blinks ($P_R)"
 [ "$(min $T_R)" -ge $T_T ] || red="$red; the title screen's prompt blinks ($T_R)"
 [ "$(min $R_R)" -ge $R_T ] || red="$red; TRACED. blinks ($R_R)"
+[ "$TH_1" -eq 0 ] && [ "$TH_2" -eq 0 ] || red="$red; the thrusters flicker ($TH_1, $TH_2 px)"
+[ "$TH_BASE" -eq 0 ] || red="$red; the machines are not drawn as between flickers ($TH_BASE px off)"
+[ "$(max $PP_RH)" -eq 0 ] || red="$red; the popup rises ($PP_RH)"
+# shown: some of its orange in its row (the wall hits' red popups, from the
+# unsteered drive, can cover part of it)
+[ "$(max $PP_R)" -ge 20 ] || red="$red; the popup is not shown in its row ($PP_R)"
 if [ -n "$red" ]; then echo "RED: with reduced motion${red#;}"; exit 1; fi
-echo "GREEN: with reduced motion the glitch and the dip show nothing, the camera does not kick, the warp's reticle, the interference's colour and the speed lines stand still, and the prompts and TRACED. hold steady"
+echo "GREEN: with reduced motion the glitch and the dip show nothing, the camera does not kick, the warp's reticle, the interference's colour and the speed lines stand still, the prompts, TRACED. and the thrusters hold steady, and the popups stay in their row"
