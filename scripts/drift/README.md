@@ -130,6 +130,27 @@ the capture sink. PASS needs every section, music throughout, zero
 sounding music underruns and a clean Escape exit; it records where each
 underrun increment happened.
 
+## Web checks
+
+These need a web build and a browser, not a capture:
+
+```sh
+sh scripts/drift/build-web-candidate RUNDIR      # bounded web build; PASS checks the bundle and stamp
+P15_OUT=RUNDIR/p15 scripts/gate-p15 build/web     # interference never covers the road (GREEN/RED/SETUP-FAILED)
+node scripts/fx-check.mjs build/web scripts/drift/effects-steps.json \
+  --query "start&autopilot&mute&track=loop&laps=9" --gpu --out RUNDIR/fx
+node scripts/fx-check.mjs build/web scripts/drift/web-race-steps.json \
+  --query "start&autopilot&musiclog&track=loop" --gpu --out RUNDIR/web-race
+```
+
+`effects-steps.json` compares effects off with every effect held at peak and
+fires all three triggers, recording isolation, renderer, probes and frame
+intervals. `web-race-steps.json` needs COOP/COEP isolation, fresh probes
+with engine and music on, the intended results landing and a finished race.
+Both run muted headless Chrome (`--mute-audio`, `PULSE_SINK=worker-null`)
+against a temporary loopback server; neither correlates audio. Public
+hosting is never part of these checks.
+
 ## Other tools
 
 `sh scripts/drift/build-candidate RUNDIR` builds a bounded native release

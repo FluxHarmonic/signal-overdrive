@@ -193,54 +193,54 @@ needed to reproduce them. Music cost is sampled on every traced frame.
 
 The three diagnostic arms are `--music-sabotage=depth` (omit queue depth
 from the audible reading), `immediate` (hand over planned marks at once)
-and `skew` (plant 1% in the shell clock and disable its nudge). `none`
-restores the normal path. Resync remains active, so each arm tests the
-actual system including its recovery behavior.
+and `skew` (plant 1% in the shell clock and disable its nudge). In the
+depth arm resync requests are counted but not executed: a resync projects
+with the real queue depth and would put the audio back, hiding the offset.
+The other arms keep resync active. `none` restores the normal path.
 
-The actual drift gate is **known RED** under Leader 14:58's integration
-plan. It remains a separate opt-in target with unchanged p95 30 ms,
-worst 60 ms and 95% correlation-coverage requirements. The latest full
-native headless race has zero sounding underruns, p95 49.01 ms drift,
-worst 111.40 ms and 59.43% coverage; no captured sabotage acceptance is
-claimed. See `scripts/drift/README.md` for evidence and reproduction.
+### The drift gate
 
-### Known native music underruns
+The gate passes: a music-only capture (`sfx=0`) of a headless native race
+with the beat within 6.4 ms at p95 and 6.7 ms at worst over 100% of the
+race's windows, the full mix reported alongside (5.9 ms, 98.0%), and each
+sabotage arm RED for its own defect (depth at a median -229 ms, immediate
+a bar or more early, skew drifting 10 ms a second between resyncs). The
+definition, the evidence for judging the music alone, how the analyzer
+acquires and re-verifies its lag, and how captures are classified are in
+`scripts/drift/README.md`.
 
-Leader 21:40 (2026-10-13) authorizes local integration with this issue
-recorded for the next audio/drift worker. The final native graphical
-race on runtime commit `3d0fbc9` completed all eight intended sections,
-the results coda and a clean Escape exit, but failed zero sounding
-music underruns: **8,414 frames at 44,100 Hz** (about 191 ms).
-Of these, **7,407 frames** (about 168 ms) were already present at title
-startup; **1,007 more** (about 23 ms) first appeared at tick 6,119,
-song time 101.983 s, phase `finished`, before the planned results landing.
-The engine remained at zero sounding underruns. The final web race on
-hardware AMD Radeon 780M/RADV had zero engine and music underruns.
+What made the beat late was the simulation falling behind its own audio:
 
-Conditions: private Xvfb, scale 2, software GL/llvmpipe with one rendering
-thread, CPU 5 only, nice 15, 250 ms music ring, PulseAudio forced to the
-verified `worker-null` sink (128), native device rate 44,100 Hz, and a
-machine at load roughly 11–14. No speaker or foreground display was used.
-Evidence remains in this conductor worktree under
-`build/conductor-final-native-race-retry/`: `RESULT`, `game.log`,
-`routing.json` and `verification-failed.json`. The exact corrected
-verification helper is `build/conductor-final-native-race-check.mjs`;
-its log is `build/conductor-final-native-race-retry-helper.log`.
+- **Allocation.** The engine synth's noise generator formed a 61-bit
+  product, past Sigil's 47-bit fixnums, so every engine sample allocated a
+  bignum: about 4 MB a second, half of the game's garbage. The same
+  generator now runs in fixnum range, sample for sample identical.
+- **The fixed clock's cap.** Substratic's clock runs at most six ticks a
+  frame and drops the rest, so every collection longer than about 100 ms
+  cost the race time while the music played on, and the 2% nudge took
+  seconds to win it back. While music plays, a long frame now catches up to
+  the `catchup-ticks` knob (15 ticks, the music ring's 250 ms); without
+  music the cap stays at six. After a long stall the race jumps up to a
+  quarter second, which is for a playtest to judge.
+- **Race restarts.** A start that landed mid-frame ran the frame's remaining
+  ticks on the new song, so its music opened as a late join, silent until
+  bar 1. A start now ends that frame's ticks.
 
-A pristine `9ac977c` master comparison used the same helper/environment.
-Its engine counter was zero at title startup and all six periodic samples
-through lap 3; the race finished, but Escape exited 139 (the older graphics
-teardown defect fixed by this branch). Master has no music stream, so this
-is not a comparison of the same music lane. No post-finish engine counter
-was emitted before its four-second coda/quit. Evidence is under
-`build/conductor-master-native-race/` (`comparison.json`, `launch.json`,
-`routing.json`, `received.json`, `game.log` and `RESULT`). Its comparison
-PASS means collection completed, not clean shutdown or a music-zero claim.
+### Native startup and the music ring
 
-The hypothesis is that main-thread presentation, allocation or collector
-stalls drain the new music lane at startup and near finish. Graphics warmup
-and pre-rendered initial PCM already precede music publication; the exact
-remaining cause has not been isolated. These native underruns and the
-separate known-RED drift gate pass to a fresh worker, who should start on
-real hardware to distinguish the environment from the product. Neither
-failure is hidden by a counter reset or weaker gate thresholds.
+The native graphical race check (`scripts/drift/native-race.mjs`) passes
+with zero sounding music underruns and a clean exit. The underruns it used
+to find at the title (7,407 to 19,695 frames, always whole device periods
+against a full ring) were first-use stalls after the music started: the
+first present of a drawn frame (a driver compiles and runs a frame at the
+present, 2-4 s under software GL) and the first gamepad read (674 ms, the
+joystick backend initializing). The native loop now draws and presents two
+zero-dt frames and reads the gamepad once before opening audio.
+`--musiclog` prints the duration of each startup step and the music's
+sounding underruns after it.
+
+A loaded host can still drain the 250 ms ring: with other heavy work
+running (load 16-19), single collections took up to 354 ms and music
+rendering up to 190 ms in the same frame, and the ring ran dry for about
+50-110 ms in a few runs. Sounding underruns since music start are a product
+failure in the drift gate in either mix.

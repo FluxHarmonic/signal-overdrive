@@ -243,9 +243,11 @@ Tests: `scripts/dev sigil test --sgl test/test-handling.sgl` (and
 
 Conductor checks: `scripts/test-conductor`, `scripts/test-score` and
 `scripts/test-reference`; effects state checks are in `test/test-fx.sgl`.
-The captured-audio drift gate is a separate opt-in target, currently
-**known RED**, with unchanged thresholds and reproducible evidence in
-[`scripts/drift/README.md`](scripts/drift/README.md). It does not make
-the default tests or effects gates fail. The stable song/tick interface
+The captured-audio drift gate is a separate opt-in target
+(`node scripts/drift/gate.mjs RUNROOT`), passing: the music-only capture's
+beat within 30 ms at p95 and 60 ms at worst over the race, and each
+sabotage arm red for its own defect. Its definition and evidence are in
+[`scripts/drift/README.md`](scripts/drift/README.md); it does not run as
+part of the default tests or effects gates. The stable song/tick interface
 for effects and title integration is in
 [`docs/CONDUCTOR.md`](docs/CONDUCTOR.md).
