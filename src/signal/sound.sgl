@@ -33,7 +33,7 @@
   (import (sigil core)
           (sigil math))
 
-  (export make-synth lcg-next synth-set! synth-event! synth-fill! synth-rate synth-engine-gain! render-cue CUE-KINDS
+  (export make-synth lcg-next synth-set! synth-event! synth-fill! synth-rate synth-engine-gain! render-cue cue-steps CUE-KINDS
           synth-freq)
 
   (begin
@@ -172,11 +172,28 @@
     ;; The wall is rendered at full strength; the game plays it at a volume
     ;; for the impact.
     (define (render-cue kind rate)
+      ((cue-steps kind rate) (cue-frames kind rate)))
+
+    (define (cue-frames kind rate)
+      (exact (floor (* (cadr (assq kind CUE-KINDS)) rate))))
+
+    ;; render-cue a part at a time, for a shell that spreads the work over
+    ;; frames: a procedure that renders up to FRAMES more on each call and
+    ;; returns the finished bytevector, #f while frames remain. The synth
+    ;; carries its state between calls, so every split gives the same bytes.
+    (define (cue-steps kind rate)
       (let* ((s (make-synth rate))
-             (secs (cadr (assq kind CUE-KINDS)))
-             (n (exact (floor (* secs rate))))
-             (buf (make-bytevector (* 8 n) 0)))
+             (n (cue-frames kind rate))
+             (buf (make-bytevector (* 8 n) 0))
+             (done 0))
         (synth-engine-gain! s 0.0)
         (synth-event! s kind 250.0)
-        (synth-fill! s buf n)
-        buf))))
+        (lambda (frames)
+          (let ((k (min (max 0 frames) (- n done))))
+            (cond ((and (= done 0) (= k n)) (synth-fill! s buf n))
+                  ((> k 0)
+                   (let ((part (make-bytevector (* 8 k) 0)))
+                     (synth-fill! s part k)
+                     (bytevector-copy! buf (* 8 done) part 0 (* 8 k)))))
+            (set! done (+ done k))
+            (and (= done n) buf)))))))

@@ -22,7 +22,7 @@
   (import (sigil core)
           (sigil math))
 
-  (export render-tune-in tune-in-carrier-hz)
+  (export render-tune-in tune-in-steps tune-in-carrier-hz)
 
   (begin
     (define PI 3.141592653589793)
@@ -37,34 +37,49 @@
             (* lo (expt (/ hi lo) e)))))
 
     (define (render-tune-in rate lo hi lock secs)
+      ((tune-in-steps rate lo hi lock secs) (exact (floor (* secs rate)))))
+
+    ;; The same PCM a part at a time, for a shell that spreads the work
+    ;; over frames: a procedure that renders up to FRAMES more on each call
+    ;; and returns the finished bytevector, #f while frames remain. Every
+    ;; split gives the same bytes.
+    (define (tune-in-steps rate lo hi lock secs)
       (let* ((n (exact (floor (* secs rate))))
              (buf (make-bytevector (* 8 n) 0))
              (dt (/ 1.0 rate))
              (fade-in (* 0.03 rate))
-             (fade-out (* 0.8 rate)))
-        (let loop ((i 0) (pa 0.0) (pb 0.0) (seed 12345) (lp 0.0) (gate 0.0))
-          (if (< i n)
-              (let* ((t (* i dt))
-                     (u (min 1.0 (/ t lock)))
-                     ;; the dial's wobble, fading out by the lock
-                     (wob (* (- 1.0 u) 0.012 (sin (* 2.0 PI 5.3 t))))
-                     (f (* (tune-in-carrier-hz t lo hi lock) (+ 1.0 wob)))
-                     (pa (let ((p (+ pa (* f dt)))) (- p (floor p))))
-                     (pb (let ((p (+ pb (* hi dt)))) (- p (floor p))))
-                     (seed (modulo (+ (* seed 1103515245) 12345) 2147483648))
-                     (nz (- (* 2.0 (/ seed 2147483648.0)) 1.0))
-                     (lp (+ lp (* 0.35 (- nz lp))))
-                     ;; crackle: the gate flips at random about 60 times a second
-                     (gate (if (< (/ (modulo seed 1000) 1000.0) (/ 60.0 rate)) (- 1.0 gate) gate))
-                     (static (* (- 1.0 u) (- 1.0 u) (+ (* 0.55 lp) (* 0.25 gate nz))))
-                     (carrier (* (+ 0.2 (* 0.25 u))
-                                 (+ (sin (* 2.0 PI pa)) (* 0.25 (sin (* 4.0 PI pa))))))
-                     (station (* 0.22 u u (sin (* 2.0 PI pb))))
-                     (env (* (min 1.0 (/ i fade-in))
-                             (min 1.0 (/ (- n i) fade-out))))
-                     (mix (* env (+ static carrier station)))
-                     (out (/ mix (+ 1.0 (abs mix)))))
-                (bytevector-ieee-single-set! buf (* 8 i) out 'little)
-                (bytevector-ieee-single-set! buf (+ (* 8 i) 4) out 'little)
-                (loop (+ i 1) pa pb seed lp gate))
-              buf))))))
+             (fade-out (* 0.8 rate))
+             ;; where the last call stopped: i pa pb seed lp gate
+             (at (vector 0 0.0 0.0 12345 0.0 0.0)))
+        (lambda (frames)
+          (let ((end (min n (+ (vector-ref at 0) (max 0 frames)))))
+            (let loop ((i (vector-ref at 0)) (pa (vector-ref at 1)) (pb (vector-ref at 2))
+                       (seed (vector-ref at 3)) (lp (vector-ref at 4)) (gate (vector-ref at 5)))
+              (if (< i end)
+                  (let* ((t (* i dt))
+                         (u (min 1.0 (/ t lock)))
+                         ;; the dial's wobble, fading out by the lock
+                         (wob (* (- 1.0 u) 0.012 (sin (* 2.0 PI 5.3 t))))
+                         (f (* (tune-in-carrier-hz t lo hi lock) (+ 1.0 wob)))
+                         (pa (let ((p (+ pa (* f dt)))) (- p (floor p))))
+                         (pb (let ((p (+ pb (* hi dt)))) (- p (floor p))))
+                         (seed (modulo (+ (* seed 1103515245) 12345) 2147483648))
+                         (nz (- (* 2.0 (/ seed 2147483648.0)) 1.0))
+                         (lp (+ lp (* 0.35 (- nz lp))))
+                         ;; crackle: the gate flips at random about 60 times a second
+                         (gate (if (< (/ (modulo seed 1000) 1000.0) (/ 60.0 rate)) (- 1.0 gate) gate))
+                         (static (* (- 1.0 u) (- 1.0 u) (+ (* 0.55 lp) (* 0.25 gate nz))))
+                         (carrier (* (+ 0.2 (* 0.25 u))
+                                     (+ (sin (* 2.0 PI pa)) (* 0.25 (sin (* 4.0 PI pa))))))
+                         (station (* 0.22 u u (sin (* 2.0 PI pb))))
+                         (env (* (min 1.0 (/ i fade-in))
+                                 (min 1.0 (/ (- n i) fade-out))))
+                         (mix (* env (+ static carrier station)))
+                         (out (/ mix (+ 1.0 (abs mix)))))
+                    (bytevector-ieee-single-set! buf (* 8 i) out 'little)
+                    (bytevector-ieee-single-set! buf (+ (* 8 i) 4) out 'little)
+                    (loop (+ i 1) pa pb seed lp gate))
+                  (begin
+                    (vector-set! at 0 i) (vector-set! at 1 pa) (vector-set! at 2 pb)
+                    (vector-set! at 3 seed) (vector-set! at 4 lp) (vector-set! at 5 gate))))
+            (and (= (vector-ref at 0) n) buf)))))))

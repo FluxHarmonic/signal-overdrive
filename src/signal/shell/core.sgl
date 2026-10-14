@@ -301,6 +301,7 @@
       (set! *skip-interval* #f)
       (set! *resync-requests* 0)
       (music-reset!)
+      (music-prepare!)
       ;; the song waits for the card (song-gate!)
       (music-hold!)
       (set! *music-generation* (music-generation))
@@ -415,10 +416,13 @@
                " ms music-underruns " (number->string (list-ref (music-readout) 3)))
           (set! *startup-mark* now))))
 
+    ;; The tuning-in sound's knobs, for the cue bank.
+    (define (tune-audio!)
+      (audio-tune! (tuning-ref *tuning* 'tone-lo) (tuning-ref *tuning* 'tone-hi)
+                   (intro-lock *tuning*) (intro-length *tuning*)))
     ;; Open the sound (again, to resume a context the browser suspended).
     (define (core-audio-start!)
-      (audio-tune! (tuning-ref *tuning* 'tone-lo) (tuning-ref *tuning* 'tone-hi)
-                   (intro-lock *tuning*) (intro-length *tuning*))
+      (tune-audio!)
       (audio-start!)
       (core-startup-mark! "engine-and-cues")
       (when (and *race* (not (core-paused?)))
@@ -935,6 +939,11 @@
                       (if (eq? (race-phase *race*) 'race) *last-throttle* 0.0)
                       (> (machine-boost m) 0.0)
                       *frame-events*)
+        ;; The cue bank, a few milliseconds a frame: more before the sound
+        ;; starts (on the web's start gate, which opens a suspended context
+        ;; for its rate), less once the music plays.
+        (tune-audio!)
+        (audio-prepare! (if (audio-started?) 3.0 8.0) (eq? *platform* 'web))
         (set! *audio-ms* (ease *audio-ms* (ms-since t0)))))
 
     (define (finish-frame!)

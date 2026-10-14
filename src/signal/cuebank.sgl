@@ -1,0 +1,78 @@
+;;; (signal cuebank) - The cues rendered a part at a time, so the shell can
+;;; spread the work over frames: ahead of the sound on the web's start
+;;; gate, and after the start for what is left. A finished cue's PCM goes
+;;; to the LOAD procedure the shell passes (load-audio-cue there, a list in
+;;; the tests); nothing here opens a device.
+;;;
+;;; The tuning-in sound comes first: the card plays it as the gesture
+;;; lands. The one-shots follow; the race needs them seconds later, and a
+;;; one-shot fired before its cue is loaded falls back to the engine
+;;; stream, as it does with cues off.
+;;;
+;;;   (cue-bank rate tune)            a bank at the context's rate, with the
+;;;                                   tuning-in knobs (lo hi lock secs)
+;;;   (cue-bank-step! b seconds load) render for about SECONDS; #t once
+;;;                                   every cue is loaded
+;;;   (cue-bank-finish! b kind load)  render KIND to the end now, if it is
+;;;                                   still to come
+;;;   (cue-bank-done? b)
+(define-library (signal cuebank)
+  (import (sigil core)
+          (sigil time)
+          (signal sound)
+          (signal tunein))
+
+  (export cue-bank cue-bank-step! cue-bank-finish! cue-bank-done? CUE-BANK-ORDER)
+
+  (begin
+    ;; Frames rendered between checks of the budget: about 2 ms of work on
+    ;; the web at 48 kHz.
+    (define CHUNK 1024)
+    (define ALL 1073741823)
+
+    (define CUE-BANK-ORDER (cons 'tune-in (map car CUE-KINDS)))
+
+    ;; #(rate tune queue current): queue holds the kinds not started,
+    ;; current is (kind . stepper) or #f.
+    (define (cue-bank rate tune) (vector rate tune CUE-BANK-ORDER #f))
+    (define (cue-bank-done? b)
+      (and (null? (vector-ref b 2)) (not (vector-ref b 3))))
+
+    (define (start! b kind)
+      (vector-set! b 3 (cons kind (if (eq? kind 'tune-in)
+                                      (apply tune-in-steps (vector-ref b 0) (vector-ref b 1))
+                                      (cue-steps kind (vector-ref b 0)))))
+      (vector-set! b 2 (remove-kind kind (vector-ref b 2))))
+
+    ;; Up to FRAMES more of the cue under way, starting the next in the
+    ;; queue when none is; a finished cue goes to LOAD.
+    (define (advance! b frames load)
+      (unless (vector-ref b 3) (start! b (car (vector-ref b 2))))
+      (let* ((current (vector-ref b 3))
+             (pcm ((cdr current) frames)))
+        (when pcm
+          (vector-set! b 3 #f)
+          (load (car current) pcm))))
+
+    (define (cue-bank-step! b seconds load)
+      (let ((deadline (+ (current-jiffy) (* seconds (jiffies-per-second)))))
+        ;; at least one chunk a call, however small the budget
+        (let loop ((first #t))
+          (cond ((cue-bank-done? b) #t)
+                ((and (not first) (>= (current-jiffy) deadline)) #f)
+                (else (advance! b CHUNK load) (loop #f))))))
+
+    ;; A different cue under way finishes first, so its work is kept.
+    (define (cue-bank-finish! b kind load)
+      (let ((current (vector-ref b 3)))
+        (when (and current (not (eq? (car current) kind)) (memq kind (vector-ref b 2)))
+          (advance! b ALL load)))
+      (let ((current (vector-ref b 3)))
+        (cond ((and current (eq? (car current) kind)) (advance! b ALL load))
+              ((memq kind (vector-ref b 2)) (start! b kind) (advance! b ALL load))
+              (else #f))))
+
+    (define (remove-kind kind kinds)
+      (cond ((null? kinds) '())
+            ((eq? (car kinds) kind) (cdr kinds))
+            (else (cons (car kinds) (remove-kind kind (cdr kinds))))))))

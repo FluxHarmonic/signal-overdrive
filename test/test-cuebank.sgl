@@ -1,0 +1,94 @@
+;;; The cue bank renders cues a part at a time. No device: finished PCM goes
+;;; to a list, compared with the one-pass renders.
+(import (sigil test)
+        (signal sound)
+        (signal tunein)
+        (signal cuebank))
+
+(define RATE 8000)
+(define TUNE '(180.0 880.0 2.2 4.0))
+
+(define (one-pass kind)
+  (if (eq? kind 'tune-in) (apply render-tune-in RATE TUNE) (render-cue kind RATE)))
+
+;; Call STEP with uneven parts (and an empty one) until it returns the cue.
+(define (by-parts step)
+  (let loop ((k 0))
+    (or (step (list-ref '(1 7 1000 0 333) (modulo k 5)))
+        (loop (+ k 1)))))
+
+;; A bank whose loads are recorded, newest first, as (kind . pcm).
+(define (recording)
+  (let ((loaded '()))
+    (cons (lambda (kind pcm) (set! loaded (cons (cons kind pcm) loaded)))
+          (lambda () (reverse loaded)))))
+
+(define (kinds loaded)
+  (let loop ((l loaded) (out ""))
+    (if (null? l)
+        out
+        (loop (cdr l) (string-append out (if (string=? out "") "" " ")
+                                     (symbol->string (car (car l))))))))
+
+;; With no budget a step renders exactly one part (1024 frames).
+(define (steps! b n load)
+  (when (> n 0) (cue-bank-step! b 0.0 load) (steps! b (- n 1) load)))
+
+(test-group "cue bank: parts"
+  (test "every one-shot rendered in uneven parts is byte-identical to one pass"
+    (for-each (lambda (kind)
+                (assert-equal (render-cue kind RATE) (by-parts (cue-steps kind RATE))))
+              (map car CUE-KINDS)))
+
+  (test "the tuning-in sound rendered in uneven parts is byte-identical to one pass"
+    (assert-equal (apply render-tune-in RATE TUNE)
+                  (by-parts (apply tune-in-steps RATE TUNE))))
+
+  (test "a stepper returns nothing until its last frame"
+    (let ((step (cue-steps 'wall RATE)))
+      ;; wall is 0.4 s: 3200 frames
+      (assert-false (step 3199))
+      (assert-false (step 0))
+      (assert-equal (render-cue 'wall RATE) (step 1)))))
+
+(test-group "cue bank: order and the start"
+  (test "the bank loads the tuning-in sound first, then each one-shot once"
+    (let* ((r (recording))
+           (b (cue-bank RATE TUNE)))
+      (let loop ((n 0))
+        (unless (or (cue-bank-step! b 0.0 (car r)) (> n 1000))
+          (loop (+ n 1))))
+      (assert-true (cue-bank-done? b))
+      (assert-equal "tune-in boost pad wall ice corrupt" (kinds ((cdr r))))
+      (for-each (lambda (entry) (assert-equal (one-pass (car entry)) (cdr entry)))
+                ((cdr r)))))
+
+  ;; The start needs the card's sound at once; the one-shots wait.
+  (test "finishing the tuning-in sound at the start keeps its parts and leaves the rest"
+    (let* ((r (recording))
+           (b (cue-bank RATE TUNE)))
+      ;; 4 s at 8 kHz is 32000 frames: three parts in, it is under way
+      (steps! b 3 (car r))
+      (assert-equal "" (kinds ((cdr r))))
+      (cue-bank-finish! b 'tune-in (car r))
+      (assert-equal "tune-in" (kinds ((cdr r))))
+      (assert-equal (one-pass 'tune-in) (cdr (car ((cdr r)))))
+      (assert-false (cue-bank-done? b))
+      ;; already loaded: nothing again
+      (cue-bank-finish! b 'tune-in (car r))
+      (assert-equal "tune-in" (kinds ((cdr r))))))
+
+  (test "finishing a cue not started first finishes the one under way"
+    (let* ((r (recording))
+           (b (cue-bank RATE TUNE)))
+      ;; 32 parts load the tuning-in sound; the 33rd starts boost
+      (steps! b 33 (car r))
+      (assert-equal "tune-in" (kinds ((cdr r))))
+      (cue-bank-finish! b 'corrupt (car r))
+      (assert-equal "tune-in boost corrupt" (kinds ((cdr r))))
+      (let loop ((n 0))
+        (unless (or (cue-bank-step! b 0.0 (car r)) (> n 1000))
+          (loop (+ n 1))))
+      (assert-equal "tune-in boost corrupt pad wall ice" (kinds ((cdr r))))
+      (for-each (lambda (entry) (assert-equal (one-pass (car entry)) (cdr entry)))
+                ((cdr r))))))

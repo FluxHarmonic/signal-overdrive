@@ -8,8 +8,16 @@
 ;;;   (audio-cues! on?)             one-shots as cues (default) or in the stream (?cues=0)
 ;;;   (audio-sfx! on?)              #f: engine silent and no one-shots, the synth
 ;;;                                 still rendering (sfx=0, a music-only capture)
-;;;   (audio-start!)                open the context and the stream, load the
-;;;                                 cues; on the web call it from a user
+;;;   (audio-prepare! ms early?)    render cues for about MS of this frame
+;;;                                 ((signal cuebank)), once a frame until
+;;;                                 the bank is complete; EARLY? lets it open
+;;;                                 the context first, before the start (the
+;;;                                 web's start gate: a context opened before
+;;;                                 a gesture stays suspended, and silent,
+;;;                                 until the gesture resumes it)
+;;;   (audio-start!)                open the context and the stream, and
+;;;                                 finish the tuning-in cue if the bank has
+;;;                                 not; on the web call it from a user
 ;;;                                 gesture (autoplay policy), again on later
 ;;;                                 gestures to resume
 ;;;   (audio-frame! speed throttle boost events)
@@ -20,7 +28,7 @@
 ;;;   (audio-tune! lo hi lock secs) the tuning-in sound's sweep, before the start
 ;;;   (audio-tune-in!)              play it ((signal tunein), as a cue): the
 ;;;                                 card before the title. It is rendered
-;;;                                 once, when the sound starts, from the
+;;;                                 once, when the bank starts, from the
 ;;;                                 knobs then: a CARD knob changed later in
 ;;;                                 the overlay (a dev tool) is heard on the
 ;;;                                 next load
@@ -39,18 +47,20 @@
 ;;;     (a slow frame, a collection, a busy machine) ran the device dry and
 ;;;     was heard as a hitch. The default is now 250 ms, Crash's figure.
 ;;;   - the one-shots (boost, pad, wall, ICE, corrupt) are cues: rendered
-;;;     once at the device's rate when the sound starts, then mixed in the
-;;;     AudioWorklet (web) or the device callback (native) from their next
-;;;     quantum. A deep stream would make them late if they were in it; as
+;;;     once at the device's rate, a few milliseconds a frame (the web
+;;;     renders them on the start gate, before the sound starts), then
+;;;     mixed in the AudioWorklet (web) or the device callback (native)
+;;;     from their next quantum. Rendering them all at the start took
+;;;     841-877 ms on the web's first gesture. A deep stream would make them late if they were in it; as
 ;;;     cues they are immediate whatever the depth, and no main-thread stall
 ;;;     can starve them.
 
 (define-library (signal shell audio)
   (import (sigil audio sink)
           (signal sound)
-          (signal tunein))
+          (signal cuebank))
 
-  (export audio-mute! audio-depth! audio-cues! audio-sfx! audio-start! audio-frame! audio-started? audio-readout
+  (export audio-mute! audio-depth! audio-cues! audio-sfx! audio-prepare! audio-start! audio-frame! audio-started? audio-readout
           audio-context audio-pause! audio-tune! audio-tune-in! audio-stop-tune-in!)
 
   (begin
@@ -85,17 +95,33 @@
     (define *tune* (list 180.0 880.0 2.2 4.0))
     (define (audio-tune! lo hi lock secs) (set! *tune* (list lo hi lock secs)))
 
+    ;; The cue bank, made once there is a context (its rate) and the
+    ;; tuning-in knobs are set.
+    (define *bank* #f)
+    (define (bank)
+      (and *cues-on* *ctx*
+           (or *bank*
+               (begin
+                 (set! *bank* (cue-bank (or (guard (e (#t #f)) (audio-context-sample-rate *ctx*)) 44100)
+                                        *tune*))
+                 *bank*))))
+    (define (bank-load! kind pcm)
+      (let ((c (guard (e (#t #f)) (load-audio-cue pcm channels: 2))))
+        (when c (set! *cues* (cons (cons kind c) *cues*)))))
+
+    (define (audio-prepare! ms early?)
+      (unless (or *muted* *paused* (not *cues-on*))
+        (when (and early? (not *ctx*))
+          (set! *ctx* (guard (e (#t #f)) (audio-context-open))))
+        (let ((b (bank)))
+          (when (and b (not (cue-bank-done? b)))
+            (cue-bank-step! b (/ ms 1000.0) bank-load!)))))
+
+    ;; At the start the card's sound must be there; the one-shots can wait
+    ;; for audio-prepare!.
     (define (load-cues!)
-      (when (and *cues-on* *ctx* (null? *cues*))
-        (let ((rate (or (guard (e (#t #f)) (audio-context-sample-rate *ctx*)) 44100)))
-          (set! *cues*
-                (let loop ((ks CUE-KINDS) (acc '()))
-                  (if (null? ks)
-                      acc
-                      (let ((c (guard (e (#t #f)) (load-audio-cue (render-cue (caar ks) rate) channels: 2))))
-                        (loop (cdr ks) (if c (cons (cons (caar ks) c) acc) acc))))))
-          (let ((c (guard (e (#t #f)) (load-audio-cue (apply render-tune-in rate *tune*) channels: 2))))
-            (when c (set! *cues* (cons (cons 'tune-in c) *cues*)))))))
+      (let ((b (bank)))
+        (when b (cue-bank-finish! b 'tune-in bank-load!))))
 
     ;; The card's sound: the cue when there is one (no stream fallback: it
     ;; belongs to the card, which goes on without it).

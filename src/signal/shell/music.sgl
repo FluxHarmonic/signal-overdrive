@@ -13,7 +13,7 @@
           (signal music transport)
           (signal music playback)
           (signal music inserts))
-  (export music-start! music-frame! music-close! music-reset! music-running?
+  (export music-prepare! music-start! music-frame! music-close! music-reset! music-running?
           music-audible-seconds music-depth! music-latency! music-readout
           music-request-resync! music-resync-in-flight? music-log music-sabotage! music-generation
           music-hold! music-release-at!)
@@ -151,11 +151,16 @@
       (music-close!)
       (set! *ctx* #f))
 
+    ;; The score, parsed ahead of the sound: on the web the start is a
+    ;; gesture's work, and the frame after it pays for every millisecond.
+    (define (music-prepare!)
+      (unless *tune* (set! *tune* (read-tune-string SCORE-TUNE-TEXT))))
+
     (define (music-start! ctx c)
       (set! *ctx* ctx)
       (when (and ctx (not *stream*)
                  (eq? (audio-context-state ctx) 'running))
-        (unless *tune* (set! *tune* (read-tune-string SCORE-TUNE-TEXT)))
+        (music-prepare!)
         (set! *rate* (audio-context-sample-rate ctx))
         (let ((plan (transport-start c *rate*)))
           ;; Construct all voice/insert graphs before exposing an empty
