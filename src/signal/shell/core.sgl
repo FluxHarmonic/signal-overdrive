@@ -432,7 +432,11 @@
         (song-gate!)
         (music-start! (audio-context) (race-song *race*))
         (core-startup-mark! "music-start")
-        (music-frame! (race-song *race*) #f)
+        ;; dated like service-audio!'s, so a queued resync measures its
+        ;; gap against the simulation now
+        (music-frame! (race-song *race*) #f
+                      clock-fraction: (clock-acc *clock*)
+                      frame-jiffy: *frame-jiffy*)
         (core-startup-mark! "music-frame")))
     ;; The song's release, named before each music frame: at the card's
     ;; lock, in song seconds (a constant while the card runs: the song and

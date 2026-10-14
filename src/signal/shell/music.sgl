@@ -13,7 +13,7 @@
           (signal music transport)
           (signal music playback)
           (signal music inserts))
-  (export music-prepare! music-prepare-playback! music-start! music-frame! music-close! music-reset! music-running?
+  (export music-prepare! music-prepare-playback! music-prepared? music-start! music-frame! music-close! music-reset! music-running?
           music-audible-seconds music-depth! music-latency! music-readout
           music-request-resync! music-resync-in-flight? music-log music-sabotage! music-generation
           music-opened-jiffy
@@ -24,6 +24,7 @@
     (define *stream* #f)
     (define *generation* 0)
     (define *opened* 0)           ; the jiffy the current stream started playing
+    (define *opened-once* #f)     ; a stream has opened in this session
     (define *playback* #f)
     (define *tune* #f)
     (define *rate* 44100)
@@ -153,6 +154,7 @@
     (define (music-reset!)
       (music-close!)
       (drop-prepared!)
+      (set! *opened-once* #f)
       (set! *ctx* #f))
 
     ;; The score, parsed ahead of the sound: on the web the start is a
@@ -160,14 +162,18 @@
     (define (music-prepare!)
       (unless *tune* (set! *tune* (read-tune-string SCORE-TUNE-TEXT))))
 
-    ;; The player built ahead of the sound, #(playback rate mode): on the
-    ;; web's start gate, once the context gives its rate. Building its
-    ;; voices and inserts took about 230 ms of the first gesture.
-    ;; music-start! moves it to where the song is then, which renders the
-    ;; same bytes as opening it there; a later start builds its own.
+    ;; The player built ahead of the session's first sound, #(playback rate
+    ;; mode): on the web's start gate, once the context gives its rate.
+    ;; Building its voices and inserts took about 230 ms of the first
+    ;; gesture. music-start! moves it to where the song is then; a later
+    ;; start (a resume, a race start) builds its own. Moved, it renders the
+    ;; same bytes as one opened there: a jump does not replay the channel
+    ;; state of the rows it skips, which this score never needs (the tests
+    ;; check bars across every section); a resync's jump assumes the same.
     (define *prepared* #f)
+    (define (music-prepared?) (and *prepared* #t))
     (define (music-prepare-playback! ctx c)
-      (when (and ctx (not *stream*) (not *prepared*))
+      (when (and ctx (not *stream*) (not *prepared*) (not *opened-once*))
         (music-prepare!)
         (let ((rate (audio-context-sample-rate ctx)))
           (set! *prepared*
@@ -219,6 +225,7 @@
                       (error "music sink refused initial queue" frames accepted))
                     (set! *delivered* accepted)
                     (set! *opened* (current-jiffy))
+                    (set! *opened-once* #t)
                     (set! *generation* (+ *generation* 1)))
                   (begin
                     (playback-close! *playback*)

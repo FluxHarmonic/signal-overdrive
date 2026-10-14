@@ -110,9 +110,10 @@
         (when c (set! *cues* (cons (cons kind c) *cues*)))))
 
     (define (audio-prepare! ms early?)
-      (unless (or *muted* *paused* (not *cues-on*))
+      (unless (or *muted* *paused*)
         (when (and early? (not *ctx*))
           (set! *ctx* (guard (e (#t #f)) (audio-context-open))))
+        ;; no bank with cues off; the early context still serves the music
         (let ((b (bank)))
           (when (and b (not (cue-bank-done? b)))
             (cue-bank-step! b (/ ms 1000.0) bank-load!)))))
@@ -145,8 +146,13 @@
           (set! *fade* #f)
           (set! *cue-stops* (+ *cue-stops* 1)))))
 
+    ;; The sound was started (audio-start! ran): a resume restarts it. A
+    ;; context opened early, before any start, is not enough.
+    (define *started* #f)
+
     (define (audio-start!)
       (unless (or *muted* *paused*)
+        (set! *started* #t)
         (unless *ctx* (set! *ctx* (guard (e (#t #f)) (audio-context-open))))
         (when *ctx* (guard (e (#t #f)) (audio-context-resume *ctx*)))
         (unless *stream*
@@ -165,7 +171,7 @@
                 (close-audio-stream! *stream*)
                 (set! *stream* #f))
               (when *ctx* (stop-audio-cues!)))
-            (when *ctx* (audio-start!)))))
+            (when *started* (audio-start!)))))
 
     ;; A one-shot: a cue when there is one, else into the synth's stream.
     (define (one-shot! kind strength)

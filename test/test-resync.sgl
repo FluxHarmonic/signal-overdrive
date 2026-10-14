@@ -143,22 +143,34 @@
 
   ;; The web builds the music's player on its start gate, where the song
   ;; is somewhere else than when the sound starts; the start moves it.
+  ;; A jump does not replay the channel state of the rows it skips, so
+  ;; the equality is the score's: bars across every section, half a
+  ;; second each, from where the title has the song on the gate.
   (test "a playback built ahead and moved to the start renders as one opened there"
-    (for-each
-      (lambda (case)
-        (let* ((at (advance-to (conductor-new (list-ref case 0)) (list-ref case 1)))
-               (start (transport-start-conductor
-                        (transport-start (advance-to (conductor-new (list-ref case 2)) (list-ref case 3))
-                                         RATE)))
-               (opened (playback-open tune RATE start MUSIC-INSERTS))
-               (ahead (playback-seek-start! (playback-open tune RATE at MUSIC-INSERTS) start)))
-          (assert-equal (playback-origin-frame opened) (playback-origin-frame ahead))
-          (assert-equal (pulled opened start 44100) (pulled ahead start 44100))
-          (assert-false (find (lambda (e) (eq? 'resync (vector-ref e 0))) (playback-log ahead)))
-          (assert-error (playback-seek-start! ahead start))
-          (playback-close! opened)
-          (playback-close! ahead)))
-      '((calm 30 grid 100) (calm 0 calm 200) (lap1 0 lap1 500) (lap1 400 lap1 2000))))
+    (let ((gate (advance-to (conductor-new 'calm) 30))
+          (differ '()))
+      (for-each
+        (lambda (section)
+          (for-each
+            (lambda (bar)
+              (let* ((start (transport-start-conductor
+                              (transport-start (advance-to (conductor-new section) (song-bar->tick bar))
+                                               RATE)))
+                     (opened (playback-open tune RATE start MUSIC-INSERTS))
+                     (ahead (playback-seek-start! (playback-open tune RATE gate MUSIC-INSERTS) start)))
+                (unless (and (= (playback-origin-frame opened) (playback-origin-frame ahead))
+                             (equal? (pulled opened start 22050) (pulled ahead start 22050)))
+                  (set! differ (cons (list section bar) differ)))
+                (assert-false (find (lambda (e) (eq? 'resync (vector-ref e 0))) (playback-log ahead)))
+                (assert-error (playback-seek-start! ahead start))
+                (playback-close! opened)
+                (playback-close! ahead)))
+            '(0 2 5)))
+        '(calm grid lap1 lap2 hold fill traced uplink results))
+      (assert-equal "" (apply string-append
+                              (map (lambda (d) (string-append (symbol->string (car d)) " bar "
+                                                              (number->string (cadr d)) "; "))
+                                   (reverse differ))))))
 
   (test "the music starts a prepared player with the same samples as a fresh one"
     (let ((c (advance-to (conductor-new 'lap1) 500))
@@ -178,10 +190,17 @@
         (assert-true (let loop ((i 0))
                        (and (< i (bytevector-length fresh))
                             (or (not (= 0 (bytevector-u8-ref fresh i))) (loop (+ i 1))))))
+        ;; only before a session's first stream: a new session
+        (music-reset!)
         (music-prepare-playback! 'offline-test-context (conductor-new 'calm))
+        (assert-true (music-prepared?))
         (let ((prepared (heard)))
+          (assert-false (music-prepared?))
           (assert-equal fresh prepared)
-          (assert-false (find (lambda (e) (eq? 'resync (vector-ref e 0))) (music-log))))))
+          (assert-false (find (lambda (e) (eq? 'resync (vector-ref e 0))) (music-log))))
+        ;; a later start builds its own
+        (music-prepare-playback! 'offline-test-context (conductor-new 'calm))
+        (assert-false (music-prepared?))))
     (assert-false (audio-initialized?)))
 
   (test "the sink changes its clock epoch only when the corrected sample reaches the ear"
@@ -299,7 +318,9 @@
         ;; the ticks real time allows, and the clock's remainder
         (let* ((real (/ (- (current-jiffy) t0) (* 1.0 (jiffies-per-second))))
                (allowed (+ 1 (exact (ceiling (* 60 real))))))
-          (assert-true (< real 0.15))
+          ;; the test can still tell: counted in full, the frame caught
+          ;; up 15 ticks
+          (assert-true (< allowed 15))
           (let ((advanced (- (conductor-tick (race-song (core-race))) tick)))
             (assert-equal "within" (if (<= advanced allowed)
                                        "within"
