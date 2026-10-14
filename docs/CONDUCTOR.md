@@ -150,10 +150,20 @@ adapter context. Ordinary close retains context for pause/resume; a
 re-init must bind the current engine context through audio startup and
 cannot reopen a previous session's stream behind a muted shell.
 Initial PCM is prepared in 256-frame pulls before a stream is opened,
-then published in one accepted push. A fresh tick-zero stream discards
-its initialization interval and fixed-clock remainder, so setup time is
-not counted as progress in the new song. Native drawing is warmed once
-at zero dt before audio starts. Subsequent audio service runs before
+then published in one accepted push. Every frame interval is bounded by
+the wall time since the music's stream opened, so setup time is never
+counted as progress: the ear heard none of the time before. A fresh
+tick-zero stream also starts the fixed clock and pacing over; the frame
+after it counts the time since the opening, which the ear did hear
+(skipping that frame outright left a native boot's simulation 127 ms
+behind the ear, and asked for a resync). On the web the first stream
+opens mid-song, on the gesture after the gate and the title. Counting the
+time before it charged the opening for the gesture's work (about a
+second): the next frame caught up the ring's 15 ticks of it, and the
+-300 ms gap cost a resync that cut the opening's held notes. That work can
+land in the second frame after the opening, not the first: a browser
+stamps a frame before it runs the input handlers queued in it. Native
+drawing is warmed once at zero dt before audio starts. Subsequent audio service runs before
 drawing; resync projection includes the fixed clock's fractional tick
 and elapsed work since the conductor's monotonic frame-start timestamp.
 This fraction is used for audio timing only, without drawing interpolation.
@@ -268,3 +278,39 @@ running (load 16-19), single collections took up to 354 ms and music
 rendering up to 190 ms in the same frame, and the ring ran dry for about
 50-110 ms in a few runs. Sounding underruns since music start are a product
 failure in the drift gate in either mix.
+
+### Web startup
+
+On the web the sound starts on the start gate's gesture (the browser's
+autoplay rule). The gesture used to render the whole cue bank (8 s of PCM
+at the context's rate) and build the music's Motif player before the music
+could start: 841-877 ms of cues and 224 ms of music on a lightly loaded
+host, 3.3-4.0 s in all at load 14-18. That work now happens on the gate,
+before the gesture:
+
+- the shell opens the AudioContext there. A context opened before a
+  gesture stays suspended, and silent, until the gesture resumes it; it
+  gives the rate the cues render at. Only a sound that was started resumes
+  after a focus change.
+- `(signal cuebank)` renders the cues 8 ms a frame, the tuning-in sound
+  first (the card plays it as the gesture lands), then the one-shots; after
+  the start, 3 ms a frame. A one-shot fired before its cue is loaded falls
+  back to the engine stream.
+- the music's player is built in one frame, before the session's first
+  stream, and the start moves it to where the song is with
+  `playback-seek-start!`, the same bytes as opening it there.
+
+At load 14-18, with 3 s on the gate, the gesture took 49-103 ms in all,
+against 3.3-4.0 s before. A gesture that comes before the tuning-in cue is
+done renders the rest of it then: 1.3-1.6 s at that load, about half the
+old bank. `--musiclog`'s `startup audio-start` mark takes the wait before
+the start, so `engine-and-cues` and `music-start` time the start alone.
+
+The startup gap is now the output latency (35-51 ms in headless Chrome)
+plus the web audible clock's 10.7 ms steps and its lagging depth reports in
+the first frames: -73 to -107 ms, against -364 to -378 ms before. The
+resync request that follows is cancelled at the next render-head bar line
+when the nudge has brought the gap within 60 ms by then (3 of 3 runs after
+3 s on the gate), and runs otherwise (1 of 2 immediate gestures; before:
+5 of 5). Removing it needs a stream start that allows for the output
+latency.
