@@ -8,6 +8,7 @@
 
 (import (sigil test)
         (sigil audio)
+        (sigil time)
         (substratic store kv)
         (signal tuning)
         (signal race)
@@ -34,6 +35,12 @@
 (define (run-card n tap-at)
   (core-boot! 'desktop)
   (music-start! 'offline-test-context (race-song (core-race)))
+  ;; The frames below claim 1/60 s each but run back to back, and no
+  ;; interval counts more than the real time since the stream opened. Let
+  ;; the opening lie further back than a frame, so every frame counts.
+  (let wait ()
+    (when (< (- (current-jiffy) (music-opened-jiffy)) (* 0.1 (jiffies-per-second)))
+      (wait)))
   (let ((ms (make-vector (+ 2 (quotient (* 1000 n) 60)) 0.0))
         (tapped #f))
     (let loop ((k 0) (d 0))

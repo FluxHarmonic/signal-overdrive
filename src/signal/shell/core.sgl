@@ -310,6 +310,9 @@
       (set-store-prefix! "signal-overdrive:")
       (set! *race* (race-new *tuning*))
       (set! *intro* (intro-new *tuning* (eq? platform 'web)))
+      ;; a boot is a new session, its title too: a start or a skip from an
+      ;; earlier boot in the same process does not carry over
+      (set! *title* (title-new))
       (load-best!))
 
     ;; A URL parameter or a command-line --key=value: a knob; or
