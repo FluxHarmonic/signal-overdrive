@@ -1,6 +1,7 @@
 ;;; Real Motif pulls and native ring drain, with no playback device.
 (import (sigil test)
         (sigil list)
+        (sigil time)
         (sigil audio)
         (motif tune)
         (motif tune player)
@@ -30,6 +31,11 @@
       (unless (and distance (= distance 0) (> (playback-rendered b) 0))
         (playback-pull! b c buffer 0 (if (and distance (> distance 0)) (min distance 256) 256))
         (loop)))))
+
+;; Spin until SECONDS of real time have passed since the jiffy FROM.
+(define (wait-since from seconds)
+  (when (< (- (current-jiffy) from) (* seconds (jiffies-per-second)))
+    (wait-since from seconds)))
 
 ;; (counts "a" 1 "b" 2) is "a 1 b 2".
 (define (counts . kv)
@@ -187,6 +193,9 @@
     (core-headless-frame! (/ 1.0 60.0))
     (core-headless-frame! (/ 1.0 60.0))
     (assert-equal 0 (conductor-tick (race-song (core-race))))
+    ;; no interval reaches back before the opening: the stall below must
+    ;; happen in real time, the ring playing nothing of it
+    (wait-since (music-opened-jiffy) 0.25)
     (let ((out (make-bytevector (* 8 735) 0))
           (resyncs (list-ref (music-readout) 7))
           (cancels (list-ref (music-readout) 9)))
@@ -206,5 +215,53 @@
       (assert-true (< (abs (- (music-audible-seconds)
                               (/ (conductor-tick (race-song (core-race))) 60.0)))
                       RESYNC-GAP)))
+    (music-close!)
+    (assert-false (audio-initialized?))))
+
+(test-group "resync: a stream opened mid-song"
+  ;; The web opens the music on the first gesture, after the gate and the
+  ;; title have run, and the work before the stream opens falls in a
+  ;; frame after it. Counted in full, that frame caught up the ring's 15
+  ;; ticks of time the ear never heard: a 300 ms gap, and a resync that
+  ;; cut the opening's held notes.
+  (test "the frame after a mid-song start counts only the time since the stream opened"
+    (set-store-root! "/tmp/signal-conductor-resync-test-store")
+    (core-param! "mute")
+    (core-boot! 'desktop)
+    (let loop ((n 0))
+      (when (< n 120) (core-headless-frame! (/ 1.0 60.0)) (loop (+ n 1))))
+    (let ((tick (conductor-tick (race-song (core-race))))
+          (out (make-bytevector (* 8 735) 0))
+          (resyncs (list-ref (music-readout) 7))
+          (cancels (list-ref (music-readout) 9)))
+      (assert-true (> tick 100))
+      (music-start! 'offline-test-context (race-song (core-race)))
+      ;; A second of work before the stream opened, in the second frame's
+      ;; interval: a browser stamps the frame after a gesture before
+      ;; running the gesture's handler, so its interval is short and the
+      ;; next one carries the work.
+      (let ((t0 (current-jiffy)))
+        (core-headless-frame! (/ 1.0 60.0))
+        (core-headless-frame! 1.0)
+        ;; the ticks real time allows, and the clock's remainder
+        (let* ((real (/ (- (current-jiffy) t0) (* 1.0 (jiffies-per-second))))
+               (allowed (+ 1 (exact (ceiling (* 60 real))))))
+          (assert-true (< real 0.15))
+          (let ((advanced (- (conductor-tick (race-song (core-race))) tick)))
+            (assert-equal "within" (if (<= advanced allowed)
+                                       "within"
+                                       (counts "ticks" advanced "allowed" allowed))))))
+      ;; The frames below claim 1/60 s each but run back to back; real
+      ;; frames take as long as they claim. Let the opening lie further
+      ;; back than any of them, so none is clipped to the real time.
+      (wait-since (music-opened-jiffy) 0.25)
+      (let loop ((frame 0))
+        (when (< frame 480)
+          (%audio-stream-drain-for-test out 735 2)
+          (core-headless-frame! (/ 1.0 60.0))
+          (loop (+ frame 1))))
+      (assert-equal "resyncs 0 cancels 0"
+                    (counts "resyncs" (- (list-ref (music-readout) 7) resyncs)
+                            "cancels" (- (list-ref (music-readout) 9) cancels))))
     (music-close!)
     (assert-false (audio-initialized?))))

@@ -16,12 +16,14 @@
   (export music-prepare! music-start! music-frame! music-close! music-reset! music-running?
           music-audible-seconds music-depth! music-latency! music-readout
           music-request-resync! music-resync-in-flight? music-log music-sabotage! music-generation
+          music-opened-jiffy
           music-hold! music-release-at!)
   (begin
     (define PUSH 256)
     (define *ctx* #f)
     (define *stream* #f)
     (define *generation* 0)
+    (define *opened* 0)           ; the jiffy the current stream started playing
     (define *playback* #f)
     (define *tune* #f)
     (define *rate* 44100)
@@ -102,6 +104,7 @@
       (and *stream* *ctx* (eq? (audio-context-state *ctx*) 'running)))
 
     (define (music-generation) *generation*)
+    (define (music-opened-jiffy) (and *stream* *opened*))
 
     (define (music-audible-seconds)
       (and *stream*
@@ -190,6 +193,7 @@
                     (unless (= accepted frames)
                       (error "music sink refused initial queue" frames accepted))
                     (set! *delivered* accepted)
+                    (set! *opened* (current-jiffy))
                     (set! *generation* (+ *generation* 1)))
                   (begin
                     (playback-close! *playback*)

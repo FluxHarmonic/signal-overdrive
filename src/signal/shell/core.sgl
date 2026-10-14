@@ -819,6 +819,19 @@
         (set! *skip-interval* #t)
         (say "restart"))
       (let* ((interval (if *skip-interval* 0.0 (* dt (if *skew-arm* 1.01 1.0))))
+             ;; No interval reaches back before the music stream opened:
+             ;; the ear heard none of that time. Counting it charged a
+             ;; mid-song start for the work before it (the web's first
+             ;; gesture: about a second), caught up the ring's 15 ticks of
+             ;; it, and opened a 300 ms gap that cost a resync. The work
+             ;; can land in the second frame after the opening, not the
+             ;; first: a browser stamps a frame before it runs the input
+             ;; handlers queued in it.
+             (opened (music-opened-jiffy))
+             (interval (if opened
+                           (min interval (max 0.0 (/ (- *frame-jiffy* opened)
+                                                     (* 1.0 (jiffies-per-second)))))
+                           interval))
              (c (race-song *race*))
              ;; With the song playing, a long frame catches up to the
              ;; catchup-ticks knob (the ring's depth by default); without
