@@ -1,0 +1,35 @@
+;;; The HUD under reduced motion: blinking text shown steady (hud-blink?),
+;;; the meter under 30 a steady red (meter-colour); in full motion both
+;;; blink as before. scripts/gate-motion checks the drawn text in the
+;;; browser (the title's prompts and TRACED.).
+
+(import (sigil test)
+        (signal scene))
+
+(define (every? f lo hi)
+  (let loop ((k lo)) (or (>= k hi) (and (f k) (loop (+ k 1))))))
+(define (some? f lo hi)
+  (let loop ((k lo)) (and (< k hi) (or (f k) (loop (+ k 1))))))
+
+(test-group "blinking text"
+  (test "with reduced motion it is always shown"
+    (for-each (lambda (half) (assert-true (every? (lambda (k) (hud-blink? #t k half)) 0 600)))
+              '(4 10 30)))
+  (test "in full motion it blinks on the odd halves, as before"
+    (for-each (lambda (half)
+                (assert-true (every? (lambda (k) (eq? (hud-blink? #f k half) (odd? (quotient k half)))) 0 600))
+                (assert-true (some? (lambda (k) (not (hud-blink? #f k half))) 0 600)))
+              '(4 10 30))))
+
+(test-group "the meter's colour"
+  (test "under 30 with reduced motion: a steady red"
+    (assert-true (every? (lambda (k) (string=? "#FF5959" (meter-colour 20.0 0 k #t))) 0 600)))
+  (test "under 30 in full motion: red pulsing to a darker red every 8 ticks, as before"
+    (assert-true (every? (lambda (k) (string=? (if (odd? (quotient k 8)) "#CC3340" "#FF5959")
+                                               (meter-colour 20.0 0 k #f)))
+                         0 600)))
+  (test "from 30 up cyan, and white in a hit's flash, either way"
+    (for-each (lambda (calm)
+                (assert-true (every? (lambda (k) (string=? "#4DF2D9" (meter-colour 30.0 0 k calm))) 0 100))
+                (assert-true (every? (lambda (k) (string=? "#FAFCFF" (meter-colour 20.0 3 k calm))) 0 100)))
+              '(#t #f))))

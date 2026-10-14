@@ -29,7 +29,8 @@
     ;; full and the picture going red: corrupt cargo). vp: the vanishing
     ;; point (x, y), rows from the top, z how far the frame has faded to
     ;; black, 0..1 (the title's fades), and w 1 for reduced motion: no
-    ;; tearing, the glitch's or corruption's (corruption's red stays).
+    ;; tearing, the glitch's or corruption's (corruption's red stays), and
+    ;; the speed lines standing still.
     (define LUT-FRAGMENT
       "uniform vec4 params;
 uniform vec4 opts;
@@ -72,7 +73,7 @@ void main() {
       // tens of pixels wide out at the edges)
       float ac = (lane + 0.5) * 6.28318 / 96.0 - 3.14159;
       float perp = r * abs(sin(a - ac));
-      float pos = fract(h * 9.1 + fx.y * (0.8 + h) * 1.6) * 420.0;
+      float pos = fract(h * 9.1 + (vp.w > 0.5 ? 0.0 : fx.y * (0.8 + h) * 1.6)) * 420.0;
       float len = 10.0 + 40.0 * fx.x;
       if (perp < 0.75 && r > pos && r < pos + len) c = mix(c, vec3(204.0, 230.0, 255.0), 0.8 * fx.x);
     }

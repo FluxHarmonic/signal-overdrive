@@ -54,7 +54,9 @@
     ;; The 0.1 effects (signal fx state): each an intensity, 0 off, 1 the
     ;; default. fx-solo shows one alone (1 dip, 2 pools, 3 chase, 4 sky,
     ;; 5 glitch, 6 warp, 7 interference); fx-tier forces the integrity the
-    ;; effects see (-1: the cargo's own; the race is untouched);
+    ;; effects see (-1: the cargo's own; the race is untouched); fx-speed
+    ;; the speed the speed lines see, 0 to 1 of top (-1: the machine's own;
+    ;; a still frame with the lines, for scripts/gate-motion);
     ;; fx-showcase cycles them; fx-hold pins the dip, glitch, warp and
     ;; interference at their peaks (to measure them); fx-passes draws the ground that many times
     ;; a frame, to measure its cost on the GPU.
@@ -68,6 +70,7 @@
         (fx-interf    fx       0.0    1.0    0.1   1.0     "FX INTERFERENCE")
         (fx-solo      fx       0.0    7.0    1.0   0.0     "FX SOLO (0 ALL)")
         (fx-tier      fx       -1.0   100.0  5.0   -1.0    "FX INTEGRITY (-1 REAL)")
+        (fx-speed     fx       -1.0   1.0    0.1   -1.0    "FX SPEED (-1 REAL)")
         (fx-showcase  fx       0.0    1.0    1.0   0.0     "FX SHOWCASE")
         (fx-passes    fx       1.0    512.0  1.0   1.0     "FX GROUND PASSES")
         (fx-hold      fx       0.0    1.0    1.0   0.0     "FX HOLD AT PEAK (COST)")))

@@ -1,8 +1,8 @@
 #!/bin/sh
 # scripts/gate-motion [BUILD]   Reduced motion (the browser's
-# prefers-reduced-motion, or ?motion=reduce): the P15 family keeps its
-# meaning in colour and the HUD, but nothing in it tears, ripples, rolls
-# or flickers.
+# prefers-reduced-motion, or ?motion=reduce): the effects keep their
+# meaning in colour and the HUD, but nothing tears, ripples, rolls,
+# flickers or blinks, and the camera does not jolt.
 #   glitch  (a wall hit, ICE: torn rows, a split channel, scrambled road
 #           tiles) shows nothing at all; the HUD's meter flash and popups
 #           carry the hit
@@ -11,23 +11,40 @@
 #   interf  (integrity's interference, sky and HUD only) keeps its colour
 #           bleed, standing still: no row shifts, rolling band, static,
 #           dropouts, jittering text or tracking lines
+#   dip     (the horizon's dip on the drop) is off
+#   kick    (the camera's punch on a boost, a pad or the drop) is off
+#   lines   (the speed lines) stand still, still drawn
+#   prompt, title, traced  (the race's title prompt, the title screen's
+#           prompt, TRACED. on the final lap) are shown steady
 #
-# How: the web build (default build/web) on the race's title phase with
+# How: the web build (default build/web), with no machines (?nosprites:
+# their thrusters flicker). The effects run on the race's title phase with
 # the title screen off (?title=0), where the camera and the road do not
-# move, with no machines (?nosprites: their thrusters flicker), each
-# effect alone (?fx-solo=N). The glitch and the warp are pinned at their
-# peak (?fx-hold=1); the interference runs at CRITICAL (?fx-tier=5), its
-# dropouts and all, with the HUD shown. Per effect, two page loads, one
-# with ?motion=reduce and one with ?motion=full (the control: the gate
-# must see motion when there is some), each capturing ON1, ON2 700 ms
-# later, and OFF with the effect's knob at 0. Then, by pixel count
-# (ImageMagick compare -metric AE) over the effect's region (the whole
-# frame; for the interference the rows above the horizon, to row 70):
+# move, each alone (?fx-solo=N): the glitch, the warp and the dip pinned at
+# their peak (?fx-hold=1), the interference at CRITICAL (?fx-tier=5), its
+# dropouts and all, with the HUD; the kick from a drop (?fx-fire=drop, the
+# dip's own solo); the lines at a forced speed (?fx-speed=1) with every
+# other effect off. Per case, two page loads, one with ?motion=reduce and
+# one with ?motion=full (the control: the gate must see motion when there
+# is some). The effects: ON1, ON2 700 ms later, and OFF with the effect's
+# knob at 0, counted by pixel (ImageMagick compare -metric AE) over the
+# effect's region (the whole frame; for the interference the rows above
+# the horizon, to row 70):
 #   reduce  ON1 against ON2 must be 0 (still); ON1 against OFF must be at
-#           least CUE pixels (the colour is there), or for the glitch
-#           exactly 0 (nothing shows)
-#   full    ON1 against ON2 (ON1 against OFF for the glitch) must be over
-#           0, or the gate cannot see motion (SETUP-FAILED)
+#           least CUE pixels (the colour is there: warp, interf, lines), or
+#           exactly 0 (nothing shows: glitch, dip)
+#   full    ON1 against ON2 (ON1 against OFF for the glitch and the dip)
+#           must be over 0, or the gate cannot see motion (SETUP-FAILED)
+# The kick: PRE, then K1 and K2 just after the drop: with reduced motion
+# both match PRE; in full motion K1 must not. The text: a burst of shots
+# through more than a blink's period (the title screen with its prompt,
+# its camera flying; TRACED. on a one-lap race's GO, the autopilot
+# driving), each counting the text's own colour in its box
+# (scripts/png-count.mjs: the HUD draws after the palette pass). Shown
+# means at least 3/4 of the full-motion burst's fullest shot (the text's
+# own pixels; road colour under a moving camera stays well below): with
+# reduced motion every shot must show it; in full motion some shot must
+# not (the control).
 # Prints GREEN, RED or SETUP-FAILED with the counts, and exits 0, 1 or 2.
 # Renders on the GPU when GPU=1 (default), SwiftShader with GPU=0.
 # MOTION_OUT names a fresh directory for the captures (default: a new
@@ -52,25 +69,62 @@ count() {   # count A B HEIGHT Y: differing pixels in the band
     compare -metric AE '$OUT/a.png' '$OUT/b.png' null: 2>&1 || true" | tail -1 | awk '{print $1}' |
     grep -E '^[0-9]+$' || true
 }
-# capture NAME MOTION KNOB QUERY: on1, on2 and off into $OUT/NAME-MOTION/
-capture() {
+# run NAME MOTION STEPS QUERY: the steps (JSON) into $OUT/NAME-MOTION/
+run() {
   d="$OUT/$1-$2"; mkdir -p "$d"
-  cat > "$d/steps.json" <<EOF
-[{"wait": 2500}, {"shot": "on1.png"}, {"wait": 700}, {"shot": "on2.png"},
- {"param": "$3=0"}, {"wait": 1500}, {"shot": "off.png"}]
-EOF
+  printf '%s\n' "$3" > "$d/steps.json"
   if ! node "$REPO/scripts/fx-check.mjs" "$BUILD" "$d/steps.json" $GPUFLAG --scale $SCALE \
-       --query "mute&title=0&nosprites&motion=$2&$4" --out "$d" > "$d/run.log" 2>&1; then
+       --query "mute&nosprites&motion=$2&$4" --out "$d" > "$d/run.log" 2>&1; then
     echo "SETUP-FAILED: the $1 capture ($2) did not run cleanly; $d/run.log:"; cat "$d/run.log"; exit 2
   fi
-  for f in on1 on2 off; do [ -s "$d/$f.png" ] || { echo "SETUP-FAILED: no $1-$2 $f.png"; exit 2; }; done
 }
+# capture NAME MOTION KNOB QUERY: on1, on2 and off (the knob at 0)
+capture() {
+  run "$1" "$2" "[{\"wait\": 2500}, {\"shot\": \"on1.png\"}, {\"wait\": 700}, {\"shot\": \"on2.png\"},
+ {\"param\": \"$3=0\"}, {\"wait\": 1500}, {\"shot\": \"off.png\"}]" "title=0&$4"
+  for f in on1 on2 off; do [ -s "$OUT/$1-$2/$f.png" ] || { echo "SETUP-FAILED: no $1-$2 $f.png"; exit 2; }; done
+}
+# burst NAME MOTION FIRST QUERY: FIRST (JSON steps), then 10 shots t0..t9
+# about 170 ms apart
+burst() {
+  steps="[$3"
+  for i in 0 1 2 3 4 5 6 7 8 9; do steps="$steps, {\"shot\": \"t$i.png\"}, {\"wait\": 110}"; done
+  run "$1" "$2" "$steps]" "$4"
+  for i in 0 1 2 3 4 5 6 7 8 9; do [ -s "$OUT/$1-$2/t$i.png" ] || { echo "SETUP-FAILED: no $1-$2 t$i.png"; exit 2; }; done
+}
+# texts NAME MOTION X Y W H COLOUR: each burst shot's count of the colour in
+# the box (view pixels), space-separated
+texts() {
+  out=""
+  for i in 0 1 2 3 4 5 6 7 8 9; do
+    f="$OUT/$1-$2/t$i.png"
+    out="$out $(node "$REPO/scripts/png-count.mjs" "$f" $(($3 * SCALE)) $(($4 * SCALE)) $(($5 * SCALE)) $(($6 * SCALE)) "$7")"
+  done
+  echo $out
+}
+min() { echo "$@" | tr ' ' '\n' | sort -n | head -1; }
+max() { echo "$@" | tr ' ' '\n' | sort -n | tail -1; }
+
 capture glitch reduce fx-glitch "nohud&fx-solo=5&fx-hold=1"
 capture glitch full   fx-glitch "nohud&fx-solo=5&fx-hold=1"
 capture warp   reduce fx-warp   "nohud&fx-solo=6&fx-hold=1"
 capture warp   full   fx-warp   "nohud&fx-solo=6&fx-hold=1"
 capture interf reduce fx-interf "fx-solo=7&fx-tier=5"
 capture interf full   fx-interf "fx-solo=7&fx-tier=5"
+capture dip    reduce fx-dip    "nohud&fx-solo=1&fx-hold=1"
+capture dip    full   fx-dip    "nohud&fx-solo=1&fx-hold=1"
+capture lines  reduce speed-lines "nohud&fx-solo=1&fx-dip=0&fx-speed=1"
+capture lines  full   speed-lines "nohud&fx-solo=1&fx-dip=0&fx-speed=1"
+KICK='[{"wait": 2500}, {"shot": "pre.png"}, {"param": "fx-fire=drop"}, {"wait": 30}, {"shot": "k1.png"}, {"wait": 60}, {"shot": "k2.png"}]'
+run kick reduce "$KICK" "title=0&nohud&fx-solo=1"
+run kick full   "$KICK" "title=0&nohud&fx-solo=1"
+burst prompt reduce '{"wait": 2500}' "title=0&fx-solo=1&fx-dip=0"
+burst prompt full   '{"wait": 2500}' "title=0&fx-solo=1&fx-dip=0"
+burst title  reduce '{"wait": 2500}' "card=0&fx-solo=1&fx-dip=0"
+burst title  full   '{"wait": 2500}' "card=0&fx-solo=1&fx-dip=0"
+RACE='{"waitLine": "phase race", "ms": 30000}, {"wait": 300}'
+burst traced reduce "$RACE" "start&autopilot&laps=1&title=0&fx-solo=1&fx-dip=0"
+burst traced full   "$RACE" "start&autopilot&laps=1&title=0&fx-solo=1&fx-dip=0"
 grep -h -E "^renderer:" "$OUT/glitch-reduce/run.log" | head -1 || true
 
 G_SHOW=$(count "$OUT/glitch-reduce/on1.png" "$OUT/glitch-reduce/off.png" $H 0)
@@ -82,16 +136,48 @@ W_CTRL=$(count "$OUT/warp-full/on1.png" "$OUT/warp-full/on2.png" $H 0)
 I_STILL=$(count "$OUT/interf-reduce/on1.png" "$OUT/interf-reduce/on2.png" $SKY_H 0)
 I_CUE=$(count "$OUT/interf-reduce/on1.png" "$OUT/interf-reduce/off.png" $SKY_H 0)
 I_CTRL=$(count "$OUT/interf-full/on1.png" "$OUT/interf-full/on2.png" $SKY_H 0)
+D_SHOW=$(count "$OUT/dip-reduce/on1.png" "$OUT/dip-reduce/off.png" $H 0)
+D_STILL=$(count "$OUT/dip-reduce/on1.png" "$OUT/dip-reduce/on2.png" $H 0)
+D_CTRL=$(count "$OUT/dip-full/on1.png" "$OUT/dip-full/off.png" $H 0)
+L_STILL=$(count "$OUT/lines-reduce/on1.png" "$OUT/lines-reduce/on2.png" $H 0)
+L_CUE=$(count "$OUT/lines-reduce/on1.png" "$OUT/lines-reduce/off.png" $H 0)
+L_CTRL=$(count "$OUT/lines-full/on1.png" "$OUT/lines-full/on2.png" $H 0)
+for f in pre k1 k2; do for m in reduce full; do
+  [ -s "$OUT/kick-$m/$f.png" ] || { echo "SETUP-FAILED: no kick-$m $f.png"; exit 2; }; done; done
+K_1=$(count "$OUT/kick-reduce/pre.png" "$OUT/kick-reduce/k1.png" $H 0)
+K_2=$(count "$OUT/kick-reduce/pre.png" "$OUT/kick-reduce/k2.png" $H 0)
+K_CTRL=$(count "$OUT/kick-full/pre.png" "$OUT/kick-full/k1.png" $H 0)
+# the boxes: the race's title prompt (row 120, size 2), the title screen's
+# (row 206, size 2), TRACED. (row 36, size 2); in view pixels
+P_R=$(texts prompt reduce 90 118 300 18 "#FFCC33"); P_F=$(texts prompt full 90 118 300 18 "#FFCC33")
+T_R=$(texts title reduce 60 204 360 18 "#FFCC33");  T_F=$(texts title full 60 204 360 18 "#FFCC33")
+R_R=$(texts traced reduce 180 34 120 18 "#FF5959"); R_F=$(texts traced full 180 34 120 18 "#FF5959")
+# a text is shown at 3/4 of the full-motion burst's fullest shot
+shown() { echo $(( $(max $1) * 3 / 4 )); }
+P_T=$(shown "$P_F"); T_T=$(shown "$T_F"); R_T=$(shown "$R_F")
 echo "glitch: shown $G_SHOW still $G_STILL (full: $G_CTRL)"
 echo "warp:   still $W_STILL cue $W_CUE (full: moved $W_CTRL)"
 echo "interf: still $I_STILL cue $I_CUE (full: moved $I_CTRL)"
+echo "dip:    shown $D_SHOW still $D_STILL (full: $D_CTRL)"
+echo "lines:  still $L_STILL cue $L_CUE (full: moved $L_CTRL)"
+echo "kick:   moved $K_1 then $K_2 (full: $K_CTRL)"
+echo "prompt: $P_R (full: $P_F; shown from $P_T)"
+echo "title:  $T_R (full: $T_F; shown from $T_T)"
+echo "traced: $R_R (full: $R_F; shown from $R_T)"
 echo "(pixels at scale $SCALE; captures in $OUT)"
-for v in "$G_SHOW" "$G_STILL" "$G_CTRL" "$W_STILL" "$W_CUE" "$W_CTRL" "$I_STILL" "$I_CUE" "$I_CTRL"; do
+for v in "$G_SHOW" "$G_STILL" "$G_CTRL" "$W_STILL" "$W_CUE" "$W_CTRL" "$I_STILL" "$I_CUE" "$I_CTRL" \
+         "$D_SHOW" "$D_STILL" "$D_CTRL" "$L_STILL" "$L_CUE" "$L_CTRL" "$K_1" "$K_2" "$K_CTRL"; do
   [ -n "$v" ] || { echo "SETUP-FAILED: a count is empty (is ImageMagick reachable?)"; exit 2; }
 done
-if [ "$G_CTRL" -eq 0 ] || [ "$W_CTRL" -eq 0 ] || [ "$I_CTRL" -eq 0 ]; then
+if [ "$G_CTRL" -eq 0 ] || [ "$W_CTRL" -eq 0 ] || [ "$I_CTRL" -eq 0 ] || [ "$D_CTRL" -eq 0 ] ||
+   [ "$L_CTRL" -eq 0 ] || [ "$K_CTRL" -eq 0 ]; then
   echo "SETUP-FAILED: with full motion an effect did not move or show; the gate cannot see motion"; exit 2
 fi
+for b in "$P_F" "$T_F" "$R_F"; do
+  if [ "$(max $b)" -lt 200 ] || [ "$(min $b)" -ge "$(shown "$b")" ]; then
+    echo "SETUP-FAILED: with full motion a blinking text did not both show and hide ($b); the gate cannot see the blink"; exit 2
+  fi
+done
 red=""
 [ "$G_SHOW" -eq 0 ] || red="$red; the glitch still shows ($G_SHOW px)"
 [ "$G_STILL" -eq 0 ] || red="$red; the glitch's frame moves ($G_STILL px)"
@@ -99,5 +185,13 @@ red=""
 [ "$W_CUE" -ge $CUE ] || red="$red; the warp's reticle is gone ($W_CUE px)"
 [ "$I_STILL" -eq 0 ] || red="$red; the interference moves ($I_STILL px)"
 [ "$I_CUE" -ge $CUE ] || red="$red; the interference's colour is gone ($I_CUE px)"
+[ "$D_SHOW" -eq 0 ] || red="$red; the dip still shows ($D_SHOW px)"
+[ "$D_STILL" -eq 0 ] || red="$red; the dip's frame moves ($D_STILL px)"
+[ "$L_STILL" -eq 0 ] || red="$red; the speed lines move ($L_STILL px)"
+[ "$L_CUE" -ge $CUE ] || red="$red; the speed lines are gone ($L_CUE px)"
+[ "$K_1" -eq 0 ] && [ "$K_2" -eq 0 ] || red="$red; the camera kicks ($K_1, $K_2 px)"
+[ "$(min $P_R)" -ge $P_T ] || red="$red; the race's title prompt blinks ($P_R)"
+[ "$(min $T_R)" -ge $T_T ] || red="$red; the title screen's prompt blinks ($T_R)"
+[ "$(min $R_R)" -ge $R_T ] || red="$red; TRACED. blinks ($R_R)"
 if [ -n "$red" ]; then echo "RED: with reduced motion${red#;}"; exit 1; fi
-echo "GREEN: with reduced motion the glitch shows nothing, and the warp's reticle and the interference's colour stand still"
+echo "GREEN: with reduced motion the glitch and the dip show nothing, the camera does not kick, the warp's reticle, the interference's colour and the speed lines stand still, and the prompts and TRACED. hold steady"

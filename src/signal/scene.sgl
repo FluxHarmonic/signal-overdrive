@@ -36,7 +36,7 @@
           (signal music conductor))
 
   (export VIEW-W VIEW-H scene-init! scene-ready? scene-frame! scene-camera
-          scene-world-ms speed-kmh lap-clock)
+          scene-world-ms speed-kmh lap-clock hud-blink? meter-colour)
 
   (begin
     (define VIEW-W 480)
@@ -175,6 +175,10 @@
     ;; interference keeps its colour bleed, standing still: no row shifts,
     ;; rolling band, static or dropouts in the sky, no jitter, flicker or
     ;; tracking lines in the HUD. The meter is never touched either way.
+    ;; Beyond the P15 family: blinking HUD text is shown steady, in its
+    ;; colour (hud-blink?, meter-colour); the camera's kick and the
+    ;; horizon's dip are off; the speed lines stand still (they keep their
+    ;; length and their swell on a boost, so speed and boost still read).
     ;; scripts/gate-motion checks it in the browser.
     (define *calm* #f)
     (define (fx-uniforms! r c st knob hold)
@@ -199,7 +203,9 @@
              (flags (+ (if (on 'fx-pools) 1 0) (if (on 'fx-chase) 2 0) (if (on 'fx-sky) 4 0)
                        (if (on 'fx-warp) 8 0) (if (on 'fx-interf) 16 0) (if *calm* 32 0))))
         (set! *hold* hold)
-        (set! *dip* (if hold (* DIP-ROWS (knob (quote fx-dip))) (fx-dip-rows st (knob (quote fx-dip)))))
+        (set! *dip* (cond (*calm* 0.0)
+                          (hold (* DIP-ROWS (knob (quote fx-dip))))
+                          (else (fx-dip-rows st (knob (quote fx-dip))))))
         (mode7-set-lights! lights)
         (mode7-set-fx!
          (list *dip* (cond (*calm* 0.0) (hold (knob (quote fx-glitch))) (else (fx-glitch-now st)))
@@ -488,12 +494,21 @@
     ;; meter-shown: the integrity the meter showed last frame, easing down to
     ;; the real one, so what a hit or a boost spent drains away in white
     (define *meter-shown* 100.0)
+    ;; Blinking HUD text: shown on the odd halves of a 2 x half tick
+    ;; period; with reduced motion (calm?), always.
+    (define (hud-blink? calm? tick half) (or calm? (odd? (quotient tick half))))
+    ;; The meter's colour: white in a hit's flash, cyan (your live signal)
+    ;; from 30 up, red (danger, P16) under it, pulsing to a darker red every
+    ;; 8 ticks; with reduced motion (calm?) a steady red.
+    (define (meter-colour integrity flash tick calm?)
+      (cond ((> flash 0) "#FAFCFF")
+            ((>= integrity 30.0) "#4DF2D9")
+            ((or calm? (even? (quotient tick 8))) "#FF5959")
+            (else "#CC3340")))
     (define (meter! vx vy integrity flash tick)
       (let* ((cells 50)
              (lit (exact (ceiling (* cells (/ integrity INTEGRITY-MAX)))))
-             (col (if (>= integrity 30.0) "#4DF2D9" "#FF5959"))
-             (col (if (and (< integrity 30.0) (odd? (quotient tick 8))) "#CC3340" col))
-             (col (if (> flash 0) "#FAFCFF" col)))
+             (col (meter-colour integrity flash tick *calm*)))
         (rect! (- vx 1) (- vy 1) (+ (* cells 3) 1) 8 "#0D0A1A")
         ;; two textured draws: every cell dim, then the lit ones
         (let ((s (fit-scale *fit*)))
@@ -534,7 +549,7 @@
                         (text! (car pp) (+ (/ VIEW-W 2) 80) (- 15 (quotient age 6)) (cadr pp)))))
                   (cdr (assq 'popups info)))
         (cond ((> (machine-scramble m) 0.0)
-               (when (odd? (quotient tick 4)) (centred! "ICE: STEERING SCRAMBLED" 25 "#FF9F1A")))   ; amber: ICE (P16)
+               (when (hud-blink? *calm* tick 4) (centred! "ICE: STEERING SCRAMBLED" 25 "#FF9F1A")))   ; amber: ICE (P16)
               ((> (machine-boost m) 0.0) (centred! "BOOST" 25 "#F2731A"))   ; orange: speed
               ((machine-on-repair m) (centred! "CHECKSUM LANE: REPAIRING" 25 "#4DF2D9"))
               ((and (eq? phase 'race) (>= (racer-lap p) (race-tuning-ref tuning 'boost-lap))
@@ -542,7 +557,7 @@
                (centred! "BOOST READY" 25 "#7380A6")))
         ;; TRACED. on the final lap, red (P16), for its first three seconds
         (let ((age (cdr (assq 'traced-age info))))
-          (when (and age (< age 180) (odd? (quotient age 10)))
+          (when (and age (< age 180) (hud-blink? *calm* age 10))
             (centred! "TRACED." 36 "#FF5959" 2)))
         (hud-tracking!)
         ;; the showcase's or the solo's caption, and the panel's key
@@ -555,7 +570,7 @@
           ((title)
            (centred! "SIGNAL OVERDRIVE" 70 "#FF59D9" 3)
            (centred! "COURIER ZERO. ONE PACKAGE. DON'T LET IT CORRUPT." 98 "#CCE6FF")
-           (when (odd? (quotient tick 30)) (centred! (cdr (assq 'start-line info)) 120 "#FFCC33" 2)))
+           (when (hud-blink? *calm* tick 30) (centred! (cdr (assq 'start-line info)) 120 "#FFCC33" 2)))
           ((countdown)
            ;; the start card
            (rect! 70 56 340 26 "#0D0A1A")
@@ -715,13 +730,16 @@
       (sync-post! tuning)
       (show-track! (track-name (race-track r)))
       (look! tuning)
+      (set! *calm* (eq? (info-get info 'motion) 'reduce))
       (let* ((m (racer-machine (race-player r)))
-             (c (or (info-get info 'camera) (scene-camera tuning m cam-heading (cdr (assq 'kick info)))))
+             ;; the camera's kick on a boost, a pad or the drop: off with
+             ;; reduced motion
+             (kick (if *calm* 0.0 (cdr (assq 'kick info))))
+             (c (or (info-get info 'camera) (scene-camera tuning m cam-heading kick)))
              (dither? (> (tuning-ref tuning 'dither) 0.5))
              (f (view-fit win-w win-h VIEW-W VIEW-H integer-only: integer-only)))
         (set! *fit* f)
         (set! *horizon* (tuning-ref tuning 'horizon))
-        (set! *calm* (eq? (info-get info 'motion) 'reduce))
         (let ((st (cdr (assq 'fx info))))
           (fx-uniforms! r c st (cdr (assq 'fx-knob info)) (> (tuning-ref tuning 'fx-hold) 0.5))
           (set! *hud-interf* (* (if (> ((cdr (assq 'fx-knob info)) 'fx-interf) 0.0) 1.0 0.0) (fx-interf st)))
@@ -741,8 +759,11 @@
               (draw-machines! c tuning r (camera-heading c) (cdr (assq 'spark info)) (cdr (assq 'ghost info))))
             (let ((d (info-get info 'draw-3d))) (when d (d)))))
         ;; the frame's effects, for the lookup pass
-        (let ((v (min 1.0 (/ (machine-speed m) (handling-ref tuning 'top)))))
+        (let ((v (let ((forced (tuning-ref tuning 'fx-speed)))
+                   (if (>= forced 0.0) forced (min 1.0 (/ (machine-speed m) (handling-ref tuning 'top)))))))
           (set-pipeline-uniform! *lut-pipe* 'fx
+                                 ;; the lines swell on a boost's kick even with reduced motion,
+                                 ;; standing still (the post pass), so a boost still reads
                                  (list (* (tuning-ref tuning 'speed-lines) (max 0.0 (min 1.0 (* 2.5 (- v 0.55)))) (+ 1.0 (cdr (assq 'kick info))))
                                        (cdr (assq 'time info))
                                        (if *hold* ((cdr (assq 'fx-knob info)) 'fx-glitch) (cdr (assq 'glitch info)))

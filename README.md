@@ -56,7 +56,10 @@ through the Flux Harmonic palette and Bayer dither pass.
   flash and the pop-ups, with no glitch; corrupt cargo turns the picture
   red without tearing it; a tracer's amber reticle stands still on the road,
   with no ripple; low integrity's interference keeps its red bleed in the
-  sky and the HUD, standing still. `scripts/gate-motion` checks it.
+  sky and the HUD, standing still. Blinking text (ICE, TRACED., the title's
+  prompts, the meter under 30) is shown steady in its colour; the camera's
+  kick and the horizon's dip are off; the speed lines stand still, still
+  swelling on a boost. `scripts/gate-motion` checks it.
 - Placeholder sound, synthesized: an engine that follows your speed, a boost
   whoosh, a wall scrape. On the web it starts at your first key or tap.
 - The best lap's ghost, see-through, from your second lap on (per track, for
@@ -197,6 +200,7 @@ The knobs, from `signal-overdrive --knobs` (units are world texels, seconds and 
 | `fx-interf` FX INTERFERENCE | fx | 1 | 0 to 1 | 0.1 |
 | `fx-solo` FX SOLO (0 ALL) | fx | 0 | 0 to 7 | 1 |
 | `fx-tier` FX INTEGRITY (-1 REAL) | fx | -1 | -1 to 100 | 5 |
+| `fx-speed` FX SPEED (-1 REAL) | fx | -1 | -1 to 1 | 0.1 |
 | `fx-showcase` FX SHOWCASE | fx | 0 | 0 to 1 | 1 |
 | `fx-passes` FX GROUND PASSES | fx | 1 | 1 to 512 | 1 |
 | `fx-hold` FX HOLD AT PEAK (COST) | fx | 0 | 0 to 1 | 1 |

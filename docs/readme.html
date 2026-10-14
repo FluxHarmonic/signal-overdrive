@@ -62,7 +62,10 @@ tears, ripples, rolls or flickers. A wall hit or ICE shows in the meter's
 flash and the pop-ups, with no glitch; corrupt cargo turns the picture
 red without tearing it; a tracer's amber reticle stands still on the road,
 with no ripple; low integrity's interference keeps its red bleed in the
-sky and the HUD, standing still. <code>scripts/gate-motion</code> checks it.</li>
+sky and the HUD, standing still. Blinking text (ICE, TRACED., the title's
+prompts, the meter under 30) is shown steady in its colour; the camera's
+kick and the horizon's dip are off; the speed lines stand still, still
+swelling on a boost. <code>scripts/gate-motion</code> checks it.</li>
 <li>Placeholder sound, synthesized: an engine that follows your speed, a boost
 whoosh, a wall scrape. On the web it starts at your first key or tap.</li>
 <li>The best lap's ghost, see-through, from your second lap on (per track, for
@@ -607,6 +610,13 @@ the stream instead of as cues, the old way), <code>?hitchlog</code> (every frame
 <td>-1</td>
 <td>-1 to 100</td>
 <td>5</td>
+</tr>
+<tr>
+<td><code>fx-speed</code> FX SPEED (-1 REAL)</td>
+<td>fx</td>
+<td>-1</td>
+<td>-1 to 1</td>
+<td>0.1</td>
 </tr>
 <tr>
 <td><code>fx-showcase</code> FX SHOWCASE</td>

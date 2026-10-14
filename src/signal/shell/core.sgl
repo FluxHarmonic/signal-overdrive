@@ -826,7 +826,10 @@
                           (cons (quote draw-2d) (cond ((eq? (intro-phase *intro*) 'gate)
                                                        (lambda (centred!) (centred! (intro-gate-line *touch-device*) 130 "#4DF2D9" 2)))
                                                       ((intro-active? *intro*) #f)
-                                                      ((and (title-prompt? *title*) (not *no-hud*))
+                                                      ;; the prompt blinks; with reduced motion, steady
+                                                      ((and (or (title-prompt? *title*)
+                                                                (and *reduce-motion* (eq? (title-phase *title*) 'attract)))
+                                                            (not *no-hud*))
                                                        (lambda (centred!)
                                                          (centred! (if (eq? *platform* 'web) "PRESS ENTER, START OR TAP" "PRESS ENTER OR START")
                                                                    206 "#FFCC33" 2)))
