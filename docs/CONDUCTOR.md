@@ -156,7 +156,10 @@ counted as progress: the ear heard none of the time before. A fresh
 tick-zero stream also starts the fixed clock and pacing over; the frame
 after it counts the time since the opening, which the ear did hear
 (skipping that frame outright left a native boot's simulation 127 ms
-behind the ear, and asked for a resync). On the web the first stream
+behind the ear, and asked for a resync). A race start's skip of the next
+interval (the rest of its frame was the old race's) yields the same way
+when the new song's stream opens in that frame; without music it stands.
+On the web the first stream
 opens mid-song, on the gesture after the gate and the title. Counting the
 time before it charged the opening for the gesture's work (about a
 second): the next frame caught up the ring's 15 ticks of it, and the
