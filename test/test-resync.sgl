@@ -290,6 +290,32 @@
     (music-close!)
     (assert-false (audio-initialized?))))
 
+(test-group "resync: a stream opened at tick zero"
+  ;; A native boot opens the title's stream at tick zero, and its next
+  ;; frames are long. The time before the opening is not counted; the time
+  ;; after it is, because the ear heard it. Skipping the interval after a
+  ;; tick-zero opening left the simulation that far behind the ear: +127 ms
+  ;; and a resync request at a native boot.
+  (test "the frame after a tick-zero start counts the time since the stream opened"
+    (set-store-root! "/tmp/signal-conductor-resync-test-store")
+    (core-param! "mute")
+    (core-boot! 'desktop)
+    (let ((out (make-bytevector (* 8 6615) 0)))
+      (music-start! 'offline-test-context (race-song (core-race)))
+      (assert-equal 0 (conductor-tick (race-song (core-race))))
+      (core-headless-frame! (/ 1.0 60.0))
+      ;; 150 ms played, and passed, then a frame that long
+      (%audio-stream-drain-for-test out 6615 2)
+      (wait-since (music-opened-jiffy) 0.15)
+      (core-headless-frame! 0.15)
+      ;; 150 ms less the nudge's 2% is 8 ticks and a remainder; the first
+      ;; frame's real time since the opening can add one. Skipped, it was 0.
+      (let ((ticks (conductor-tick (race-song (core-race)))))
+        (assert-equal "8 or 9" (if (memv ticks '(8 9)) "8 or 9" (counts "ticks" ticks))))
+      (assert-false (list-ref (music-readout) 8)))
+    (music-close!)
+    (assert-false (audio-initialized?))))
+
 (test-group "resync: a stream opened mid-song"
   ;; The web opens the music on the first gesture, after the gate and the
   ;; title have run, and the work before the stream opens falls in a

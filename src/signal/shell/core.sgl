@@ -947,11 +947,14 @@
         (unless (= *music-generation* (music-generation))
           (set! *music-generation* (music-generation))
           (when (= 0 (conductor-tick (race-song *race*)))
-            ;; Reset player construction/fill precedes the new song's
-            ;; first interval. Do not count that setup as racing time.
+            ;; A new song's stream: the clock and pacing start over. The
+            ;; setup before it opened is never counted (no interval
+            ;; reaches back past the opening, in core-advance!), and the
+            ;; time since is: skipping the next interval outright lost what
+            ;; the ear had already heard (127 ms at a native boot, and a
+            ;; resync request).
             (set! *clock* (clock-new))
             (set! *pacing* (pacing-new))
-            (set! *skip-interval* #t)
             ;; The frame-start reading belonged to the old stream.
             (set! *frame-ear* #f)))
         (audio-frame! (if (memq (race-phase *race*) '(title countdown)) 0.0
