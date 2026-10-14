@@ -52,7 +52,11 @@
              ;; where the last call stopped: i pa pb seed lp gate
              (at (vector 0 0.0 0.0 12345 0.0 0.0)))
         (lambda (frames)
-          (let ((end (min n (+ (vector-ref at 0) (max 0 frames)))))
+          ;; locals for the per-sample loop: read through the closure, a
+          ;; wasm build ran it about three times slower
+          (let ((n n) (buf buf) (dt dt) (fade-in fade-in) (fade-out fade-out)
+                (lo lo) (hi hi) (lock lock) (rate rate) (at at)
+                (end (min n (+ (vector-ref at 0) (max 0 frames)))))
             (let loop ((i (vector-ref at 0)) (pa (vector-ref at 1)) (pb (vector-ref at 2))
                        (seed (vector-ref at 3)) (lp (vector-ref at 4)) (gate (vector-ref at 5)))
               (if (< i end)
