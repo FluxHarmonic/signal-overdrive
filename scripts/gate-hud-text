@@ -1,0 +1,60 @@
+#!/bin/sh
+# scripts/gate-hud-text [BUILD]   An interference dropout never takes text
+# below the HUD band. GO, the countdown and the captions are readings, not
+# the effect: they stay whole through every dropout. The top band's text
+# (above HUD-BAND, in the sky) still drops out; that is the effect.
+#
+# How: the web build (default build/web) with ?start (the countdown at
+# once) and the title screen off, no machines, interference alone
+# (?fx-solo=7) at a forced tier, in full motion: FAILING (?fx-tier=20,
+# dropouts on beats 2 and 4) and CRITICAL (?fx-tier=5, all but the first
+# beat). Shots one after another through the countdown and the race's
+# first seconds (scale 1). In each, scripts/gate-hud-text.mjs counts the
+# pixels of: the start card's first line (cyan, under the band), the
+# count-in (3, 2, 1, amber-yellow) and GO (cyan, on the road's rows), and
+# the control, LAP (in the band). A line is whole when it is in every shot
+# from its first to its last: a shot without it in between is a dropout
+# taking it.
+#   RED          a line under the band missing from a shot within its span
+#   SETUP-FAILED a line never seen, or too few shots in its span; or, at
+#                CRITICAL, LAP never dropping out (the dropouts did not run,
+#                so the check proves nothing)
+# Prints GREEN, RED or SETUP-FAILED and exits 0, 1 or 2. GPU=1 (default)
+# renders on the GPU, GPU=0 on SwiftShader. HUD_OUT names a fresh directory
+# for the captures (default: a new /tmp/gate-hud-text-XXXXXX).
+set -eu
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+BUILD="${1:-$REPO/build/web}"
+if [ -n "${HUD_OUT:-}" ]; then
+  OUT="$HUD_OUT"
+  [ ! -e "$OUT" ] || { echo "SETUP-FAILED: HUD_OUT must be a fresh directory"; exit 2; }
+  mkdir -p "$OUT"
+else
+  OUT="$(mktemp -d /tmp/gate-hud-text-XXXXXX)"
+fi
+SHOTS=90
+GPUFLAG=""; [ "${GPU:-1}" = 1 ] && GPUFLAG="--gpu"
+code=0
+for tier in failing:20 critical:5; do
+  name="${tier%%:*}"; value="${tier#*:}"; d="$OUT/$name"; mkdir -p "$d"
+  node -e 'const n = +process.argv[1]; const s = [{"wait": 200}];
+    for (let i = 0; i < n; i++) { s.push({"shot": `s${String(i).padStart(3, "0")}.png`}); s.push({"wait": 40}); }
+    console.log(JSON.stringify(s));' "$SHOTS" > "$d/steps.json"
+  if ! node "$REPO/scripts/fx-check.mjs" "$BUILD" "$d/steps.json" $GPUFLAG --scale 1 \
+       --query "mute&start&title=0&nosprites&motion=full&fx-solo=7&fx-tier=$value" --out "$d" > "$d/run.log" 2>&1; then
+    echo "SETUP-FAILED: the $name capture did not run cleanly; $d/run.log:"; cat "$d/run.log"; exit 2
+  fi
+  grep -h -E "^renderer:" "$d/run.log" | head -1 || true
+  set +e
+  node "$REPO/scripts/gate-hud-text.mjs" "$d" "$name"
+  c=$?
+  set -e
+  [ $c -gt $code ] && code=$c
+done
+echo "(captures in $OUT)"
+case $code in
+  0) echo "GREEN: no dropout took the countdown, the start card or GO, at FAILING or CRITICAL";;
+  1) echo "RED: a dropout took text under the HUD band";;
+  *) echo "SETUP-FAILED: see above";;
+esac
+exit $code

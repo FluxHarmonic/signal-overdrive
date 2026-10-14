@@ -433,9 +433,10 @@
     ;; The signal's interference on the HUD (P15: the HUD and the sky
     ;; only): text in the top band (above HUD-BAND, which is sky) jitters
     ;; sideways, bleeds a red copy, and during a dropout tears further and
-    ;; flickers. With reduced motion (*calm*) only the red copy stays, and
-    ;; the tracking lines go. The meter is never touched: it's the one
-    ;; reading a struggling player needs.
+    ;; flickers. Text below the band (GO, the countdown, the captions) is
+    ;; never touched, a dropout included. With reduced motion (*calm*) only
+    ;; the red copy stays, and the tracking lines go. The meter is never
+    ;; touched: it's the one reading a struggling player needs.
     (define HUD-BAND 58)
     (define *hud-interf* 0.0)
     (define *hud-dropout* #f)
@@ -457,7 +458,7 @@
                       ((< r (* 0.35 L)) (exact (round (* 6.0 L (- (h2 *hud-frame* vy) 0.5)))))
                       (else 0)))
              (vx (+ vx j)))
-        (unless (and *hud-dropout* (not *calm*) (< r 0.45))
+        (unless (and *hud-dropout* (not *calm*) (> L 0.0) (< r 0.45))
           (when (> L 0.3)
             (rgb "#CC3340")
             (glyphs! s (hx (+ vx 1 (exact (round (* 2.0 L))))) (hy vy) (* k (hs))))
