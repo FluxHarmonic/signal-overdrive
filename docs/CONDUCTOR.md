@@ -274,7 +274,9 @@ present, 2-4 s under software GL) and the first gamepad read (674 ms, the
 joystick backend initializing). The native loop now draws and presents two
 zero-dt frames and reads the gamepad once before opening audio.
 `--musiclog` prints the duration of each startup step and the music's
-sounding underruns after it.
+sounding underruns after it. Since the clock counts from the stream's
+opening (above), a native race no longer asks for a resync at its title
+start (1 request per race before, 0 after, at load 2-5).
 
 A loaded host can still drain the 250 ms ring: with other heavy work
 running (load 16-19), single collections took up to 354 ms and music
@@ -287,9 +289,8 @@ failure in the drift gate in either mix.
 On the web the sound starts on the start gate's gesture (the browser's
 autoplay rule). The gesture used to render the whole cue bank (8 s of PCM
 at the context's rate) and build the music's Motif player before the music
-could start: 841-877 ms of cues and 224 ms of music on a lightly loaded
-host, 3.3-4.0 s in all at load 14-18. That work now happens on the gate,
-before the gesture:
+could start, and the frame after it caught up the ring's 15 ticks of that
+work. That work now happens on the gate, before the gesture:
 
 - the shell opens the AudioContext there. A context opened before a
   gesture stays suspended, and silent, until the gesture resumes it; it
@@ -303,17 +304,25 @@ before the gesture:
   stream, and the start moves it to where the song is with
   `playback-seek-start!`, the same bytes as opening it there.
 
-At load 14-18, with 3 s on the gate, the gesture took 49-103 ms in all,
-against 3.3-4.0 s before. A gesture that comes before the tuning-in cue is
-done renders the rest of it then: 1.3-1.6 s at that load, about half the
-old bank. `--musiclog`'s `startup audio-start` mark takes the wait before
-the start, so `engine-and-cues` and `music-start` time the start alone.
+Measured in headless Chrome, the old and new builds interleaved:
 
-The startup gap is now the output latency (35-51 ms in headless Chrome)
-plus the web audible clock's 10.7 ms steps and its lagging depth reports in
-the first frames: -73 to -107 ms, against -364 to -378 ms before. The
-resync request that follows is cancelled at the next render-head bar line
-when the nudge has brought the gap within 60 ms by then (3 of 3 runs after
-3 s on the gate), and runs otherwise (1 of 2 immediate gestures; before:
-5 of 5). Removing it needs a stream start that allows for the output
-latency.
+| | before | after 3 s on the gate | after an immediate gesture |
+|---|---|---|---|
+| the gesture, quiet host (load 4-5) | 871-944 ms | 15-33 ms | 310-363 ms |
+| simulation time dropped after it | 599-681 ms | 0 | 0 |
+| startup gap, first 8 frames | -313 to -325 ms | -46 to -56 ms | -49 to -69 ms |
+| startup resyncs | 7 in 5 runs | 0 in 3 | 0 in 2 |
+| the gesture, loaded host (load 13-18) | 3.2-4.0 s | 49-113 ms | 1.3-1.6 s |
+| startup resyncs, loaded host | 5 in 5 | 0 in 3 | 2 in 2 |
+
+A gesture that comes before the tuning-in cue is done renders the rest of
+it then, about half the old bank's work. `--musiclog`'s
+`startup audio-start` mark takes the wait before the start, so
+`engine-and-cues` and `music-start` time the start alone.
+
+The startup gap left is the output latency (35-51 ms in headless Chrome)
+plus the web audible clock's 10.7 ms steps and its depth reports, which lag
+in the first frames, more so on a loaded host. A resync requested from it
+is cancelled at the next render-head bar line when the nudge has brought
+the gap within 60 ms by then, and runs otherwise. Removing it needs a
+stream start that allows for the output latency.
