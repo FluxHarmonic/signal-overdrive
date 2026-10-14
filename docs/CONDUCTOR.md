@@ -177,8 +177,18 @@ tracker row, and restores the cue loop. The simulation never changes.
 The stream's clock epoch changes only when the corrected sample reaches
 the ear, after queue depth and device latency. Resyncs execute at most
 once per simulation bar; diagnostics distinguish requests and completions.
+One gap gets one correction. A resync is in flight from its request until
+its first corrected sample is heard, and the gap still reads the old
+epoch meanwhile, so the clock asks for no other resync until then. A
+queued resync re-measures the gap where it would run, as heard now
+against the simulation now, and is cancelled if the gap is back within
+60 ms (`resync-cancels` on the clock line). Before this, a jump that ran
+just short of a bar line was asked for again from its stale gap once the
+simulation entered the next bar, and a second jump, made with the gap
+already at 0, cut the held notes again a bar later.
 `test/test-resync.sgl` checks exact pull splitting, pending-mark safety,
-later planned landings and delayed audible epochs without a device.
+later planned landings and delayed audible epochs without a device, and
+one correction per gap through the shell's own frame.
 
 `core-advance!` is the same input/pacing/tick path used by each graphical
 frame, exposed without drawing for headless checks. The muted

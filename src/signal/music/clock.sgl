@@ -6,7 +6,7 @@
           (substratic time clock))
   (export audible-seconds pacing pacing-new pace-frame
           pacing-dt pacing-gap pacing-resync? pacing-last-resync-bar
-          jump-handoff-window clock-advance-capped CATCH-UP-STEPS)
+          RESYNC-GAP jump-handoff-window clock-advance-capped CATCH-UP-STEPS)
   (begin
     ;; Delivered and queued are DEVICE frames, not Motif render frames.
     ;; Paused frames are frames explicitly inserted as silence on pause.
@@ -54,10 +54,20 @@
 
     (define (pacing-new) (pacing))
 
-    (define (pace-frame p wall-dt simulation-seconds audible running? paused? bar)
+    ;; A gap past this asks the shell for a resync; a queued resync that
+    ;; finds the gap back within it when it would run is cancelled.
+    (define RESYNC-GAP 0.060)
+
+    ;; in-flight: a resync is queued, or has jumped and its first
+    ;; corrected sample is not heard yet. The gap still reads the old
+    ;; epoch then, so asking again would repeat the same correction a bar
+    ;; later, after the first had already closed the gap.
+    (define (pace-frame p wall-dt simulation-seconds audible running? paused? bar
+                        (keys: (in-flight #f)))
       (let* ((dt (max 0.0 wall-dt))
              (gap (if running? (- audible simulation-seconds) 0.0))
-             (resync? (and running? (not paused?) (> (abs gap) 0.060)
+             (resync? (and running? (not paused?) (not in-flight)
+                           (> (abs gap) RESYNC-GAP)
                            (not (= bar (pacing-last-resync-bar p)))))
              ;; Close 10% of the gap per frame, capped at 2% of wall dt.
              (nudge (if running?

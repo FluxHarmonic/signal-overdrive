@@ -15,7 +15,7 @@
           (signal music inserts))
   (export music-start! music-frame! music-close! music-reset! music-running?
           music-audible-seconds music-depth! music-latency! music-readout
-          music-request-resync! music-log music-sabotage! music-generation
+          music-request-resync! music-resync-in-flight? music-log music-sabotage! music-generation
           music-hold! music-release-at!)
   (begin
     (define PUSH 256)
@@ -31,6 +31,7 @@
     (define *epoch-changes* '())
     (define *resync-pending* #f)
     (define *resyncs* 0)
+    (define *resync-cancels* 0)
     (define *last-resync-bar* -1)
     (define *subtract-depth* #t)
     (define *handoff-mode* 'planned)
@@ -119,6 +120,13 @@
 
     (define (music-request-resync!)
       (when *stream* (set! *resync-pending* #t)))
+
+    ;; A resync is in flight from its request until its first corrected
+    ;; sample is heard. Reading the ear first applies any change heard by
+    ;; now.
+    (define (music-resync-in-flight?)
+      (music-audible-seconds)
+      (or *resync-pending* (pair? *epoch-changes*)))
 
     (define (music-log)
       (if *playback* (reverse (playback-log *playback*)) '()))
@@ -234,16 +242,25 @@
                 ;; work so callback consumption cannot bias the seek.
                 (let* ((elapsed (/ (- (current-jiffy) (or frame-jiffy t0))
                                    (* 1.0 (jiffies-per-second))))
-                       (ahead (+ (/ (audio-stream-depth *stream*) (* 1.0 *rate*))
-                                 *latency* clock-fraction elapsed))
-                       (target (transport-render-target c ahead))
-                       (frame (playback-resync! *playback* target)))
-                  (set! *epoch-changes*
-                    (append *epoch-changes* (list (cons *delivered* (/ (- frame *delivered*) (* 1.0 *rate*))))))
-                  (set! *start-conductor* target)
-                  (set! *resync-pending* #f)
-                  (set! *last-resync-bar* (conductor-bar c))
-                  (set! *resyncs* (+ *resyncs* 1)))
+                       ;; The request can be up to a bar old, and the
+                       ;; nudge may have closed the gap since: measure it
+                       ;; again, heard now against the simulation now.
+                       (gap (- (music-audible-seconds)
+                               (+ (/ (conductor-tick c) 60.0) clock-fraction elapsed))))
+                  (if (> (abs gap) RESYNC-GAP)
+                      (let* ((ahead (+ (/ (audio-stream-depth *stream*) (* 1.0 *rate*))
+                                       *latency* clock-fraction elapsed))
+                             (target (transport-render-target c ahead))
+                             (frame (playback-resync! *playback* target)))
+                        (set! *epoch-changes*
+                          (append *epoch-changes* (list (cons *delivered* (/ (- frame *delivered*) (* 1.0 *rate*))))))
+                        (set! *start-conductor* target)
+                        (set! *resync-pending* #f)
+                        (set! *last-resync-bar* (conductor-bar c))
+                        (set! *resyncs* (+ *resyncs* 1)))
+                      (begin
+                        (set! *resync-pending* #f)
+                        (set! *resync-cancels* (+ *resync-cancels* 1)))))
                 (loop remaining))
               (when (> n 0)
                 (unless silence?
@@ -268,7 +285,7 @@
           (set! *last-tick* (conductor-tick c)))
         (set! *cost-ms* (/ (* 1000.0 (- (current-jiffy) t0)) (jiffies-per-second)))))
 
-    ;; (running target-ms queued-ms sounding-underruns all-underruns cost-ms missed resyncs pending?)
+    ;; (running target-ms queued-ms sounding-underruns all-underruns cost-ms missed resyncs pending? cancels)
     (define (music-readout)
       (list (and (music-running?) #t)
             *depth-ms*
@@ -277,4 +294,4 @@
             (+ *underruns-all* (if *stream* (audio-stream-underruns *stream*) 0))
             *cost-ms*
             (if *playback* (playback-missed *playback*) 0)
-            *resyncs* *resync-pending*))))
+            *resyncs* *resync-pending* *resync-cancels*))))

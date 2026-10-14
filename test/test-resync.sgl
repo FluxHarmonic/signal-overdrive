@@ -9,7 +9,11 @@
         (signal music transport)
         (signal music playback)
         (signal music inserts)
-        (signal shell music))
+        (signal music clock)
+        (substratic store kv)
+        (signal race)
+        (signal shell music)
+        (signal shell core))
 
 (define RATE 44100)
 (define tune (read-tune-string SCORE-TUNE-TEXT))
@@ -26,6 +30,54 @@
       (unless (and distance (= distance 0) (> (playback-rendered b) 0))
         (playback-pull! b c buffer 0 (if (and distance (> distance 0)) (min distance 256) 256))
         (loop)))))
+
+;; (counts "a" 1 "b" 2) is "a 1 b 2".
+(define (counts . kv)
+  (let loop ((kv kv) (out ""))
+    (if (null? kv)
+        out
+        (loop (cddr kv)
+              (string-append out (if (string=? out "") "" " ")
+                             (car kv) " " (number->string (cadr kv)))))))
+
+;; The shell's frame as core-advance! and service-audio! run it, against
+;; a device that drains one 60 Hz frame first: the ear read at frame start
+;; and paced against the simulation this interval produces, a request on
+;; the pacing's flag, the simulation advanced by the paced dt, then the
+;; music frame with the clock's remainder. The simulation starts LEAD
+;; seconds into lap1 with the ear at its start: ahead of the ear, as after
+;; a stalled first frame, or behind it when LEAD is negative. Returns
+;; ("requests R resyncs S cancels C" last-gap), the counts as text so
+;; a failure prints them.
+(define (shell-frames lead frames)
+  (let* ((c0 (conductor-new 'lap1))
+         (out (make-bytevector (* 8 735) 0))
+         (readout (lambda (i) (list-ref (music-readout) i)))
+         (resyncs (readout 7))
+         (cancels (readout 9)))
+    (music-start! 'offline-test-context c0)
+    (music-frame! c0 #f)
+    (let loop ((frame 0) (s lead) (c (advance-to c0 (exact (floor (* lead 60.0)))))
+               (p (pacing-new)) (requests 0))
+      (if (= frame frames)
+          (let ((result (list (counts "requests" requests
+                                      "resyncs" (- (readout 7) resyncs)
+                                      "cancels" (- (readout 9) cancels))
+                              (pacing-gap p))))
+            (music-close!)
+            result)
+          (begin
+            (%audio-stream-drain-for-test out 735 2)
+            (let* ((dt (/ 1.0 60.0))
+                   (ear (music-audible-seconds))
+                   (next (pace-frame p dt (+ s dt) ear #t #f (conductor-bar c)
+                                     in-flight: (music-resync-in-flight?)))
+                   (s (+ s (pacing-dt next)))
+                   (c (advance-to c (exact (floor (* s 60.0))))))
+              (when (pacing-resync? next) (music-request-resync!))
+              (music-frame! c #f clock-fraction: (- s (/ (conductor-tick c) 60.0)))
+              (loop (+ frame 1) s c next
+                    (if (pacing-resync? next) (+ requests 1) requests))))))))
 
 (test-group "resync: bar boundary and intended transport"
   (test "splitting a pull reaches the exact bar sample and restores the cue loop"
@@ -100,4 +152,59 @@
                       (or checked-before (and seek (not changed?)))
                       (or checked-after changed?))))))
       (music-close!))
+    (assert-false (audio-initialized?))))
+
+(test-group "resync: one correction per gap"
+  ;; The ear 200 ms behind the simulation: the jump runs at the next bar
+  ;; line with the simulation just short of it, so the simulation enters
+  ;; the new bar while the jump is still in the ring and the gap still
+  ;; reads -200 ms. Asking again then queued a second jump for the bar
+  ;; after, made with the gap already at 0.
+  (test "a resync still in the ring is not asked for again from its stale gap"
+    (let ((r (shell-frames 0.2 480)))
+      (assert-equal "requests 1 resyncs 1 cancels 0" (car r))
+      (assert-true (< (abs (cadr r)) 0.005)))
+    (assert-false (audio-initialized?)))
+
+  ;; The ear 100 ms ahead: the request is made at +65 ms, and by the bar
+  ;; line the 2% nudge has closed the gap to about +36 ms. The jump would
+  ;; cut the held notes for nothing; it is cancelled.
+  (test "a queued resync re-checks the gap when it would run and is cancelled within 60 ms"
+    (let ((r (shell-frames -0.1 480)))
+      (assert-equal "requests 1 resyncs 0 cancels 1" (car r))
+      (assert-false (list-ref (music-readout) 8))
+      (assert-true (< (abs (cadr r)) RESYNC-GAP)))
+    (assert-false (audio-initialized?)))
+
+  ;; The same 200 ms lead through the shell's own frame, where
+  ;; core-advance! paces and asks and service-audio! runs the jump.
+  (test "the shell's frame makes one resync for a 200 ms lead and cancels none"
+    (set-store-root! "/tmp/signal-conductor-resync-test-store")
+    (core-param! "mute")
+    (core-boot! 'desktop)
+    (music-start! 'offline-test-context (race-song (core-race)))
+    ;; the new stream resets the clock, and the next interval is skipped
+    (core-headless-frame! (/ 1.0 60.0))
+    (core-headless-frame! (/ 1.0 60.0))
+    (assert-equal 0 (conductor-tick (race-song (core-race))))
+    (let ((out (make-bytevector (* 8 735) 0))
+          (resyncs (list-ref (music-readout) 7))
+          (cancels (list-ref (music-readout) 9)))
+      ;; one long frame the ring plays nothing of: the simulation is
+      ;; about 200 ms ahead of the ear after it (0.2 s less the nudge's
+      ;; 2% is 11 ticks and a remainder)
+      (core-headless-frame! 0.2)
+      (assert-equal 11 (conductor-tick (race-song (core-race))))
+      (let loop ((frame 0))
+        (when (< frame 480)
+          (%audio-stream-drain-for-test out 735 2)
+          (core-headless-frame! (/ 1.0 60.0))
+          (loop (+ frame 1))))
+      (assert-equal "resyncs 1 cancels 0"
+                    (counts "resyncs" (- (list-ref (music-readout) 7) resyncs)
+                            "cancels" (- (list-ref (music-readout) 9) cancels)))
+      (assert-true (< (abs (- (music-audible-seconds)
+                              (/ (conductor-tick (race-song (core-race))) 60.0)))
+                      RESYNC-GAP)))
+    (music-close!)
     (assert-false (audio-initialized?))))

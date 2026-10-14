@@ -213,6 +213,19 @@
       (assert-equal #f (pacing-resync? again))
       (assert-true (pacing-resync? next))))
 
+  ;; Until its first corrected sample is heard, a resync leaves the gap
+  ;; reading the old epoch; a new bar must not ask for it again.
+  (test "no resync request while one is in flight; the nudge still runs"
+    (let* ((p (pace-frame (pacing-new) 1.0 5.0 6.0 #t #f 3))
+           (queued (pace-frame p 1.0 5.0 6.0 #t #f 4 in-flight: #t))
+           (heard (pace-frame queued 1.0 5.0 6.0 #t #f 4 in-flight: #f)))
+      (assert-true (pacing-resync? p))
+      (assert-equal #f (pacing-resync? queued))
+      (assert-equal 3 (pacing-last-resync-bar queued))
+      (assert-equal 1.02 (pacing-dt queued))
+      (assert-true (pacing-resync? heard))
+      (assert-equal 4 (pacing-last-resync-bar heard))))
+
   (test "pause freezes pacing; suspended audio uses wall time"
     (assert-equal 0.0 (pacing-dt (pace-frame (pacing-new) 1.0 0.0 4.0 #t #t 0)))
     (let ((p (pace-frame (pacing-new) 1.0 0.0 4.0 #f #f 0)))
