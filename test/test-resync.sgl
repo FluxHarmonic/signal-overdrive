@@ -314,7 +314,38 @@
         (assert-equal "8 or 9" (if (memv ticks '(8 9)) "8 or 9" (counts "ticks" ticks))))
       (assert-false (list-ref (music-readout) 8)))
     (music-close!)
+    (assert-false (audio-initialized?)))
+
+  ;; A race start restarts the song at tick zero and asks to skip the next
+  ;; interval: the rest of that frame was the old race's. The new stream
+  ;; opens in the same frame, so the next interval is already bounded at
+  ;; the opening, and skipping it dropped what the ear heard after: a long
+  ;; frame after a native race start left the simulation 104 ms behind.
+  (test "the frame after a race start counts the time since the new stream opened"
+    (set-store-root! "/tmp/signal-conductor-resync-test-store")
+    (core-param! "mute")
+    (core-boot! 'desktop)
+    (let ((out (make-bytevector (* 8 6615) 0)))
+      (music-start! 'offline-test-context (race-song (core-race)))
+      (let loop ((n 0))
+        (when (< n 30)
+          (%audio-stream-drain-for-test out 735 2)
+          (core-headless-frame! (/ 1.0 60.0))
+          (loop (+ n 1))))
+      (core-param! "start")
+      (core-headless-frame! (/ 1.0 60.0))
+      (assert-equal 'countdown (race-phase (core-race)))
+      (assert-equal 0 (conductor-tick (race-song (core-race))))
+      ;; 150 ms played, and passed, then a frame that long
+      (%audio-stream-drain-for-test out 6615 2)
+      (wait-since (music-opened-jiffy) 0.15)
+      (core-headless-frame! 0.15)
+      (let ((ticks (conductor-tick (race-song (core-race)))))
+        (assert-equal "8 or 9" (if (memv ticks '(8 9)) "8 or 9" (counts "ticks" ticks))))
+      (assert-false (list-ref (music-readout) 8)))
+    (music-close!)
     (assert-false (audio-initialized?))))
+
 
 (test-group "resync: a stream opened mid-song"
   ;; The web opens the music on the first gesture, after the gate and the

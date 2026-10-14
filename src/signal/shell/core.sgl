@@ -946,6 +946,13 @@
                       frame-jiffy: *frame-jiffy*)
         (unless (= *music-generation* (music-generation))
           (set! *music-generation* (music-generation))
+          ;; A new stream bounds the next interval at its opening (in
+          ;; core-advance!), so a skip asked for it (a race start: the
+          ;; rest of the frame was the old race's) would only drop what
+          ;; the ear hears after the opening: a 628 ms frame after a native
+          ;; race start left the simulation 104 ms behind and cost a
+          ;; resync at the countdown. Without music the skip stands.
+          (set! *skip-interval* #f)
           (when (= 0 (conductor-tick (race-song *race*)))
             ;; A new song's stream: the clock and pacing start over. The
             ;; setup before it opened is never counted (no interval
