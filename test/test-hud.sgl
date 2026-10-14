@@ -42,3 +42,31 @@
     (assert-true (every? (lambda (k) (> (cadr (popup-look k #t)) 0.0)) 0 50)))
   (test "in full motion they rise a row every 6 ticks, opaque, as before"
     (assert-true (every? (lambda (k) (equal? (list (quotient k 6) 1.0) (popup-look k #f))) 0 50))))
+
+;; popups aged n ticks, as the shell ages them
+(define (age-popups ps n)
+  (map (lambda (p) (list (car p) (cadr p) (+ n (caddr p)) (cadddr p))) ps))
+
+(test-group "popup slots"
+  (test "two at once with reduced motion: each its own row, apart, still, both readable"
+    (let* ((ps (popups-add (popups-add '() "-12" "#F2731A" #t) "-3" "#FF5959" #t))
+           (a (cadr ps)) (b (car ps)))
+      (assert-true (every? (lambda (k)
+                             (let ((ra (popup-row (car (age-popups (list a) k)) #t))
+                                   (rb (popup-row (car (age-popups (list b) k)) #t)))
+                               ;; the text is 7 rows high: rows apart by 8 or more never overlap
+                               (and (>= (abs (- ra rb)) 8)
+                                    (= ra (popup-row a #t)) (= rb (popup-row b #t)))))
+                           0 50))))
+  (test "with all slots taken, a new one takes the oldest's, and every live one keeps its own"
+    (let* ((full (let loop ((k 0) (ps '()))
+                   (if (= k POPUP-SLOTS) ps (loop (+ k 1) (popups-add (age-popups ps 5) "-1" "#FF5959" #t)))))
+           (more (popups-add full "+" "#4DF2D9" #t))
+           (slots (map cadddr more)))
+      (assert-equal POPUP-SLOTS (length more))
+      (assert-equal (cadddr (car (reverse full))) (cadddr (car more)))
+      (assert-true (every? (lambda (k) (memv k slots)) 0 POPUP-SLOTS))))
+  (test "in full motion each starts in slot 0 and rises, as before"
+    (let ((ps (popups-add (popups-add '() "-12" "#F2731A" #f) "-3" "#FF5959" #f)))
+      (assert-equal '(0 0) (map cadddr ps))
+      (assert-true (every? (lambda (k) (= (- 15 (quotient k 6)) (popup-row (car (age-popups ps k)) #f))) 0 50)))))

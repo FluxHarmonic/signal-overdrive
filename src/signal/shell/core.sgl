@@ -104,8 +104,8 @@
     (define *kick* 0.0)          ; a boost's camera punch, 1 then decaying
     (define *glitch* 0.0)        ; the screen's glitch: wall hits, ICE
     (define *corrupt* 0.0)       ; corrupt cargo, ramping to 1
-    (define *popups* '())        ; ((text colour age) ...) by the meter
-    (define (popup! text colour) (set! *popups* (cons (list text colour 0) *popups*)))
+    (define *popups* '())        ; ((text colour age slot) ...) by the meter
+    (define (popup! text colour) (set! *popups* (popups-add *popups* text colour *reduce-motion*)))
 
     ;; The best lap's ghost. The player's positions are recorded every tick
     ;; of the lap being driven; when a lap ends as the best yet on this
@@ -167,7 +167,8 @@
         (set! *popups* (let keep ((ps *popups*))
                          (cond ((null? ps) '())
                                ((> (caddr (car ps)) 50) (keep (cdr ps)))
-                               (else (cons (list (car (car ps)) (cadr (car ps)) (+ 1 (caddr (car ps)))) (keep (cdr ps)))))))))
+                               (else (let ((p (car ps)))
+                                       (cons (list (car p) (cadr p) (+ 1 (caddr p)) (cadddr p)) (keep (cdr ps))))))))))
     ;; --- the 0.1 effects ---------------------------------------------------------------
     ;; (signal fx state), stepped every tick from the stub's pulse (the
     ;; conductor's later: see (signal fx beat)), the player's events and

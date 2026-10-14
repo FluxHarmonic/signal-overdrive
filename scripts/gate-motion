@@ -17,8 +17,8 @@
 #   prompt, title, traced  (the race's title prompt, the title screen's
 #           prompt, TRACED. on the final lap) are shown steady
 #   thrust  (the machines' thrusters) glow steady, no flicker
-#   popup   (the damage popups beside the meter) appear in place and fade,
-#           without rising
+#   popup   (the damage popups beside the meter) appear in place, each in a
+#           row of its own (a slot), and fade, without rising
 #
 # How: the web build (default build/web), with no machines (?nosprites:
 # their thrusters flicker) but for the thrusters' own case. The effects run on the race's title phase with
@@ -53,9 +53,11 @@
 # flickers); in full motion they differ. The popup: driven over the start
 # line by a touch's throttle, a boost (?boost-lap=1, the touch's boost flag)
 # and a burst through the popup's life,
-# counting its orange above its row and in it: with reduced motion never
-# above, and shown in it; in full motion above (it rose). Its fade is
-# test/test-hud.sgl's (a see-through colour is not the exact one counted).
+# counting its orange in the slots' rows and off them: with reduced motion
+# never off them (above slot 0, or between slots), and shown in them; in
+# full motion above slot 0 (it rose). Two at once both readable, and the
+# fade (a see-through colour is not the exact one counted), are
+# test/test-hud.sgl's.
 # Prints GREEN, RED or SETUP-FAILED with the counts, and exits 0, 1 or 2.
 # Renders on the GPU when GPU=1 (default), SwiftShader with GPU=0.
 # MOTION_OUT names a fresh directory for the captures (default: a new
@@ -182,9 +184,12 @@ TH_CTRL=0; for j in 1 2 3 4 5 6 7 8 9; do
 TH_BASE=""; for j in 0 1 2 3 4 5 6 7 8 9; do
   v=$(count "$OUT/thrust-reduce/t0.png" "$OUT/thrust-full/t$j.png" $H 0)
   if [ -z "$TH_BASE" ] || [ "${v:-999999}" -lt "$TH_BASE" ]; then TH_BASE=${v:-999999}; fi; done
-# the boost's -12 popup (orange, beside the meter, from row 15): never above
-# its row with reduced motion; risen in full motion
-PP_R=$(texts popup reduce 318 15 62 9 "#F2731A"); PP_RH=$(texts popup reduce 318 5 62 10 "#F2731A")
+# the boost's -12 popup (orange, beside the meter): with reduced motion only
+# ever in a slot's rows (slot k from row 15 + 9k, 7 rows; none above slot 0
+# or in the 2 rows between slots) and shown there; risen above row 15 in
+# full motion
+PP_R=$(texts popup reduce 318 15 62 34 "#F2731A")
+PP_RH="$(max $(texts popup reduce 318 5 62 10 "#F2731A")) $(max $(texts popup reduce 318 22 62 2 "#F2731A")) $(max $(texts popup reduce 318 31 62 2 "#F2731A")) $(max $(texts popup reduce 318 40 62 2 "#F2731A"))"
 PP_FH=$(texts popup full 318 5 62 10 "#F2731A")
 # a text is shown at 3/4 of the full-motion burst's fullest shot
 shown() { echo $(( $(max $1) * 3 / 4 )); }
@@ -199,7 +204,7 @@ echo "prompt: $P_R (full: $P_F; shown from $P_T)"
 echo "title:  $T_R (full: $T_F; shown from $T_T)"
 echo "traced: $R_R (full: $R_F; shown from $R_T)"
 echo "thrust: moved $TH_1 then $TH_2; off the full-motion frame by $TH_BASE (full: flickered $TH_CTRL)"
-echo "popup:  in its row $PP_R; above it $PP_RH (full, above its row: $PP_FH)"
+echo "popup:  in the slots' rows $PP_R; off them (above, gaps) $PP_RH (full, above its row: $PP_FH)"
 echo "(pixels at scale $SCALE; captures in $OUT)"
 for v in "$G_SHOW" "$G_STILL" "$G_CTRL" "$W_STILL" "$W_CUE" "$W_CTRL" "$I_STILL" "$I_CUE" "$I_CTRL" \
          "$D_SHOW" "$D_STILL" "$D_CTRL" "$L_STILL" "$L_CUE" "$L_CTRL" "$K_1" "$K_2" "$K_CTRL" \
@@ -232,9 +237,9 @@ red=""
 [ "$(min $R_R)" -ge $R_T ] || red="$red; TRACED. blinks ($R_R)"
 [ "$TH_1" -eq 0 ] && [ "$TH_2" -eq 0 ] || red="$red; the thrusters flicker ($TH_1, $TH_2 px)"
 [ "$TH_BASE" -eq 0 ] || red="$red; the machines are not drawn as between flickers ($TH_BASE px off)"
-[ "$(max $PP_RH)" -eq 0 ] || red="$red; the popup rises ($PP_RH)"
+[ "$(max $PP_RH)" -eq 0 ] || red="$red; the popup leaves its slot's rows ($PP_RH)"
 # shown: some of its orange in its row (the wall hits' red popups, from the
 # unsteered drive, can cover part of it)
-[ "$(max $PP_R)" -ge 20 ] || red="$red; the popup is not shown in its row ($PP_R)"
+[ "$(max $PP_R)" -ge 20 ] || red="$red; the popup is not shown in a slot ($PP_R)"
 if [ -n "$red" ]; then echo "RED: with reduced motion${red#;}"; exit 1; fi
 echo "GREEN: with reduced motion the glitch and the dip show nothing, the camera does not kick, the warp's reticle, the interference's colour and the speed lines stand still, the prompts, TRACED. and the thrusters hold steady, and the popups stay in their row"

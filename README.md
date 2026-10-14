@@ -53,14 +53,15 @@ through the Flux Harmonic palette and Bayer dither pass.
 - Reduced motion (the browser's preference, or `?motion=reduce`): the
   signal's effects keep their meaning in colour and the HUD, and nothing
   tears, ripples, rolls or flickers. A wall hit or ICE shows in the meter's
-  flash and the pop-ups, with no glitch; corrupt cargo turns the picture
-  red without tearing it; a tracer's amber reticle stands still on the road,
+  flash and the pop-ups, with no glitch; corrupt cargo turns the picture red
+  without tearing it; a tracer's amber reticle stands still on the road,
   with no ripple; low integrity's interference keeps its red bleed in the
   sky and the HUD, standing still. Blinking text (ICE, TRACED., the title's
   prompts, the meter under 30) is shown steady in its colour, and so are the
-  machines' thrusters; damage pop-ups appear in place and fade instead of
-  rising; the camera's kick and the horizon's dip are off; the speed lines stand still, still
-  swelling on a boost. `scripts/gate-motion` checks it.
+  machines' thrusters; damage pop-ups appear in place, each in a row of its
+  own, and fade instead of rising; the camera's kick and the horizon's dip
+  are off; the speed lines stand still, still swelling on a boost.
+  `scripts/gate-motion` checks it.
 - Placeholder sound, synthesized: an engine that follows your speed, a boost
   whoosh, a wall scrape. On the web it starts at your first key or tap.
 - The best lap's ghost, see-through, from your second lap on (per track, for

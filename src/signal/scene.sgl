@@ -36,7 +36,8 @@
           (signal music conductor))
 
   (export VIEW-W VIEW-H scene-init! scene-ready? scene-frame! scene-camera
-          scene-world-ms speed-kmh lap-clock hud-blink? meter-colour popup-look)
+          scene-world-ms speed-kmh lap-clock hud-blink? meter-colour popup-look
+          popups-add popup-row POPUP-SLOTS)
 
   (begin
     (define VIEW-W 480)
@@ -501,6 +502,27 @@
     ;; meter-shown: the integrity the meter showed last frame, easing down to
     ;; the real one, so what a hit or a boost spent drains away in white
     (define *meter-shown* 100.0)
+    ;; Damage popups, beside the meter: (text colour age slot). In full
+    ;; motion each starts in slot 0 and they rise apart. With reduced motion
+    ;; nothing moves, so each new one takes the next free slot, a row of its
+    ;; own under the last (SLOT-ROWS apart, POPUP-SLOTS of them; with all
+    ;; taken, the oldest makes way), and none can hide another.
+    (define POPUP-SLOTS 4)
+    (define SLOT-ROWS 9)
+    (define (popups-add popups text colour calm?)
+      (if (not calm?)
+          (cons (list text colour 0 0) popups)
+          (let ((free (let loop ((k 0))
+                        (cond ((= k POPUP-SLOTS) #f)
+                              ((memv k (map cadddr popups)) (loop (+ k 1)))
+                              (else k)))))
+            (if free
+                (cons (list text colour 0 free) popups)
+                (let ((oldest (car (reverse popups))))
+                  (cons (list text colour 0 (cadddr oldest)) (reverse (cdr (reverse popups)))))))))
+    ;; The row a popup's text starts on, at its age.
+    (define (popup-row p calm?)
+      (- (+ 15 (* SLOT-ROWS (cadddr p))) (car (popup-look (caddr p) calm?))))
     ;; A damage popup's rise (rows) and opacity at its age (ticks; it lives
     ;; 50): rising a row every 6 ticks, opaque; with reduced motion in
     ;; place, fading out over its last 20 ticks.
@@ -556,14 +578,15 @@
         ;; the integrity meter, top centre
         (centred! "INTEGRITY" 6 "#7380A6")
         (meter! (- (/ VIEW-W 2) 75) 15 (machine-integrity m) (cdr (assq 'flash info)) tick)
-        ;; what the last moments did to the cargo: (text colour age) rising
-        ;; (with reduced motion, in place and fading: popup-look)
+        ;; what the last moments did to the cargo: (text colour age slot)
+        ;; rising (with reduced motion, each in its own row, fading:
+        ;; popups-add, popup-look)
         (for-each (lambda (pp)
                     (let ((age (caddr pp)))
                       (when (< age 50)
                         (let ((look (popup-look age *calm*)))
                           (set! *alpha* (cadr look))
-                          (text! (car pp) (+ (/ VIEW-W 2) 80) (- 15 (car look)) (cadr pp))
+                          (text! (car pp) (+ (/ VIEW-W 2) 80) (popup-row pp *calm*) (cadr pp))
                           (set! *alpha* 1.0)))))
                   (cdr (assq 'popups info)))
         (cond ((> (machine-scramble m) 0.0)
