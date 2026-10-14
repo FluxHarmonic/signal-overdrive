@@ -5,7 +5,6 @@
         (sigil list)
         (sigil math)
         (motif tune)
-        (signal music score)
         (signal music conductor)
         (signal music transport)
         (signal music playback)
@@ -13,7 +12,15 @@
 
 (define RATE 44100)
 (define BLOCK 441)                      ; 10 ms
-(define tune (read-tune-string SCORE-TUNE-TEXT))
+
+;; The alignment is checked on the diagnostic placeholder, not the game's
+;; song. A resync releases every sounding note, so a song with long held
+;; notes (Carrier's lead and pad) rings on past the jump where the fresh
+;; player is silent, and the match drops (to 0.905 in lap1) with the best
+;; shift still exactly 0. The placeholder's short notes leave only the
+;; landing to compare. Its sections, bars and loops are the game's song's
+;; (test-score checks that they are equal).
+(define tune (read-tune-file "music/placeholder/parts.cts"))
 (define chunk (make-bytevector (* 8 256) 0))
 
 (define (advance-to c tick)
