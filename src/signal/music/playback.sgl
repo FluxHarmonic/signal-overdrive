@@ -9,7 +9,7 @@
           (signal music clock))
   (export playback-open playback-pull! playback-close! playback-player
           playback-origin-frame playback-walker-frame playback-log playback-missed
-          playback-set-region! playback-bar-distance playback-resync!
+          playback-set-region! playback-bar-distance playback-resync! playback-seek-start!
           playback-rendered playback-can-resync?)
   (begin
     (define-struct playback
@@ -79,6 +79,23 @@
       ;; first; then all resets use public APIs and cannot leave it stale.
       (unless (playback-can-resync? b)
         (error "resync must wait for the pending Motif mark"))
+      (let ((frame (jump! b target)))
+        (set-playback-log! b
+          (cons (vector 'resync (conductor-section target) (conductor-bar target)
+                        frame (playback-rendered b))
+                (playback-log b)))
+        frame))
+
+    ;; A playback that has rendered nothing, moved to TARGET as if opened
+    ;; there (the same bytes): the shell builds the player ahead of the
+    ;; sound and starts it where the song is when the sound starts.
+    (define (playback-seek-start! b target)
+      (unless (= 0 (playback-rendered b))
+        (error "playback-seek-start! after rendering" (playback-rendered b)))
+      (jump! b target)
+      b)
+
+    (define (jump! b target)
       (let* ((p (playback-player b))
              (position (conductor-position target))
              (frame (exact (round (* (tick->song-row (conductor-tick target))
@@ -88,10 +105,6 @@
         (player-jump! p (car position) (cdr position))
         (set-playback-origin-frame! b (- frame (playback-rendered b)))
         (set-playback-requested! b #f)
-        (set-playback-log! b
-          (cons (vector 'resync (conductor-section target) (conductor-bar target)
-                        frame (playback-rendered b))
-                (playback-log b)))
         frame))
 
     (define (request-jump! b c)

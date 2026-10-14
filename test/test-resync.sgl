@@ -25,6 +25,16 @@
       c
       (advance-to (conductor-step c) tick)))
 
+;; FRAMES of B's output for conductor C, pulled 256 at a time.
+(define (pulled b c frames)
+  (let ((out (make-bytevector (* 8 frames) 0)))
+    (let loop ((off 0))
+      (when (< off frames)
+        (let ((n (min 256 (- frames off))))
+          (playback-pull! b c out (* 8 off) n)
+          (loop (+ off n)))))
+    out))
+
 (define (reach-next-bar b c)
   (let loop ()
     (let ((distance (playback-bar-distance b)))
@@ -129,6 +139,49 @@
           (assert-equal 378000 (vector-ref land 3))))
       (assert-equal 0 (playback-missed b))
       (playback-close! b))
+    (assert-false (audio-initialized?)))
+
+  ;; The web builds the music's player on its start gate, where the song
+  ;; is somewhere else than when the sound starts; the start moves it.
+  (test "a playback built ahead and moved to the start renders as one opened there"
+    (for-each
+      (lambda (case)
+        (let* ((at (advance-to (conductor-new (list-ref case 0)) (list-ref case 1)))
+               (start (transport-start-conductor
+                        (transport-start (advance-to (conductor-new (list-ref case 2)) (list-ref case 3))
+                                         RATE)))
+               (opened (playback-open tune RATE start MUSIC-INSERTS))
+               (ahead (playback-seek-start! (playback-open tune RATE at MUSIC-INSERTS) start)))
+          (assert-equal (playback-origin-frame opened) (playback-origin-frame ahead))
+          (assert-equal (pulled opened start 44100) (pulled ahead start 44100))
+          (assert-false (find (lambda (e) (eq? 'resync (vector-ref e 0))) (playback-log ahead)))
+          (assert-error (playback-seek-start! ahead start))
+          (playback-close! opened)
+          (playback-close! ahead)))
+      '((calm 30 grid 100) (calm 0 calm 200) (lap1 0 lap1 500) (lap1 400 lap1 2000))))
+
+  (test "the music starts a prepared player with the same samples as a fresh one"
+    (let ((c (advance-to (conductor-new 'lap1) 500))
+          (out (make-bytevector (* 8 735) 0)))
+      (define (heard)
+        (music-start! 'offline-test-context c)
+        (let loop ((n 0) (acc '()))
+          (if (= n 120)
+              (begin (music-close!) (apply bytevector-append (reverse acc)))
+              (begin
+                (%audio-stream-drain-for-test out 735 2)
+                (let ((copy (bytevector-copy out)))
+                  (music-frame! c #f)
+                  (loop (+ n 1) (cons copy acc)))))))
+      (let ((fresh (heard)))
+        ;; the song sounds in it (the same silence twice would match too)
+        (assert-true (let loop ((i 0))
+                       (and (< i (bytevector-length fresh))
+                            (or (not (= 0 (bytevector-u8-ref fresh i))) (loop (+ i 1))))))
+        (music-prepare-playback! 'offline-test-context (conductor-new 'calm))
+        (let ((prepared (heard)))
+          (assert-equal fresh prepared)
+          (assert-false (find (lambda (e) (eq? 'resync (vector-ref e 0))) (music-log))))))
     (assert-false (audio-initialized?)))
 
   (test "the sink changes its clock epoch only when the corrected sample reaches the ear"

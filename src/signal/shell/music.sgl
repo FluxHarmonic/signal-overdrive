@@ -13,7 +13,7 @@
           (signal music transport)
           (signal music playback)
           (signal music inserts))
-  (export music-prepare! music-start! music-frame! music-close! music-reset! music-running?
+  (export music-prepare! music-prepare-playback! music-start! music-frame! music-close! music-reset! music-running?
           music-audible-seconds music-depth! music-latency! music-readout
           music-request-resync! music-resync-in-flight? music-log music-sabotage! music-generation
           music-opened-jiffy
@@ -152,12 +152,39 @@
     ;; alone retains context for ordinary pause/resume within a session.
     (define (music-reset!)
       (music-close!)
+      (drop-prepared!)
       (set! *ctx* #f))
 
     ;; The score, parsed ahead of the sound: on the web the start is a
     ;; gesture's work, and the frame after it pays for every millisecond.
     (define (music-prepare!)
       (unless *tune* (set! *tune* (read-tune-string SCORE-TUNE-TEXT))))
+
+    ;; The player built ahead of the sound, #(playback rate mode): on the
+    ;; web's start gate, once the context gives its rate. Building its
+    ;; voices and inserts took about 230 ms of the first gesture.
+    ;; music-start! moves it to where the song is then, which renders the
+    ;; same bytes as opening it there; a later start builds its own.
+    (define *prepared* #f)
+    (define (music-prepare-playback! ctx c)
+      (when (and ctx (not *stream*) (not *prepared*))
+        (music-prepare!)
+        (let ((rate (audio-context-sample-rate ctx)))
+          (set! *prepared*
+            (vector (playback-open *tune* rate c MUSIC-INSERTS mode: *handoff-mode*)
+                    rate *handoff-mode*)))))
+    (define (drop-prepared!)
+      (when *prepared*
+        (playback-close! (vector-ref *prepared* 0))
+        (set! *prepared* #f)))
+    (define (start-playback c)
+      (let ((p *prepared*))
+        (set! *prepared* #f)
+        (if (and p (= (vector-ref p 1) *rate*) (eq? (vector-ref p 2) *handoff-mode*))
+            (playback-seek-start! (vector-ref p 0) c)
+            (begin
+              (when p (playback-close! (vector-ref p 0)))
+              (playback-open *tune* *rate* c MUSIC-INSERTS mode: *handoff-mode*)))))
 
     (define (music-start! ctx c)
       (set! *ctx* ctx)
@@ -168,9 +195,7 @@
         (let ((plan (transport-start c *rate*)))
           ;; Construct all voice/insert graphs before exposing an empty
           ;; ring to the device callback. This also applies on restart.
-          (set! *playback* (playback-open *tune* *rate*
-                                        (transport-start-conductor plan) MUSIC-INSERTS
-                                        mode: *handoff-mode*))
+          (set! *playback* (start-playback (transport-start-conductor plan)))
           (set! *epoch* (transport-start-epoch plan))
           (set! *last-resync-bar* -1)
           (set! *start-conductor* (transport-start-conductor plan))

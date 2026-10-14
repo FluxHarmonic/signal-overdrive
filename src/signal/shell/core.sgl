@@ -957,9 +957,12 @@
                       *frame-events*)
         ;; The cue bank, a few milliseconds a frame: more before the sound
         ;; starts (on the web's start gate, which opens a suspended context
-        ;; for its rate), less once the music plays.
+        ;; for its rate), less once the music plays. On the web the music's
+        ;; player is built there too, in one frame, while the music is off.
         (tune-audio!)
         (audio-prepare! (if (audio-started?) 3.0 8.0) (eq? *platform* 'web))
+        (when (eq? *platform* 'web)
+          (music-prepare-playback! (audio-context) (race-song *race*)))
         (set! *audio-ms* (ease *audio-ms* (ms-since t0)))))
 
     (define (finish-frame!)
