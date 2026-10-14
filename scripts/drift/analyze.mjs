@@ -154,8 +154,8 @@ export function assess(errors, coverage) {
 }
 
 // Each sabotage arm must go RED for its own defect. The signature is read
-// from the matched windows: immediate lands a bar early (one bar is 12/7 s
-// at 140 BPM), depth runs the simulation a ring ahead of the ear, skew
+// from the matched windows: immediate lands sections a bar or more early
+// (one bar is 12/7 s at 140 BPM), depth runs the simulation a ring ahead of the ear, skew
 // makes the error fall by about 10 ms a second between resyncs.
 export function armSignature(arm, analysis, clocks) {
   const BAR_MS = 12000 / 7;

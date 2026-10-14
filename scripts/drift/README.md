@@ -88,7 +88,7 @@ Each must be RED and show its own defect's signature in `analysis.json`:
 | arm | planted defect | signature |
 |---|---|---|
 | `depth` | the audible clock does not subtract the queued sink depth; resyncs are disabled in this arm only (they project with the real depth and would hide it) | median error between -350 and -150 ms (the simulation a ring ahead of the ear) |
-| `immediate` | section jumps handed to the player at once instead of in bar N-1 | median error within 100 ms of +1714 ms (one bar) after lap1 |
+| `immediate` | section jumps handed to the player at once instead of in bar N-1 | at least half the windows after lap1 off by a bar (1714 ms) less 100 ms or more, either way (measured: one bar, 1.5 and 2.5 bars, and a two-bar alias at -1681 ms) |
 | `skew` | the nudge disabled and a 1% clock skew planted | the error falls at least 5 ms a second between resyncs (1% is 10) |
 
 ## Running a capture
