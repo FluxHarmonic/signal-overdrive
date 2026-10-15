@@ -1,8 +1,9 @@
 # Reserved marks
 
-Everything under `assets/` is CC-BY-4.0 (the licence file comes with the
-0.1 release), credit David Wilson / Flux Harmonic, except the items listed
-here, which are reserved and not licensed for reuse:
+Everything under `assets/`, and the tunes in `music/` (the `.cts` files),
+is CC-BY-4.0 (see `assets/LICENSE`), credit David Wilson / Flux Harmonic,
+except the items listed here, which are reserved and not licensed for
+reuse:
 
 - The name "Signal Overdrive"
 - The logo (the CORRUPT wordmark and its square mark): the title's
