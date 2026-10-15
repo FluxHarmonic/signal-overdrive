@@ -104,21 +104,6 @@
 
 (define (cents f g) (* 1200.0 (/ (log (/ f g)) (log 2.0))))
 
-;; The left channel's energy above 3 kHz: two Butterworth high-pass biquads
-;; in series (24 dB an octave), from frame A on (B: the end).
-(define (bright bv a b)
-  (let* ((w (/ (* 2.0 3.141592653589793 3000.0) RATE)) (c (cos w))
-         (alpha (/ (sin w) (* 2.0 0.70710678))) (a0 (+ 1.0 alpha))
-         (b0 (/ (/ (+ 1.0 c) 2.0) a0)) (b1 (/ (- (+ 1.0 c)) a0)) (b2 b0)
-         (a1 (/ (* -2.0 c) a0)) (a2 (/ (- 1.0 alpha) a0)))
-    (let loop ((k 0) (sum 0.0) (x1 0.0) (x2 0.0) (y1 0.0) (y2 0.0) (z1 0.0) (z2 0.0))
-      (if (>= k b)
-          sum
-          (let* ((x (sample bv (* 2 k)))
-                 (y (- (+ (* b0 x) (* b1 x1) (* b2 x2)) (* a1 y1) (* a2 y2)))
-                 (z (- (+ (* b0 y) (* b1 y1) (* b2 y2)) (* a1 z1) (* a2 z2))))
-            (loop (+ k 1) (if (>= k a) (+ sum (* z z)) sum) x x1 y y1 z z1))))))
-
 ;; The mean of the 16ths the tier does not cut (the cutouts are their own
 ;; layer, measured apart, as M0 measured its stems through the inserts).
 (define (uncut-power bv frames org tier)
@@ -251,14 +236,20 @@
       ;; the pad at FAILING is at 0.35 (-9 dB) and darker; out at CRITICAL
       (check! 'pad-failing (< (gone 5 20.0) -9.0) (gone 5 20.0))
       (check! 'pad-critical (< (gone 5 5.0) -60.0) (gone 5 5.0))
-      ;; and darker: above 3 kHz, well under the gain's 9 dB (1200 Hz)
-      (let* ((top (lambda (i) (let* ((b (open-damage no-tone 5 start: LAP2))
-                                     (n (exact (round (* 4 BAR))))
-                                     (bv (car (render b n i c: LAP2))))
-                                (playback-close! b)
-                                (bright bv (quotient RATE 10) n))))
-             (darker (db (/ (top 20.0) (top 90.0)))))
-        (check! (quote pad-darker) (< darker -25.0) darker))
+      ;; and darker: its low-pass at 1200 Hz, read on two tones through
+      ;; channel 5's chain. 4 kHz against 200 Hz, FAILING less CLEAN, so the
+      ;; gain, chorus and cutouts cancel: two 1200 Hz biquads put 4 kHz about
+      ;; 42 dB down; left open, it measured +5.8 dB. (The pad's own energy above 3 kHz
+      ;; moved only 2.7 dB between the two, so it did not read the filter.)
+      (let* ((pair (lambda (ch) (and (= ch 5) (lambda () (g:add (g:sine 200.0 0.25) (g:sine 4000.0 0.25))))))
+             (tilt (lambda (i) (let* ((b (open-damage pair 5 start: LAP2))
+                                      (n (exact (round (* 2 BAR))))
+                                      (bv (car (render b n i c: LAP2)))
+                                      (a (quotient RATE 10)))
+                                 (playback-close! b)
+                                 (db (/ (tone-power bv a (- n a) 4000.0) (tone-power bv a (- n a) 200.0))))))
+             (darker (- (tilt 20.0) (tilt 90.0))))
+        (check! (quote pad-darker) (< darker -30.0) darker))
       ;; the arp leaves at FAILING
       (check! 'arp-failing (< (gone 7 20.0) -60.0) (gone 7 20.0))
       ;; the snare and ticks leave at CRITICAL; the kick stays
