@@ -41,15 +41,15 @@ motif (the synth engine and the tune model behind the music)
 sigil-dsp (motif's DSP bindings)
   MIT. Copyright David Wilson. https://codeberg.org/sigil/sigil-dsp
 
-== Vendored in sigil-lib (every build) ==
-miniz
-  MIT. Copyright 2013-2014 RAD Game Tools and Valve Software;
-  Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC;
-  Copyright 2016 Martin Raiber. (vendor/miniz/LICENSE)
-minicoro
+== Vendored in sigil-lib ==
+minicoro (every build)
   MIT-0 or the Unlicense, at your option. Copyright (c) 2021-2023 Eduardo Bart.
   Embeds LuaCoco's context switching: MIT, Copyright (C) 2004-2016 Mike Pall.
   (vendor/minicoro/minicoro.h)
+miniz (the native builds)
+  MIT. Copyright 2013-2014 RAD Game Tools and Valve Software;
+  Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC;
+  Copyright 2016 Martin Raiber. (vendor/miniz/LICENSE)
 
 == Vendored in sigil-graphics (every build) ==
 sokol_gfx.h, sokol_log.h
