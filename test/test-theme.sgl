@@ -211,7 +211,7 @@
 (test-group "theme: the stream"
   (test "a preroll is silence, then the song fades in from its first sample"
     (assert-false (audio-initialized?))
-    (theme-reset!)
+    (theme-drop!)
     (theme-latency! 0.0)
     (theme-play! 'offline-test-context 'full 'top 0.0 0.3)
     (assert-true (theme-playing?))

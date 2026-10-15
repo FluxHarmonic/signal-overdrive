@@ -39,7 +39,7 @@
           (signal music theme-score))
   (export theme-prepare! theme-play! theme-release-now! theme-stop! theme-frame!
           theme-beat theme-reset! theme-playing? theme-closing? theme-version-now
-          theme-latency! theme-readout theme-cutoff-now)
+          theme-latency! theme-readout theme-cutoff-now theme-drop!)
   (begin
     (define PUSH 256)
     (define DEPTH-MS 250)
@@ -209,6 +209,16 @@
       (when *player*
         (jump! 'top)
         (version! 'full 0)))
+
+    ;; No player at all: the next play builds a fresh one (tests, so a
+    ;; check starts from what a first session has).
+    (define (theme-drop!)
+      (close!)
+      (set! *silence* 0)
+      (when *player* (player-close! *player*))
+      (set! *player* #f)
+      (set! *version* 'full)
+      (set! *pulled* 0))
 
     ;; (playing? closing? version volume underruns-sounding opens)
     (define (theme-readout)

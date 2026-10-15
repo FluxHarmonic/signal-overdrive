@@ -38,6 +38,8 @@
 ;; the tap, and per frame #(race-song-running? theme-playing? phase).
 (define (run-card n tap-at)
   (core-boot! 'desktop)
+  ;; a fresh theme player each run, so every run renders the same bytes
+  (theme-drop!)
   (music-start! 'offline-test-context (race-song (core-race)))
   ;; The frames below claim 1/60 s each but run back to back, and no
   ;; interval counts more than the real time since the stream opened. Let
@@ -100,12 +102,12 @@
 (define (assert-fade ms base end)
   (let ((ramp (gains ms base (+ base FADE 0.1)))
         (full (gains ms (+ base FADE 0.1) end)))
-    (assert-true (> (length ramp) 100))
-    (assert-true (> (length full) 100))
+    (unless (> (length ramp) 100) (assert-equal (quote ramp-slots) (list base (length ramp) (length full))))
+    (unless (> (length full) 100) (assert-equal (quote full-slots) (list base (length ramp) (length full))))
     (for-each (lambda (g)
-                (assert-true (<= (cdr g) (+ 0.001 (/ (+ (- (car g) base) 0.001 (/ 1.0 60.0)) FADE)))))
+                (unless (<= (cdr g) (+ 0.001 (/ (+ (- (car g) base) 0.001 (/ 1.0 60.0)) FADE))) (assert-equal (quote under-the-fade) (list base g))))
               ramp)
-    (for-each (lambda (g) (assert-true (< (abs (- (cdr g) 1.0)) 1.0e-6))) full)))
+    (for-each (lambda (g) (unless (< (abs (- (cdr g) 1.0)) 1.0e-6) (assert-equal (quote full-volume) (list base g)))) full)))
 
 (test-group "the song's wait (pure)"
   (test "the gate holds it; the card counts down to its lock; then at once"
@@ -134,12 +136,12 @@
            (t0 (vector-ref (vector-ref (vector-ref r 2) 0) 3))
            (lock (- LOCK (/ t0 60.0))))
       (assert-false (audio-initialized?))
-      (assert-true (<= t0 2))
+      (unless (<= t0 2) (assert-equal (quote t0) t0))
       ;; every sample before the lock is exactly silent, and the theme
       ;; starts at it (the reference, at full volume, sounds just after)
       (assert-equal 0.0 (loudest ms 0.0 (- lock 0.002)))
       (assert-equal 0.0 (loudest REF 0.0 (- lock 0.002)))
-      (assert-true (> (loudest REF lock (+ lock 0.5)) 0.01))
+      (unless (> (loudest REF lock (+ lock 0.5)) 0.01) (assert-equal (quote ref-sounds) (list t0 lock (loudest REF 0 6) (loudest REF lock (+ lock 0.5)) (loudest ms 0 6))))
       ;; from the lock it fades in, and plays in full after the fade
       (assert-fade ms lock 4.4)
       ;; the race song never played on the title
