@@ -1,10 +1,12 @@
-;;; The song waits for the card: no music sounds before the card's lock,
-;;; it fades in from the lock over card-song-fade seconds, and a skip lets
-;;; it in early with the same fade. The fade is the song stream's volume,
-;;; which the ring's mix applies, as the device does. The shell runs headless (muted, so only
-;;; the song is in the ring) on the native ring with no device; the test
-;;; shim drains one frame's worth of samples a frame, so the d-th sample
-;;; drained since the song started is heard at song time d / rate.
+;;; The title's music waits for the card: nothing sounds before the card's
+;;; lock, the main theme (Redline) fades in from it over card-song-fade
+;;; seconds from its first bar, and a skip lets it in early with the same
+;;; fade. The race song does not play on the title: it starts with the
+;;; race. Fades are the stream's volume, which the ring's mix applies, as
+;;; the device does. The shell runs headless (muted, so only the music is
+;;; in the ring) on the native ring with no device; the test shim drains
+;;; one frame's worth of samples a frame, so the d-th sample drained is
+;;; played at d / rate.
 
 (import (sigil test)
         (sigil audio)
@@ -15,6 +17,7 @@
         (signal intro)
         (signal music conductor)
         (signal shell music)
+        (signal shell theme)
         (signal shell core))
 
 (set-store-root! "/tmp/signal-card-song-test-store")
@@ -29,9 +32,10 @@
 
 (define (f32 bv i) (bytevector-ieee-single-ref bv (* 4 i) 'little))
 
-;; n frames of the shell from a fresh boot with the song started at once;
-;; (tap-at . frame) taps a start on that frame. Returns a vector of the
-;; loudest sample in each 1 ms of song time, and the song time of the tap.
+;; n frames of the shell from a fresh boot, the music's context bound as
+;; the audio start binds it; (tap-at . frame) taps a start on that frame.
+;; Returns a vector of the loudest sample in each 1 ms played, the time of
+;; the tap, and per frame #(race-song-running? theme-playing? phase).
 (define (run-card n tap-at)
   (core-boot! 'desktop)
   (music-start! 'offline-test-context (race-song (core-race)))
@@ -42,13 +46,16 @@
     (when (< (- (current-jiffy) (music-opened-jiffy)) (* 0.1 (jiffies-per-second)))
       (wait)))
   (let ((ms (make-vector (+ 2 (quotient (* 1000 n) 60)) 0.0))
+        (states (make-vector n #f))
         (tapped #f))
     (let loop ((k 0) (d 0))
       (when (< k n)
         (when (and tap-at (= k tap-at))
-          (set! tapped (/ (conductor-tick (race-song (core-race))) 60.0))
+          (set! tapped (/ d (* 1.0 RATE)))
           (core-tap!))
         (core-headless-frame! (/ 1.0 60.0))
+        (vector-set! states k (vector (music-running?) (theme-playing?) (race-phase (core-race))
+                                      (conductor-tick (race-song (core-race)))))
         (%audio-stream-drain-for-test out PER-FRAME 2)
         (let each ((j 0))
           (when (< j PER-FRAME)
@@ -59,29 +66,27 @@
             (each (+ j 1))))
         (loop (+ k 1) (+ d PER-FRAME))))
     (music-close!)
-    (cons ms tapped)))
+    (theme-stop! 0)
+    (vector ms tapped states)))
 
-;; the loudest sample in song time [a, b) seconds
+;; the loudest sample in [a, b) seconds
 (define (loudest ms a b)
   (let loop ((i (exact (floor (* 1000 a)))) (m 0.0))
     (if (or (>= i (exact (floor (* 1000 b)))) (>= i (vector-length ms)))
         m
         (loop (+ i 1) (max m (vector-ref ms i))))))
 
-;; The same song with no envelope (the card and the fade off: the race,
-;; and so the song, runs the same ticks either way), to read the volume
-;; each millisecond was played at.
+;; The same boot with no fade: the theme at the same times at full
+;; volume, to read the volume each millisecond was played at.
 (define REF
   (begin
-    (core-param! "card=0")
     (core-param! "card-song-fade=0")
-    (let ((ms (car (run-card 270 #f))))
-      (core-param! "card=1")
+    (let ((ms (vector-ref (run-card 270 #f) 0)))
       (core-param! (string-append "card-song-fade=" (number->string FADE)))
       ms)))
 
-;; The volume in each 1 ms slot of song time [a, b) where the song is not
-;; quiet: (seconds . the run's loudest sample / the reference's).
+;; The volume in each 1 ms slot of [a, b) where the music is not quiet:
+;; (seconds . the run's loudest sample / the reference's).
 (define (gains ms a b)
   (let loop ((i (exact (floor (* 1000 a)))) (acc '()))
     (if (or (>= i (exact (floor (* 1000 b)))) (>= i (vector-length ms)))
@@ -120,24 +125,63 @@
       (assert-equal 0 (intro-song-wait (intro-step i TUNING race #f #t) TUNING))
       (assert-equal 0 (intro-song-wait (intro-new (tuning-set TUNING 'card 0.0) #f) TUNING)))))
 
-(test-group "the song after the card (native ring, no device)"
-  (test "nothing sounds before the lock; it fades in from it and plays"
+(test-group "the title's music after the card (native ring, no device)"
+  (test "nothing sounds before the lock; the theme fades in from it and plays"
     (let* ((r (run-card 270 #f))
-           (ms (car r)))
+           (ms (vector-ref r 0))
+           ;; the theme opens in the first frame, after its tick: the lock
+           ;; is that many ticks sooner in the drained samples
+           (t0 (vector-ref (vector-ref (vector-ref r 2) 0) 3))
+           (lock (- LOCK (/ t0 60.0))))
       (assert-false (audio-initialized?))
-      ;; every sample before the lock is exactly silent (the song is there:
-      ;; the reference plays)
-      (assert-equal 0.0 (loudest ms 0.0 LOCK))
-      (assert-true (> (loudest REF 0.5 LOCK) 0.01))
+      (assert-true (<= t0 2))
+      ;; every sample before the lock is exactly silent, and the theme
+      ;; starts at it (the reference, at full volume, sounds just after)
+      (assert-equal 0.0 (loudest ms 0.0 (- lock 0.002)))
+      (assert-equal 0.0 (loudest REF 0.0 (- lock 0.002)))
+      (assert-true (> (loudest REF lock (+ lock 0.5)) 0.01))
       ;; from the lock it fades in, and plays in full after the fade
-      (assert-fade ms LOCK 4.4)))
+      (assert-fade ms lock 4.4)
+      ;; the race song never played on the title
+      (let loop ((k 0))
+        (when (< k 270)
+          (assert-false (vector-ref (vector-ref (vector-ref r 2) k) 0))
+          (loop (+ k 1))))))
 
-  (test "a skip lets the song in long before the lock, faded in the same way"
+  (test "a skip lets the theme in long before the lock, faded in the same way"
     (let* ((r (run-card 150 30))
-           (ms (car r))
-           (skip (cdr r)))
-      ;; silent until the skip, then the same fade from there, in full
-      ;; well before the lock would have let it in
+           (ms (vector-ref r 0))
+           (skip (vector-ref r 1))
+           ;; silence already queued (at most the 250 ms ring) still plays
+           (in (let find ((i (exact (floor (* 1000 skip)))))
+                 (if (or (>= i (vector-length ms)) (> (vector-ref ms i) 0.0))
+                     (/ i 1000.0)
+                     (find (+ i 1))))))
       (assert-equal 0.0 (loudest ms 0.0 skip))
-      (assert-true (< (+ skip FADE 0.1) LOCK))
-      (assert-fade ms skip 2.45))))
+      (assert-true (< in (+ skip 0.3)))
+      (assert-true (< (+ in FADE 0.1) LOCK))
+      (assert-true (> (loudest ms (+ in FADE 0.1) 2.45) 0.01))))
+
+  (test "the race song starts with the race, and the theme gives way"
+    (core-param! "card=0")
+    (let* ((n 150)
+           (r (run-card n 20))
+           (states (vector-ref r 2))
+           (first (let find ((k 0))
+                    (cond ((= k n) #f)
+                          ((vector-ref (vector-ref states k) 0) k)
+                          (else (find (+ k 1)))))))
+      (core-param! "card=1")
+      ;; the title's fade-out (title-out, 0.5 s) after the tap, then the
+      ;; countdown with the race song from its first frame
+      (assert-true first)
+      (assert-true (> first 20))
+      (assert-equal 'countdown (vector-ref (vector-ref states first) 2))
+      (assert-false (vector-ref (vector-ref states (- first 1)) 0))
+      ;; the theme is gone by then, and the race song stays on
+      (assert-false (vector-ref (vector-ref states (+ first 5)) 1))
+      (let loop ((k first))
+        (when (< k n)
+          (assert-true (vector-ref (vector-ref states k) 0))
+          (loop (+ k 1)))))
+    (assert-false (audio-initialized?))))

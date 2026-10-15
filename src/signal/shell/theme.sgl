@@ -1,0 +1,217 @@
+;;; (signal shell theme) - The main theme on a device: (signal music theme)'s
+;;; player on its own stream, beside the race song's and the engine's, on
+;;; the same context. Nothing here paces the simulation: the theme plays on
+;;; the title and the pause screen, where the race song does not.
+;;;
+;;;   (theme-prepare! ctx)        build the player ahead of its first sound
+;;;                               (the web's start gate: building took a
+;;;                               frame's worth of work); #t if it built
+;;;   (theme-play! ctx version from fade preroll)
+;;;                               sound the theme: VERSION 'full or 'menu;
+;;;                               FROM 'top (bar 0), 'calm (bar 4) or #f
+;;;                               (carry on where it was); a stream opens
+;;;                               with PREROLL seconds of silence first and
+;;;                               fades in over FADE seconds from there. On
+;;;                               a stream already open: change version (a
+;;;                               ramp) and fade back up
+;;;   (theme-release-now!)        drop the rest of a preroll not yet queued
+;;;   (theme-stop! fade)          fade out over FADE seconds, then close (0:
+;;;                               close now)
+;;;   (theme-frame!)              once a frame: keep the ring full, set the
+;;;                               fade's volume, close a finished fade-out
+;;;   (theme-beat)                the theme's beat at the ear, counted from
+;;;                               the bar it started on, or #f
+;;;   (theme-reset!)              a new session: close, and start from the
+;;;                               top next time
+;;;
+;;; Fades are the stream's volume, which both sinks apply as the device
+;;; plays, so a fade starts as it is asked for and never waits on the
+;;; queue. A preroll is silence queued ahead of the song, so the song lands
+;;; on its time with no rendering work then (the card's lock).
+
+(define-library (signal shell theme)
+  (import (sigil math)
+          (sigil list)
+          (sigil audio sink)
+          (motif tune player)
+          (signal music clock)
+          (signal music theme)
+          (signal music theme-score))
+  (export theme-prepare! theme-play! theme-release-now! theme-stop! theme-frame!
+          theme-beat theme-reset! theme-playing? theme-closing? theme-version-now
+          theme-latency! theme-readout theme-cutoff-now)
+  (begin
+    (define PUSH 256)
+    (define DEPTH-MS 250)
+    (define *player* #f)
+    (define *rate* #f)
+    (define *version* 'full)
+    (define *stream* #f)
+    (define *delivered* 0)
+    (define *silence* 0)          ; preroll frames not yet queued
+    (define *song-frame* 0)       ; the stream frame the song starts on
+    (define *pulled* 0)           ; frames the player has rendered since its last jump
+    (define *beat-frame* 0)       ; the stream frame of the player's frame 0
+    (define *fade* #f)            ; #(from to start-frame end-frame), heard frames
+    (define *closing* #f)
+    (define *volume* #f)
+    (define *latency* (cond-expand (wasm 0.0) (else 0.035)))
+    (define *underruns* 0)
+    (define *opens* 0)
+    (define *buf* (make-bytevector (* 8 PUSH) 0))
+    (define *zero* (make-bytevector (* 8 PUSH) 0))
+
+    (define (theme-latency! seconds) (set! *latency* (max 0.0 seconds)))
+    (define (depth-frames) (exact (ceiling (* *rate* DEPTH-MS 0.001))))
+
+    (define (theme-playing?) (and *stream* #t))
+    (define (theme-closing?) (and *stream* *closing*))
+    (define (theme-version-now) *version*)
+    ;; channel 4's cutoff as the player has it: the version it really plays
+    (define (theme-cutoff-now) (and *player* (player-insert-param *player* 4 'cutoff)))
+
+    (define (ensure-player! rate)
+      (unless (and *player* (= rate *rate*))
+        (when *player* (player-close! *player*))
+        (set! *rate* rate)
+        (set! *pulled* 0)
+        (set! *player* (theme-open rate *version*))))
+
+    (define (theme-prepare! ctx)
+      (and ctx (not *player*)
+           (begin (ensure-player! (audio-context-sample-rate ctx)) #t)))
+
+    ;; The stream frame the device takes now: where a volume set lands
+    ;; (the sinks apply it as they play), so fades are timed on it.
+    (define (play-frame)
+      (- *delivered* (audio-stream-depth *stream*)))
+
+    ;; The stream frame now at the ear, the device's latency later: the
+    ;; beat the eye should see.
+    (define (heard-frame)
+      (- *delivered* (audio-stream-depth *stream*)
+         (exact (round (* *latency* *rate*)))))
+
+    (define (fade-gain at)
+      (if (not *fade*)
+          1.0
+          (let ((from (vector-ref *fade* 0)) (to (vector-ref *fade* 1))
+                (start (vector-ref *fade* 2)) (end (vector-ref *fade* 3)))
+            (cond ((<= at start) from)
+                  ((>= at end) to)
+                  (else (+ from (* (- to from) (/ (- at start) (* 1.0 (- end start))))))))))
+
+    (define (fade-to! to seconds from-frame)
+      (let ((from (if *stream* (fade-gain (play-frame)) 0.0)))
+        (set! *fade* (vector from to from-frame
+                             (+ from-frame (max 1 (exact (round (* seconds *rate*)))))))))
+
+    (define (set-volume! g)
+      (unless (eqv? g *volume*)
+        (set-audio-stream-volume! *stream* g)
+        (set! *volume* g)))
+
+    (define (version! version ms)
+      (unless (eq? version *version*)
+        (theme-version! *player* version *rate* ms)
+        (set! *version* version)))
+
+    (define (theme-play! ctx version from fade preroll)
+      (when (and ctx (eq? (audio-context-state ctx) 'running))
+        (let ((rate (audio-context-sample-rate ctx)))
+          (if (and *stream* (= rate *rate*))
+              (begin
+                (version! version 600)
+                (when (or *closing* (not *fade*) (< (vector-ref *fade* 1) 1.0))
+                  (set! *closing* #f)
+                  (fade-to! 1.0 fade (play-frame))))
+              (begin
+                (when *stream* (theme-stop! 0))
+                (ensure-player! rate)
+                (when from (jump! from))
+                (version! version 0)
+                (set! *silence* (max 0 (exact (round (* preroll rate)))))
+                (set! *song-frame* *silence*)
+                ;; a player carrying on keeps its beat across the reopen
+                (set! *beat-frame* (- *silence* *pulled*))
+                (set! *delivered* 0)
+                (set! *closing* #f)
+                (set! *volume* #f)
+                (set! *stream* (open-audio-stream channels: 2 rate: rate
+                                                  buffer-frames: (max 8192 (* 2 (depth-frames)))))
+                (when *stream*
+                  (set! *opens* (+ *opens* 1))
+                  (set! *fade* (vector 0.0 1.0 *song-frame*
+                                       (+ *song-frame* (max 1 (exact (round (* fade rate)))))))
+                  (set-volume! 0.0)
+                  (theme-frame!)))))))
+
+    (define (theme-release-now!)
+      (when (and *stream* (> *silence* 0))
+        (set! *silence* 0)
+        (set! *song-frame* *delivered*)
+        (set! *beat-frame* (- *delivered* *pulled*))
+        (when (and *fade* (= 0.0 (vector-ref *fade* 0)) (= 1.0 (vector-ref *fade* 1)))
+          (let ((len (- (vector-ref *fade* 3) (vector-ref *fade* 2))))
+            (set! *fade* (vector 0.0 1.0 *delivered* (+ *delivered* len)))))))
+
+    (define (close!)
+      (when *stream*
+        (set! *underruns* (+ *underruns* (audio-stream-underruns-sounding *stream*)))
+        (close-audio-stream! *stream*)
+        (set! *stream* #f))
+      (set! *closing* #f)
+      (set! *fade* #f))
+
+    (define (theme-stop! fade)
+      (when *stream*
+        (if (<= fade 0)
+            (close!)
+            (unless *closing*
+              (set! *closing* #t)
+              (fade-to! 0.0 fade (play-frame))))))
+
+    (define (theme-frame!)
+      (when *stream*
+        (let loop ((remaining (max 0 (- (depth-frames) (audio-stream-depth *stream*)))))
+          (let* ((room (audio-stream-room *stream*))
+                 (silence? (> *silence* 0))
+                 (n (min PUSH room remaining (if silence? *silence* PUSH))))
+            (when (> n 0)
+              (unless silence?
+                (player-pull! *player* *buf* 0 n)
+                (set! *pulled* (+ *pulled* n)))
+              (let ((accepted (push-audio-samples *stream* (if silence? *zero* *buf*) n)))
+                (set! *delivered* (+ *delivered* accepted))
+                (when silence? (set! *silence* (- *silence* accepted)))
+                (when (= accepted n) (loop (- remaining n)))))))
+        (let ((g (fade-gain (play-frame))))
+          (if (and *closing* (<= g 0.0))
+              (close!)
+              (set-volume! g)))))
+
+    ;; Beats since the player's last jump, at the ear; #f before the song
+    ;; (a preroll) and with no stream. Every jump is to a bar line, so the
+    ;; count's phase is the bar's.
+    (define (theme-beat)
+      (and *stream*
+           (>= (heard-frame) *song-frame*)
+           (* (/ (- (heard-frame) *beat-frame*) (* 1.0 *rate*)) (/ THEME-BPM 60.0))))
+
+    (define (jump! from)
+      (theme-jump! *player* from)
+      (set! *pulled* 0))
+
+    ;; A new session plays the title from the top, in the full version.
+    (define (theme-reset!)
+      (close!)
+      (set! *silence* 0)
+      (when *player*
+        (jump! 'top)
+        (version! 'full 0)))
+
+    ;; (playing? closing? version volume underruns-sounding opens)
+    (define (theme-readout)
+      (list (and *stream* #t) *closing* *version* (or *volume* 0.0)
+            (+ *underruns* (if *stream* (audio-stream-underruns-sounding *stream*) 0))
+            *opens*))))

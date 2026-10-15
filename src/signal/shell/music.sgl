@@ -17,7 +17,7 @@
           music-audible-seconds music-depth! music-latency! music-readout
           music-request-resync! music-resync-in-flight? music-log music-sabotage! music-generation
           music-opened-jiffy
-          music-hold! music-release-at!)
+          music-hold! music-release-at! music-unhold! music-context! music-context)
   (begin
     (define PUSH 256)
     (define *ctx* #f)
@@ -64,6 +64,15 @@
     (define *fade-secs* 0.8)
     (define *volume* #f)          ; the stream's volume as last set
     (define (music-hold!) (set! *env* 'held))
+    ;; No envelope at all: the title's theme took the card's release, so
+    ;; the race song starts at full level when the race starts.
+    (define (music-unhold!) (set! *env* 'done))
+    ;; The context, bound without starting: the audio start while the
+    ;; song is held (the title's theme owns the music); music-frame!
+    ;; starts the song on it once the hold ends.
+    (define (music-context! ctx) (set! *ctx* ctx))
+    ;; The context the music plays on (the theme's stream shares it), or #f.
+    (define (music-context) *ctx*)
     (define (music-release-at! t fade)
       (unless (eq? *env* 'done)
         (set! *fade-secs* (max 0.0 fade))

@@ -132,7 +132,9 @@
         send("audio-latency", String(1000 * ((ctx.outputLatency || 0) + (ctx.baseLatency || 0))));
     }, 500);
     var focused = true;
-    function focusState() { send("focus", focused && !document.hidden ? "1" : "0"); }
+    // "1" focused, "0" blurred but visible (PAUSED, with the pause music),
+    // "h" hidden (paused and silent)
+    function focusState() { send("focus", document.hidden ? "h" : (focused ? "1" : "0")); }
     window.addEventListener("blur", function () { focused = false; focusState(); });
     window.addEventListener("focus", function () { focused = true; focusState(); });
     document.addEventListener("visibilitychange", focusState);

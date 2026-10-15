@@ -259,6 +259,9 @@
   (test "the shell's frame makes one resync for a 200 ms lead and cancels none"
     (set-store-root! "/tmp/signal-conductor-resync-test-store")
     (core-param! "mute")
+    ;; the race song plays on the title only with the title off (the theme
+    ;; plays it otherwise): these streams are the race song's
+    (core-param! "title=0")
     (core-boot! 'desktop)
     (music-start! 'offline-test-context (race-song (core-race)))
     ;; the new stream resets the clock, and the next interval is skipped
@@ -299,6 +302,9 @@
   (test "the frame after a tick-zero start counts the time since the stream opened"
     (set-store-root! "/tmp/signal-conductor-resync-test-store")
     (core-param! "mute")
+    ;; the race song plays on the title only with the title off (the theme
+    ;; plays it otherwise): these streams are the race song's
+    (core-param! "title=0")
     (core-boot! 'desktop)
     (let ((out (make-bytevector (* 8 6615) 0)))
       (music-start! 'offline-test-context (race-song (core-race)))
@@ -324,6 +330,9 @@
   (test "the frame after a race start counts the time since the new stream opened"
     (set-store-root! "/tmp/signal-conductor-resync-test-store")
     (core-param! "mute")
+    ;; the race song plays on the title only with the title off (the theme
+    ;; plays it otherwise): these streams are the race song's
+    (core-param! "title=0")
     (core-boot! 'desktop)
     (let ((out (make-bytevector (* 8 6615) 0)))
       (music-start! 'offline-test-context (race-song (core-race)))
@@ -356,6 +365,9 @@
   (test "the frame after a mid-song start counts only the time since the stream opened"
     (set-store-root! "/tmp/signal-conductor-resync-test-store")
     (core-param! "mute")
+    ;; the race song plays on the title only with the title off (the theme
+    ;; plays it otherwise): these streams are the race song's
+    (core-param! "title=0")
     (core-boot! 'desktop)
     (let loop ((n 0))
       (when (< n 120) (core-headless-frame! (/ 1.0 60.0)) (loop (+ n 1))))
@@ -396,3 +408,6 @@
                             "cancels" (- (list-ref (music-readout) 9) cancels))))
     (music-close!)
     (assert-false (audio-initialized?))))
+
+;; the knob is module state shared with later files in the suite
+(core-param! "title=1")

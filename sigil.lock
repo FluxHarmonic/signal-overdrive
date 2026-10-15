@@ -52,9 +52,9 @@
            version: "0.13.0")
   (package name: "motif"
            url: "codeberg:sigil/motif"
-           ref: "^0.8.1"
-           sha: "152e703c81d84f53d040c4ae18fe740810efe0ea"
-           version: "0.8.1")
+           ref: "^0.8.2"
+           sha: "1e90a0e169255a718f059d20367e9c001541f9cb"
+           version: "0.8.2")
   (package name: "sigil-wasm-audio"
            url: "codeberg:sigil/sigil"
            ref: ">=0.22.11, <0.22.12"
