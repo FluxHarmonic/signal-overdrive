@@ -173,6 +173,8 @@
                                    (reverse differ))))))
 
   (test "the music starts a prepared player with the same samples as a fresh one"
+    ;; no envelope: an earlier boot in the suite may have left the song held
+    (music-unhold!)
     (let ((c (advance-to (conductor-new 'lap1) 500))
           (out (make-bytevector (* 8 735) 0)))
       (define (heard)
@@ -187,13 +189,14 @@
                   (loop (+ n 1) (cons copy acc)))))))
       (let ((fresh (heard)))
         ;; the song sounds in it (the same silence twice would match too)
-        (assert-true (let loop ((i 0))
+        (unless (let loop ((i 0))
                        (and (< i (bytevector-length fresh))
-                            (or (not (= 0 (bytevector-u8-ref fresh i))) (loop (+ i 1))))))
+                            (or (not (= 0 (bytevector-u8-ref fresh i))) (loop (+ i 1)))))
+          (assert-equal 'song-sounds (list (music-readout) (bytevector-length fresh))))
         ;; only before a session's first stream: a new session
         (music-reset!)
         (music-prepare-playback! 'offline-test-context (conductor-new 'calm))
-        (assert-true (music-prepared?))
+        (unless (music-prepared?) (assert-equal (quote prepared) (music-readout)))
         (let ((prepared (heard)))
           (assert-false (music-prepared?))
           (assert-equal fresh prepared)
@@ -222,9 +225,9 @@
               (music-frame! next #f)
               (let* ((seek (find (lambda (e) (eq? 'resync (vector-ref e 0))) (music-log)))
                      (heard (- drained (* RATE 0.035)))
-                     (changed? (and seek (>= heard (vector-ref seek 4))))
+                     (changed? (and seek (>= heard (vector-ref seek 2))))
                      (expected (+ (/ heard RATE)
-                                  (if changed? (/ (- (vector-ref seek 3) (vector-ref seek 4)) RATE) 0.0))))
+                                  (if changed? (/ (vector-ref seek 3) RATE) 0.0))))
                 (assert-true (< (abs (- expected (music-audible-seconds))) (/ 1.0 RATE)))
                 (loop (+ frame 1) next
                       (or checked-before (and seek (not changed?)))
@@ -291,6 +294,76 @@
                               (/ (conductor-tick (race-song (core-race))) 60.0)))
                       RESYNC-GAP)))
     (music-close!)
+    (assert-false (audio-initialized?))))
+
+;; Everything the ring plays over FRAMES shell frames, the simulation
+;; starting LEAD seconds into lap1 with the ear at its start, as in
+;; shell-frames. Returns (samples . the splice's log entry or #f).
+(define (spliced lead frames)
+  (let* ((c0 (conductor-new 'lap1))
+         (all (make-bytevector (* 8 735 frames) 0))
+         (out (make-bytevector (* 8 735) 0)))
+    (music-start! 'offline-test-context c0)
+    (music-frame! c0 #f)
+    (let loop ((frame 0) (s lead) (c (advance-to c0 (exact (floor (* lead 60.0))))) (p (pacing-new)))
+      (when (< frame frames)
+        (%audio-stream-drain-for-test out 735 2)
+        (bytevector-copy! all (* 8 735 frame) out 0 (* 8 735))
+        (let* ((dt (/ 1.0 60.0))
+               (next (pace-frame p dt (+ s dt) (music-audible-seconds) #t #f (conductor-bar c)
+                                 in-flight: (music-resync-in-flight?)))
+               (s (+ s (pacing-dt next)))
+               (c (advance-to c (exact (floor (* s 60.0))))))
+          (when (pacing-resync? next) (music-request-resync!))
+          (music-frame! c #f clock-fraction: (- s (/ (conductor-tick c) 60.0)))
+          (loop (+ frame 1) s c next))))
+    (let ((entry (find (lambda (e) (and (eq? 'resync (vector-ref e 0)) (memq (vector-ref e 1) '(drop insert))))
+                       (music-log))))
+      (music-close!)
+      (cons all entry))))
+
+;; The same song, never resynced: one playback pulled straight through.
+(define (continuous frames)
+  (let* ((c (conductor-new 'lap1))
+         (b (playback-open tune RATE c MUSIC-INSERTS))
+         (bv (pulled b c frames)))
+    (playback-close! b)
+    bv))
+
+;; the largest difference between A's frames [from, to) and B's from
+;; from + shift on
+(define (worst-difference a b from to shift)
+  (let loop ((k (* 2 from)) (worst 0.0))
+    (if (>= k (* 2 to))
+        worst
+        (loop (+ k 1)
+              (max worst (abs (- (bytevector-ieee-single-ref a (* 4 k) 'little)
+                                 (bytevector-ieee-single-ref b (* 4 (+ k (* 2 shift))) 'little))))))))
+
+(test-group "resync: held notes ring through"
+  ;; A resync used to jump the player, which released every note: Carrier's
+  ;; long lead and pad notes then stayed silent until their next onset.
+  ;; Now the stream drops the gap's frames before a bar line and the
+  ;; player renders on, so after the splice the stream is the unbroken
+  ;; song, the gap later: sample for sample.
+  (test "after a drop splice the stream is the continuous song, the gap on"
+    (let* ((r (spliced 0.2 300))
+           (samples (car r))
+           (entry (cdr r)))
+      (unless entry (assert-equal (quote splice-logged) (list (music-readout) (music-log))))
+      (assert-equal 'drop (vector-ref entry 1))
+      (let* ((at (vector-ref entry 4))
+             (d (vector-ref entry 3))
+             (end (+ at 128 (* 2 RATE)))
+             (song (continuous (+ end d 512))))
+        ;; the 200 ms lead and the 35 ms the ear is behind the ring, less
+        ;; the nudge's catch-up before the splice
+        (unless (< (* 0.12 RATE) d (* 0.26 RATE)) (assert-equal (quote d-in-range) (list d entry)))
+        ;; before the splice: the same song (the comparison can match)
+        (let ((w0 (worst-difference samples song 0 at 0))) (unless (< w0 1e-6) (assert-equal (quote same-before) (list w0 at d))))
+        ;; after its crossfade: the same song, D frames on, for 2 s
+        (let ((w (worst-difference samples song (+ at 128) end d)))
+          (unless (< w 1e-6) (assert-equal 'unbroken w)))))
     (assert-false (audio-initialized?))))
 
 (test-group "resync: a stream opened at tick zero"
