@@ -1,0 +1,286 @@
+;;; The damage gate (design §10, 0.1 step 2): integrity on the song through
+;;; the game's own pull path ((signal music damage-path), 256-frame pulls,
+;;; Motif's per-sample smoothing), measured per tier against the numbers
+;;; M0's approved audition settled: the lead's dropouts and detune, the
+;;; drums' bit depth and rate, the cutouts, each stem's level, and the
+;;; repair's snap on the beat. Offline: no audio device.
+;;;
+;;; A test tone stands in for a channel's voices where the measure needs
+;;; one (a 440 Hz sine through the channel's real insert, as M0's probe
+;;; did); the race song still drives the grid. Mixes are read before
+;;; Motif's master chain, whose limiter would smear a crush's levels.
+(import (sigil test)
+        (sigil math)
+        (sigil list)
+        (motif graph)
+        (motif tune)
+        (motif tune player)
+        (signal music score)
+        (signal music song)
+        (signal music conductor)
+        (signal music playback)
+        (signal music inserts)
+        (signal music damage)
+        (signal music damage-path))
+
+(define RATE 44100)
+(define tune (read-tune-string SCORE-TUNE-TEXT))
+(define LAP1 (conductor-new 'lap1))
+(define ROW (* RATE (/ (* 2.5 SONG-TICKS-PER-ROW) SONG-BPM)))
+(define S16 (* 2 ROW))
+(define BAR (* SONG-ROWS-PER-BAR ROW))
+
+(define (sample bv i) (bytevector-ieee-single-ref bv (* 4 i) 'little))
+(define (db x) (* 10.0 (/ (log (max x 1e-30)) (log 10.0))))
+
+;; a playback of lap1 with SOURCE standing in for channels' voices, CH
+;; soloed (or none), the reverb off, the master chain bypassed
+(define (open-damage source solo (keys: (start LAP1)))
+  (let ((b (playback-open tune RATE start (music-inserts-with source) bypass-master: #t)))
+    (when solo (player-solo! (playback-player b) solo))
+    (player-set-bus-mix! (playback-player b) 0.0)
+    b))
+
+(define (tone at) (lambda (ch) (and (= ch at) (lambda () (g:sine 440.0 0.5)))))
+(define (no-tone ch) #f)
+
+;; FRAMES through the damage path at INTEGRITY (a number, or a procedure
+;; of the frame), pulled 256 at a time; returns (samples . snap offsets)
+(define (render b frames integrity (keys: (boost #f) (d (damage-path-new)) (c LAP1)))
+  (let ((out (make-bytevector (* 8 frames) 0)))
+    (let loop ((done 0) (snaps '()))
+      (if (>= done frames)
+          (cons out snaps)
+          (let* ((n (min 256 (- frames done)))
+                 (i (if (procedure? integrity) (integrity done) integrity))
+                 (s (damage-pull! d b c out done n i boost)))
+            (loop (+ done n) (append snaps (map (lambda (k) (+ done k)) s))))))))
+
+;; the left channel's mean square over frames [a, b)
+(define (power bv a b)
+  (let loop ((k a) (sum 0.0))
+    (if (>= k b) (/ sum (max 1 (- b a)))
+        (loop (+ k 1) (+ sum (let ((x (sample bv (* 2 k)))) (* x x)))))))
+
+;; the song frame of render frame 0, so bars and 16ths are the song's
+(define (origin b) (playback-origin-frame b))
+
+;; each 16th of the render: (bar s16 power), its middle 60%
+(define (sixteenths bv frames org)
+  (let loop ((k (exact (ceiling (/ org S16)))) (acc '()))
+    (let* ((start (- (exact (round (* k S16))) org))
+           (end (- (exact (round (* (+ k 1) S16))) org)))
+      (if (> end frames)
+          (reverse acc)
+          (let ((a (+ start (exact (round (* 0.2 S16)))))
+                (z (- end (exact (round (* 0.2 S16))))))
+            (loop (+ k 1)
+                  (if (>= start 0)
+                      (cons (list (exact (floor (/ (* k S16) BAR))) (modulo k 16) (power bv a z)) acc)
+                      acc)))))))
+
+;; Goertzel power at f over [a, a+n) with a Hann window
+(define (tone-power bv a n f)
+  (let* ((w (/ (* 2.0 3.141592653589793 f) RATE)) (c (* 2.0 (cos w))))
+    (let loop ((k 0) (s1 0.0) (s2 0.0))
+      (if (>= k n)
+          (- (+ (* s1 s1) (* s2 s2)) (* c s1 s2))
+          (let* ((hann (- 0.5 (* 0.5 (cos (/ (* 2.0 3.141592653589793 k) (- n 1))))))
+                 (x (* hann (sample bv (* 2 (+ a k))))))
+            (loop (+ k 1) (- (+ x (* c s1)) s2) s1))))))
+
+;; the local maxima within 12 dB of the strongest, scanning LO..HI by STEP
+(define (peaks bv a n lo hi step)
+  (let* ((fs (let loop ((f lo) (acc '())) (if (> f hi) (reverse acc) (loop (+ f step) (cons f acc)))))
+         (ps (map (lambda (f) (tone-power bv a n f)) fs))
+         (top (fold-left max 0.0 ps)))
+    (let loop ((fs fs) (ps ps) (prev 0.0) (acc '()))
+      (if (or (null? fs) (null? (cdr fs)))
+          (reverse acc)
+          (loop (cdr fs) (cdr ps) (car ps)
+                (if (and (> (car ps) prev) (>= (car ps) (cadr ps)) (> (car ps) (* top 0.063)))
+                    (cons (car fs) acc)
+                    acc))))))
+
+(define (cents f g) (* 1200.0 (/ (log (/ f g)) (log 2.0))))
+
+(test-group "damage: the lead's dropouts are the tier's holes, 16th by 16th"
+  (test "CLEAN and WORN have none; DAMAGED, FAILING and CRITICAL drop exactly their 16ths"
+    (for-each
+      (lambda (i)
+        (let* ((b (open-damage (tone 6) 6))
+               (frames (exact (round (* 5 BAR))))
+               (bv (car (render b frames i)))
+               (all (sixteenths bv frames (origin b)))
+               (loud (fold-left max 0.0 (map caddr all)))
+               (tier (damage-tier i))
+               (wrong (filter (lambda (e)
+                                (let ((silent? (< (caddr e) (* 1e-4 loud)))
+                                      (hole? (= 0.0 (damage-gate tier (car e) (cadr e)))))
+                                  (not (eq? silent? hole?))))
+                              all)))
+          (playback-close! b)
+          (assert-true (> (length all) 60))
+          (unless (null? wrong) (assert-equal (list 'holes-match i) (list i (length wrong) (car wrong))))))
+      '(90.0 67.0 42.0 20.0 5.0)))
+
+  (test "the holes per bar: DAMAGED 3, FAILING 8 or 9, CRITICAL 13"
+    (for-each
+      (lambda (tier counts)
+        (let loop ((bar 0))
+          (when (< bar 4)
+            (let ((n (let count ((s 0) (n 0)) (if (= s 16) n (count (+ s 1) (if (= 0.0 (damage-gate tier bar s)) (+ n 1) n))))))
+              (assert-equal (list-ref counts bar) n))
+            (loop (+ bar 1)))))
+      '(damaged failing critical)
+      '((3 3 3 3) (8 9 9 8) (13 13 13 13)))))
+
+(test-group "damage: the lead's detune"
+  ;; 0.5 Hz: each tap holds its pitch for a 1 s half cycle; the windows sit
+  ;; inside the third and fourth, inset 10% from each turn.
+  (test "CLEAN: one peak at 440 Hz; WORN at 67: two, at 440 (1 +- 4 depth rate) within 1 cent"
+    (let* ((depth (+ 1.5 (* (/ (- 80.0 67.0) 25.0) 1.0)))      ; ms, as damage-params
+           (shift (* 4.0 (/ depth 1000.0) 0.5))
+           (lo (* 440.0 (- 1.0 shift))) (hi (* 440.0 (+ 1.0 shift)))
+           (run (lambda (i)
+                  (let* ((b (open-damage (tone 6) 6))
+                         (bv (car (render b (* 4 RATE) i))))
+                    (playback-close! b)
+                    (list (peaks bv (exact (round (* 2.1 RATE))) (exact (round (* 0.8 RATE))) 436.0 444.0 0.05)
+                          (peaks bv (exact (round (* 3.1 RATE))) (exact (round (* 0.8 RATE))) 436.0 444.0 0.05)))))
+           (clean (run 90.0))
+           (worn (run 67.0))
+           (two? (lambda (ps) (and (= 2 (length ps))
+                                   (< (abs (cents (car ps) lo)) 1.0)
+                                   (< (abs (cents (cadr ps) hi)) 1.0)))))
+      (for-each (lambda (ps) (unless (and (= 1 (length ps)) (< (abs (cents (car ps) 440.0)) 1.0))
+                               (assert-equal (list 'clean-one-peak) ps)))
+                clean)
+      (for-each (lambda (ps) (unless (two? ps) (assert-equal (list 'worn-two-peaks lo hi) ps)))
+                worn))))
+
+(test-group "damage: the drums' crush"
+  ;; A full-scale tone through the kick's crush: at most 2^bits values.
+  (define (distinct bv a n)
+    (let loop ((k 0) (seen '()) (count 0))
+      (if (or (>= k n) (> count 5000))
+          count
+          (let ((x (sample bv (* 2 (+ a k)))))
+            (if (member x seen)
+                (loop (+ k 1) seen count)
+                (loop (+ k 1) (cons x seen) (+ count 1)))))))
+  (define (changes bv a n)
+    (let loop ((k 1) (c 0))
+      (if (>= k n) c
+          (loop (+ k 1) (if (= (sample bv (* 2 (+ a k))) (sample bv (* 2 (+ a k -1)))) c (+ c 1))))))
+  (test "CLEAN many values; DAMAGED at most 2^7, held 3 samples; boosted DAMAGED at most 2^4"
+    (let* ((go (lambda (i boost)
+                 (let* ((b (open-damage (tone 1) 1))
+                        (bv (car (render b RATE i boost: boost))))
+                   (playback-close! b)
+                   bv)))
+           (clean (go 90.0 #f))
+           (damaged (go 42.0 #f))
+           (boosted (go 42.0 #t))
+           (a (quotient RATE 2)) (n 4410))
+      (unless (> (distinct clean a n) 1000) (assert-equal 'clean-values (distinct clean a n)))
+      (unless (<= (distinct damaged a n) 128) (assert-equal 'damaged-values (distinct damaged a n)))
+      ;; rate-div 3: at most a third of the steps change the value
+      (unless (<= (changes damaged a n) (+ 2 (quotient n 3))) (assert-equal 'rate-div (changes damaged a n)))
+      (unless (<= (distinct boosted a n) 16) (assert-equal 'boosted-values (distinct boosted a n))))))
+
+(test-group "damage: cutouts and stems"
+  ;; FAILING's cutouts drop the whole song to 6% (-24.4 dB) on their 16ths:
+  ;; read on the kick's tone, which has no gate of its own.
+  (test "FAILING's cut 16ths sit 24 dB under the rest"
+    (let* ((b (open-damage (tone 1) 1))
+           (frames (exact (round (* 5 BAR))))
+           (bv (car (render b frames 20.0)))
+           (all (sixteenths bv frames (origin b))))
+      (playback-close! b)
+      (let* ((cut (filter (lambda (e) (< (damage-cut 'failing (car e) (cadr e)) 1.0)) all))
+             (kept (filter (lambda (e) (= (damage-cut 'failing (car e) (cadr e)) 1.0)) all))
+             (avg (lambda (es) (/ (fold-left + 0.0 (map caddr es)) (length es))))
+             (drop (db (/ (avg cut) (avg kept)))))
+        (assert-true (>= (length cut) 8))
+        (unless (< (abs (+ drop 24.4)) 1.0) (assert-equal 'cut-depth drop)))))
+
+  ;; Each stem's level against CLEAN on the real song (lap2, 4 bars: every
+  ;; channel but Gibson's plays there). Every miss is collected and
+  ;; reported together.
+  (define LAP2 (conductor-new 'lap2))
+  (define (stem-db ch i)
+    (let* ((b (open-damage no-tone ch start: LAP2))
+           (frames (exact (round (* 4 BAR))))
+           (bv (car (render b frames i c: LAP2))))
+      (playback-close! b)
+      ;; from 20 ms in: a level set takes its first 3 ms to ramp
+      (db (power bv (quotient RATE 50) frames))))
+  (test "the bass is protected (M0: 0, -0.8, -2, -3.5 dB); stems leave as M0 settled"
+    (let* ((clean (map (lambda (ch) (cons ch (stem-db ch 90.0))) '(1 2 3 4 5 7)))
+           (gone (lambda (ch i) (- (stem-db ch i) (cdr (assv ch clean)))))
+           (misses '())
+           (check! (lambda (what ok? value) (unless ok? (set! misses (cons (list what value) misses))))))
+      ;; every stem sounds in the passage
+      (for-each (lambda (e) (check! (list 'sounds (car e)) (> (cdr e) -60.0) (cdr e))) clean)
+      (for-each (lambda (i want)
+                  (let ((got (gone 4 i))) (check! (list 'bass i want) (< (abs (- got want)) 1.5) got)))
+                '(67.0 42.0 20.0 5.0) '(0.0 -0.8 -2.0 -3.5))
+      ;; the pad at FAILING is at 0.35 (-9 dB) and darker; out at CRITICAL
+      (check! 'pad-failing (< (gone 5 20.0) -9.0) (gone 5 20.0))
+      (check! 'pad-critical (< (gone 5 5.0) -60.0) (gone 5 5.0))
+      ;; the arp leaves at FAILING
+      (check! 'arp-failing (< (gone 7 20.0) -60.0) (gone 7 20.0))
+      ;; the snare and ticks leave at CRITICAL; the kick stays
+      (check! 'snare-critical (< (gone 2 5.0) -60.0) (gone 2 5.0))
+      (check! 'ticks-critical (< (gone 3 5.0) -60.0) (gone 3 5.0))
+      (check! 'kick-critical (> (gone 1 5.0) -12.0) (gone 1 5.0))
+      (assert-equal '() (reverse misses)))))
+
+(test-group "damage: the signal's static"
+  ;; M0's static, measured from its own code (sfx.sgl's static!, 2 s at
+  ;; 48 kHz): RMS DAMAGED 0.00403, FAILING 0.01000, CRITICAL 0.01553. Read
+  ;; on channel 8 in lap1, where Gibson is silent.
+  (test "none in CLEAN and WORN; DAMAGED to CRITICAL within 1.5 dB of M0's"
+    (let* ((rms (lambda (i)
+                  (let* ((b (open-damage no-tone 8))
+                         (bv (car (render b RATE i))))
+                    (playback-close! b)
+                    (sqrt (power bv (quotient RATE 10) RATE)))))
+           (misses '()))
+      (for-each (lambda (i) (let ((r (rms i))) (unless (< r 1e-6) (set! misses (cons (list 'silent i r) misses)))))
+                '(90.0 67.0))
+      (for-each (lambda (i want)
+                  (let* ((r (rms i)) (off (* 20.0 (/ (log (/ r want)) (log 10.0)))))
+                    (unless (< (abs off) 1.5) (set! misses (cons (list 'level i r want) misses)))))
+                '(42.0 20.0 5.0) '(0.00403 0.01000 0.01553))
+      (assert-equal '() (reverse misses)))))
+
+(test-group "damage: the repair snaps on the beat"
+  (test "worse arrives at once; better waits for the first beat 0.1 s on, and snaps there"
+    (let* ((b (open-damage no-tone #f))
+           (d (damage-path-new))
+           (turn (exact (round (* 1.3 BAR))))
+           (r (render b (* 3 RATE) (lambda (k) (if (< k turn) 20.0 90.0)) d: d))
+           (snaps (cdr r)))
+      (playback-close! b)
+      ;; at once: the first pull is FAILING
+      (assert-equal 1 (length snaps))
+      (let* ((at (car snaps))
+             (song (+ (origin b) at))
+             (beat (* SONG-ROWS-PER-BEAT ROW))
+             (off (- song (* beat (round (/ song beat))))))
+        ;; on a beat line (to the frame), and at least 0.1 s after the turn
+        (assert-true (< (abs off) 1.5))
+        (assert-true (>= at (+ turn (* 0.1 RATE))))
+        (assert-true (< at (+ turn (* 0.1 RATE) beat 256)))
+        (assert-equal 'clean (damage-path-tier d)))))
+
+  (test "a worse tier does not wait"
+    (let* ((b (open-damage no-tone #f))
+           (d (damage-path-new)))
+      (render b 2048 90.0 d: d)
+      (assert-equal 'clean (damage-path-tier d))
+      (render b 256 20.0 d: d)
+      (assert-equal 'failing (damage-path-tier d))
+      (playback-close! b))))

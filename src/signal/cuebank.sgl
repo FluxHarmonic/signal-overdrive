@@ -20,6 +20,7 @@
   (import (sigil core)
           (sigil time)
           (signal sound)
+          (signal sfx)
           (signal tunein))
 
   (export cue-bank cue-bank-step! cue-bank-finish! cue-bank-done? CUE-BANK-ORDER)
@@ -30,7 +31,13 @@
     (define CHUNK 1024)
     (define ALL 1073741823)
 
-    (define CUE-BANK-ORDER (cons 'tune-in (map car CUE-KINDS)))
+    ;; the felt one-shots ((signal sfx)) first, then the synth's that remain
+    (define CUE-BANK-ORDER
+      (cons 'tune-in (append (map car SFX-KINDS)
+                             (let keep ((ks (map car CUE-KINDS)))
+                               (cond ((null? ks) '())
+                                     ((memq (car ks) '(boost wall)) (keep (cdr ks)))
+                                     (else (cons (car ks) (keep (cdr ks)))))))))
 
     ;; #(rate tune queue current): queue holds the kinds not started,
     ;; current is (kind . stepper) or #f.
@@ -41,7 +48,9 @@
     (define (start! b kind)
       (vector-set! b 3 (cons kind (if (eq? kind 'tune-in)
                                       (apply tune-in-steps (vector-ref b 0) (vector-ref b 1))
-                                      (cue-steps kind (vector-ref b 0)))))
+                                      (if (assq kind SFX-KINDS)
+                                          (sfx-steps kind (vector-ref b 0))
+                                          (cue-steps kind (vector-ref b 0))))))
       (vector-set! b 2 (remove-kind kind (vector-ref b 2))))
 
     ;; Up to FRAMES more of the cue under way, starting the next in the
@@ -71,6 +80,7 @@
         (cond ((and current (eq? (car current) kind)) (advance! b ALL load))
               ((memq kind (vector-ref b 2)) (start! b kind) (advance! b ALL load))
               (else #f))))
+
 
     (define (remove-kind kind kinds)
       (cond ((null? kinds) '())

@@ -12,12 +12,14 @@
           (signal music clock)
           (signal music transport)
           (signal music playback)
-          (signal music inserts))
+          (signal music inserts)
+          (signal music damage-path))
   (export music-prepare! music-prepare-playback! music-prepared? music-start! music-frame! music-close! music-reset! music-running?
           music-audible-seconds music-depth! music-latency! music-readout
           music-request-resync! music-resync-in-flight? music-log music-sabotage! music-generation
           music-opened-jiffy
-          music-hold! music-release-at! music-unhold! music-context! music-context)
+          music-hold! music-release-at! music-unhold! music-context! music-context
+          music-lock-due! music-tier music-dip! music-fade-out!)
   (begin
     (define PUSH 256)
     (define *ctx* #f)
@@ -91,9 +93,34 @@
       (when *stream*
         (let ((g (env-gain heard)))
           (when (and (number? *env*) (>= g 1.0)) (set! *env* 'done))
-          (unless (eqv? g *volume*)
-            (set-audio-stream-volume! *stream* g)
-            (set! *volume* g)))))
+          (let ((g (* g (dip-gain))))
+            (unless (eqv? g *volume*)
+              (set-audio-stream-volume! *stream* g)
+              (set! *volume* g))))))
+
+    ;; The immediate path (design §3.2): the stream's volume, applied as
+    ;; the device plays, so these are heard at once, a sink depth before
+    ;; anything the song itself does. Wall-clock timed: they belong to
+    ;; the moment, not to the song.
+    ;;   (music-dip! seconds level)   a hard hit (0.04 0.4), an ICE strike
+    ;;                                (a 16th, 0): LEVEL for SECONDS
+    ;;   (music-fade-out! seconds)    CORRUPT: to nothing, and it stays
+    ;;                                there until the next song starts
+    (define *dip* #f)             ; (end-jiffy . level)
+    (define *fade-out* #f)        ; (start-jiffy . seconds)
+    (define (dip-gain)
+      (let ((now (current-jiffy)) (per (* 1.0 (jiffies-per-second))))
+        (when (and *dip* (>= now (car *dip*))) (set! *dip* #f))
+        (* (if *dip* (cdr *dip*) 1.0)
+           (if *fade-out*
+               (max 0.0 (- 1.0 (/ (- now (car *fade-out*)) (* per (max 0.001 (cdr *fade-out*))))))
+               1.0))))
+    (define (music-dip! seconds level)
+      (let ((end (+ (current-jiffy) (exact (round (* seconds (jiffies-per-second)))))))
+        (set! *dip* (if (and *dip* (< (cdr *dip*) level)) (cons (max end (car *dip*)) (cdr *dip*)) (cons end level)))
+        (env-volume! (or (music-audible-seconds) *epoch*))))
+    (define (music-fade-out! seconds)
+      (unless *fade-out* (set! *fade-out* (cons (current-jiffy) seconds))))
 
     (define (music-depth! ms)
       (set! *depth-ms* (max 10 (min 2000 ms))))
@@ -161,6 +188,7 @@
       (set! *splice* #f)
       (set! *fade-in-left* 0)
       (set! *splice-log* '())
+      (set! *locks* '())
       (set! *epoch-changes* '()))
 
     ;; A new shell session must bind its own current context. Closing
@@ -216,6 +244,13 @@
           ;; Construct all voice/insert graphs before exposing an empty
           ;; ring to the device callback. This also applies on restart.
           (set! *playback* (start-playback (transport-start-conductor plan)))
+          ;; a new player starts clean; the integrity passed in reaches it
+          ;; at once (worse is never delayed)
+          (set! *damage* (damage-path-new))
+          ;; a new song (tick 0) lifts a CORRUPT fade-out; a resume keeps it
+          (when (= 0 (conductor-tick c)) (set! *fade-out* #f))
+          (set! *dip* #f)
+          (set! *locks* (quote ()))
           (set! *epoch* (transport-start-epoch plan))
           (set! *last-resync-bar* -1)
           (set! *start-conductor* (transport-start-conductor plan))
@@ -256,11 +291,7 @@
                            (if silence? *silence* PUSH))))
               (if silence?
                   (set! *silence* (- *silence* n))
-                  (playback-pull! *playback*
-                                  (if (< (conductor-tick c) (conductor-tick *start-conductor*))
-                                      *start-conductor*
-                                      c)
-                                  samples (* 8 offset) n))
+                  (damage-pulled! (pull-conductor c) samples offset n))
               (pull (+ offset n)))))
         samples))
 
@@ -414,8 +445,38 @@
       (set! *last-resync-bar* bar)
       (set! *resyncs* (+ *resyncs* 1)))
 
+    ;; ---- Damage --------------------------------------------------------
+    ;; The song's damage ((signal music damage-path)): the integrity and
+    ;; boost the shell passes each frame reach every pull. A repair's snap
+    ;; queues the lock cue for the stream frame where it lands; the shell
+    ;; plays it when that frame is heard (music-lock-due!).
+    (define *damage* (damage-path-new))
+    (define *integrity* 100.0)
+    (define *boost* #f)
+    (define *locks* '())          ; stream frames of snaps not yet heard
+
+    ;; FRAMES of the song into OUT at frame OFFSET, damaged
+    (define (damage-pulled! pc out offset frames)
+      (let ((at (+ *delivered* offset)))
+        (for-each (lambda (k) (set! *locks* (append *locks* (list (+ at k)))))
+                  (damage-pull! *damage* *playback* pc out offset frames *integrity* *boost*))))
+
+    ;; A snap's lock is due once its frame reaches the ear: #t once each.
+    (define (music-lock-due!)
+      (and *stream* (pair? *locks*)
+           (let ((heard (- *delivered* (audio-stream-depth *stream*)
+                           (exact (round (* *latency* *rate*))))))
+             (and (>= heard (car *locks*))
+                  (begin (set! *locks* (cdr *locks*)) #t)))))
+
+    ;; the tier the song is playing (the clock line)
+    (define (music-tier) (damage-path-tier *damage*))
+
     (define (music-frame! c paused?
-                          (keys: (clock-fraction 0.0) (frame-jiffy #f)))
+                          (keys: (clock-fraction 0.0) (frame-jiffy #f)
+                                 (integrity 100.0) (boost #f)))
+      (set! *integrity* integrity)
+      (set! *boost* boost)
       (let ((t0 (current-jiffy)))
         ;; A restart replaces the conductor's initial log even when it
         ;; occurs before another tick. Its tick also returns to zero.
@@ -455,7 +516,7 @@
                        (loop (max 0 (- remaining pushed))))))
                   ((> n 0)
                    (unless silence?
-                     (playback-pull! *playback* (pull-conductor c) *buf* 0 n)
+                     (damage-pulled! (pull-conductor c) *buf* 0 n)
                      (fade-in! *buf* n))
                    (push! (if silence? *zero* *buf*) n)
                    (when silence? (set! *silence* (- *silence* n)))

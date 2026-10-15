@@ -3,13 +3,16 @@
 (import (sigil test)
         (signal sound)
         (signal tunein)
+        (signal sfx)
         (signal cuebank))
 
 (define RATE 8000)
 (define TUNE '(180.0 880.0 2.2 4.0))
 
 (define (one-pass kind)
-  (if (eq? kind 'tune-in) (apply render-tune-in RATE TUNE) (render-cue kind RATE)))
+  (cond ((eq? kind (quote tune-in)) (apply render-tune-in RATE TUNE))
+        ((assq kind SFX-KINDS) (render-sfx kind RATE))
+        (else (render-cue kind RATE))))
 
 ;; Call STEP with uneven parts (and an empty one) until it returns the cue.
 (define (by-parts step)
@@ -40,6 +43,11 @@
                 (assert-equal (render-cue kind RATE) (by-parts (cue-steps kind RATE))))
               (map car CUE-KINDS)))
 
+  (test "every felt one-shot rendered in uneven parts is byte-identical to one pass"
+    (for-each (lambda (kind)
+                (assert-equal (render-sfx kind RATE) (by-parts (sfx-steps kind RATE))))
+              (map car SFX-KINDS)))
+
   (test "the tuning-in sound rendered in uneven parts is byte-identical to one pass"
     (assert-equal (apply render-tune-in RATE TUNE)
                   (by-parts (apply tune-in-steps RATE TUNE))))
@@ -59,7 +67,7 @@
         (unless (or (cue-bank-step! b 0.0 (car r)) (> n 1000))
           (loop (+ n 1))))
       (assert-true (cue-bank-done? b))
-      (assert-equal "tune-in boost pad wall ice corrupt" (kinds ((cdr r))))
+      (assert-equal "tune-in scrape hit whoosh lock pad ice corrupt" (kinds ((cdr r))))
       (for-each (lambda (entry) (assert-equal (one-pass (car entry)) (cdr entry)))
                 ((cdr r)))))
 
@@ -81,14 +89,14 @@
   (test "finishing a cue not started first finishes the one under way"
     (let* ((r (recording))
            (b (cue-bank RATE TUNE)))
-      ;; 32 parts load the tuning-in sound; the 33rd starts boost
+      ;; 32 parts load the tuning-in sound; the 33rd starts the scrape
       (steps! b 33 (car r))
       (assert-equal "tune-in" (kinds ((cdr r))))
       (cue-bank-finish! b 'corrupt (car r))
-      (assert-equal "tune-in boost corrupt" (kinds ((cdr r))))
+      (assert-equal "tune-in scrape corrupt" (kinds ((cdr r))))
       (let loop ((n 0))
         (unless (or (cue-bank-step! b 0.0 (car r)) (> n 1000))
           (loop (+ n 1))))
-      (assert-equal "tune-in boost corrupt pad wall ice" (kinds ((cdr r))))
+      (assert-equal "tune-in scrape corrupt hit whoosh lock pad ice" (kinds ((cdr r))))
       (for-each (lambda (entry) (assert-equal (one-pass (car entry)) (cdr entry)))
                 ((cdr r))))))

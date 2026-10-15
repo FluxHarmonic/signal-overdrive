@@ -39,7 +39,9 @@
           (signal shell music)
           (signal shell theme)
           (signal music conductor)
-          (signal music clock))
+          (signal music clock)
+          (only (signal music song) SONG-BPM)
+          (only (signal sfx) HIT-IMPACT))
 
   (export core-boot! core-frame! core-keys core-sticks core-pad core-param! core-touch!
           core-tap! core-race core-tuning core-describe core-probe core-knobs-markdown GAME-NAME
@@ -504,7 +506,8 @@
     ;; The tuning-in sound's knobs, for the cue bank.
     (define (tune-audio!)
       (audio-tune! (tuning-ref *tuning* 'tone-lo) (tuning-ref *tuning* 'tone-hi)
-                   (intro-lock *tuning*) (intro-length *tuning*)))
+                   (intro-lock *tuning*) (intro-length *tuning*))
+      (audio-engine-db! (tuning-ref *tuning* 'engine-db)))
     ;; Open the sound (again, to resume a context the browser suspended).
     (define (core-audio-start!)
       ;; the time since the last step (on the web, the wait for a
@@ -776,6 +779,7 @@
                        " resyncs " (number->string (list-ref m 7))
                        " resync-cancels " (number->string (list-ref m 9))
                        " dropped-ms " (r1 (* 1000.0 (clock-dropped *clock*)))
+                       " tier " (symbol->string (music-tier))
                        (theme-text))))
 
     ;; The main theme's stream: on (or fading, or off), its version, its
@@ -1044,9 +1048,22 @@
         (theme-service!)
         ;; the theme took the card's release: the race song needs none
         (if *theme-session* (music-unhold!) (song-gate!))
+        ;; the immediate path: a hard wall hit dips the song to 40% for
+        ;; 40 ms, an ICE strike drops it for a 16th, CORRUPT fades it out
+        (for-each (lambda (e)
+                    (cond ((and (pair? e) (eq? (car e) 'wall) (>= (cdr e) HIT-IMPACT))
+                           (music-dip! 0.04 0.4))
+                          ((eq? e 'ice) (music-dip! (/ 15.0 SONG-BPM) 0.0))
+                          ((eq? e 'corrupt) (music-fade-out! 0.5))
+                          (else #f)))
+                  *frame-events*)
         (music-frame! (race-song *race*) (music-held?)
                       clock-fraction: (clock-acc *clock*)
-                      frame-jiffy: *frame-jiffy*)
+                      frame-jiffy: *frame-jiffy*
+                      integrity: (machine-integrity m)
+                      boost: (> (machine-boost m) 0.0))
+        ;; a repair's snap, as it reaches the ear: the lock
+        (when (music-lock-due!) (audio-lock!))
         (unless (= *music-generation* (music-generation))
           (set! *music-generation* (music-generation))
           ;; A new stream bounds the next interval at its opening (in

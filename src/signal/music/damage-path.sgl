@@ -1,0 +1,121 @@
+;;; (signal music damage-path) - Integrity on the song, on the music's own
+;;; pull path: the live stream and the offline gate both pull through it,
+;;; so the gate measures what the game plays (design §10, 0.1 step 2).
+;;;
+;;;   (damage-path-new)                         CLEAN, nothing pending
+;;;   (damage-pull! d b c out offset frames integrity boost?)
+;;;       FRAMES of playback B for conductor C into OUT at frame OFFSET, with the
+;;;       damage of INTEGRITY (and BOOST?) on it. Returns the frame offsets
+;;;       (into OUT, from OFFSET) where a repair snap landed, for the lock.
+;;;   (damage-path-tier d)                      the tier the song plays
+;;;
+;;; Pulls are split at every 16th while the lead is gated or the song cut,
+;;; and at a pending snap, so each lands on its sample (Motif's smoothing
+;;; then ramps the gate over 3 ms; the cuts ramp over 2 ms here).
+;;; Worse integrity reaches the song at once (it is heard a sink depth
+;;; later, design §3.2). Better integrity waits for the first beat at least
+;;; SNAP-LEAD seconds past the render head, then snaps there (§3.1: the
+;;; repair snaps clean on the beat); until then the continuous parameters
+;;; ease inside the old tier.
+(define-library (signal music damage-path)
+  (import (sigil struct)
+          (sigil math)
+          (motif tune player)
+          (signal music song)
+          (signal music conductor)
+          (signal music playback)
+          (signal music damage))
+  (export damage-path-new damage-pull! damage-path-tier damage-path-applied)
+  (begin
+    (define SNAP-LEAD 0.1)       ; seconds past the render head; the sink adds 0.25
+    (define CUT-EDGE 0.002)      ; seconds
+
+    (define-struct damage-path
+      (tier default: 'clean mutable: #t)
+      (snap default: #f mutable: #t)        ; render frame of a planned snap, or #f
+      (applied default: '() mutable: #t)    ; ((ch . name) . value) as last set
+      (cut default: 1.0 mutable: #t))       ; the song's gain now (cutouts)
+
+    (define (damage-path-new) (damage-path))
+
+    ;; frames per row and per 16th at RATE
+    (define (row-frames rate) (* rate (/ (* 2.5 SONG-TICKS-PER-ROW) SONG-BPM)))
+
+    ;; Set a target only when it changed: a repeat would be harmless, but
+    ;; the sets are the cost.
+    (define (target! d p ch name value)
+      (let* ((key (cons ch name))
+             (old (assoc key (damage-path-applied d))))
+        (unless (and old (= (cdr old) value))
+          (unless (player-set-insert-param! p ch name value)
+            (error "damage: insert param refused" ch name value))
+          (set-damage-path-applied! d (cons (cons key value)
+                                            (if old
+                                                (let drop ((xs (damage-path-applied d)))
+                                                  (cond ((null? xs) '())
+                                                        ((equal? (car (car xs)) key) (cdr xs))
+                                                        (else (cons (car xs) (drop (cdr xs))))))
+                                                (damage-path-applied d)))))))
+
+    (define (f32 bv i) (bytevector-ieee-single-ref bv (* 4 i) 'little))
+    (define (f32! bv i x) (bytevector-ieee-single-set! bv (* 4 i) x 'little))
+
+    ;; The cut's gain moves toward TARGET by STEP a frame over N frames.
+    (define (apply-cut! d out offset n target step)
+      (let ((g0 (damage-path-cut d)))
+        (unless (and (= g0 1.0) (= target 1.0))
+          (let loop ((k 0) (g g0))
+            (if (< k n)
+                (let ((g (cond ((< g target) (min target (+ g step)))
+                               ((> g target) (max target (- g step)))
+                               (else g)))
+                      (i (+ (* 2 offset) (* 2 k))))
+                  (f32! out i (* g (f32 out i)))
+                  (f32! out (+ i 1) (* g (f32 out (+ i 1))))
+                  (loop (+ k 1) g))
+                (set-damage-path-cut! d g))))))
+
+    (define (damage-pull! d b c out offset frames integrity boost?)
+      (let* ((p (playback-player b))
+             (rate (* 1.0 (playback-rate b)))
+             (row (row-frames rate))
+             (s16-len (* 2 row))
+             (bar-len (* SONG-ROWS-PER-BAR row))
+             (beat-len (* SONG-ROWS-PER-BEAT row))
+             (step (/ 1.0 (* CUT-EDGE rate)))
+             (target (damage-tier integrity)))
+        (let loop ((done 0) (snaps '()))
+          (if (>= done frames)
+              (reverse snaps)
+              (let* ((rendered (playback-rendered b))
+                     (song (+ (playback-origin-frame b) rendered))
+                     ;; worse at once; better on a planned beat
+                     (snapped?
+                       (cond
+                         ((not (damage-better? target (damage-path-tier d)))
+                          (set-damage-path-tier! d target)
+                          (set-damage-path-snap! d #f)
+                          #f)
+                         ((not (damage-path-snap d))
+                          (let ((beat (exact (ceiling (/ (+ song (* SNAP-LEAD rate)) beat-len)))))
+                            (set-damage-path-snap! d (- (exact (round (* beat beat-len)))
+                                                        (playback-origin-frame b)))
+                            #f))
+                         ((>= rendered (damage-path-snap d))
+                          (set-damage-path-tier! d target)
+                          (set-damage-path-snap! d #f)
+                          #t)
+                         (else #f)))
+                     (tier (damage-path-tier d))
+                     (bar (exact (floor (/ song bar-len))))
+                     (s16 (modulo (exact (floor (/ song s16-len))) 16))
+                     (next16 (max 1 (- (exact (round (* (+ (floor (/ song s16-len)) 1) s16-len))) song)))
+                     (to-snap (and (damage-path-snap d) (- (damage-path-snap d) rendered)))
+                     (n (min (- frames done) next16 (if (and to-snap (> to-snap 0)) to-snap frames))))
+                (for-each (lambda (s) (target! d p (car s) (cadr s) (caddr s)))
+                          (damage-params (damage-clamp integrity tier) boost?))
+                (target! d p 6 (quote gain) (damage-gate tier bar s16))
+                ;; the pull takes its offset in bytes: 8 a stereo frame
+                (playback-pull! b c out (* 8 (+ offset done)) n)
+                (apply-cut! d out (+ offset done) n (damage-cut tier bar s16) step)
+                (loop (+ done n) (if snapped? (cons done snaps) snaps)))))))))
