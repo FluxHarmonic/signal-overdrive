@@ -1,81 +1,52 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Signal Overdrive: the prototype</title>
+<title>Signal Overdrive</title>
 <style>
 body { background: #0D0A1A; color: #CCE6FF; font: 16px/1.5 ui-sans-serif, system-ui, sans-serif; max-width: 980px; margin: 2em auto; padding: 0 1em; }
 a { color: #4DF2D9; } h1, h2 { color: #FF59D9; } code { color: #FFCC33; }
 table { border-collapse: collapse; } td, th { border: 1px solid #2E1C4D; padding: 2px 8px; }
 img { image-rendering: pixelated; max-width: 100%; border: 1px solid #2E1C4D; margin: 6px 0; }
 </style></head><body>
-<h1>Signal Overdrive (feel prototype)</h1>
-<p>An F-Zero style racer in the Crash The Stack world, built to answer one
-question: does it feel good enough to become a game? You're Zero, a data
-courier. Your cargo's integrity is the energy meter: boosting spends it,
-walls cost it, the checksum lane restores it, and at zero the cargo is
-corrupt and the run is over.</p>
-<p>The track is a Mode 7 ground plane (a fragment shader projecting a tiled
-track toward the horizon), the machines are sprites, and every frame goes
-through the Flux Harmonic palette and Bayer dither pass.</p>
-<h2>Play it</h2>
+<h1>Signal Overdrive</h1>
+<p>A Mode 7 racer in the spirit of F-Zero, set in the world of
+<a href="https://crashthestack.com/">Crash The Stack</a> and written in
+<a href="https://usesigil.org">Sigil</a>.</p>
+<p>You're Zero, a data courier. Gibson owns every wire in the city, so the
+collective hides its messages inside songs, and couriers like you carry
+them by hand to pirate uplinks, where they go out over the air. Your cargo
+is the song, and its integrity is your energy meter. Boosting spends it,
+scraping a wall costs it, and the checksum lane wins it back. Deliver it
+clean and the whole city hears your song!</p>
+<p><strong>Play:</strong> <a href="https://signaloverdrive.net/">signaloverdrive.net</a>, free in
+your browser. The first build, 0.1, is coming soon: one track and one
+song, <em>Carrier</em>, wired through the whole race.</p>
+<h2>How to play</h2>
+<p>Each race is three laps against five rivals. They follow the racing line,
+bump you, and move across to block you, so you'll have to work for every
+place.</p>
 <ul>
-<li>https://10.11.0.2:8855/ (self-signed certificate) or http://10.11.0.2:8856/ on wg0</li>
-<li>Native: <code>scripts/dev sigil build</code>, then <code>scripts/dev ./build/dev/bin/signal-overdrive</code> from this directory</li>
+<li><strong>Integrity is everything.</strong> The meter at the top is your cargo. Walls
+cost you, and boosting spends it. If it hits zero, the cargo is corrupt
+and the run is over.</li>
+<li><strong>The checksum lane</strong> is the repair strip on the track. Drive through it
+and your integrity refills.</li>
+<li><strong>Boost</strong> comes online on lap 2. It's fast, but every boost costs
+integrity, so pick your moments. Boost pads on the track give you a
+burst for free.</li>
+<li><strong>ICE patches</strong> are the orange and red static on the road. Cross one and
+your steering scrambles for a second or so.</li>
+<li><strong>Drift</strong> through the tight corners: hold the drift button and the
+machine slides instead of gripping.</li>
 </ul>
-<h2>What is in it</h2>
-<ul>
-<li>Before the title, the Flux Harmonic card, in four beats: high above the
-track looking straight down, the mark small on the road; a zoom straight
-down until it fills the frame, as the picture's interference and a radio's
-tuning-in sound lock clean together; a tilt into perspective; then the
-camera pulls back and down as the mark recedes up the road, coming to rest
-where the title's camera begins (on the web, a TAP TO TUNE IN gate first:
-the browser needs a gesture before sound). The CARD knobs; any start skips
-it, and its sound with it; <code>?card=0</code> leaves it out. The song waits for it:
-through the zoom only the tuning-in sound plays, and the song fades in as
-the picture locks (<code>card-song-fade</code> seconds), or at a skip, with the same
-fade. Its interference keeps the effects' rules: it tears only in bursts
-of at most 6 ticks (P15),
-scaled by <code>fx-glitch</code>, and not at all with another effect solo or with
-reduced motion (the browser's preference, or <code>?motion=reduce</code>), when the
-picture only fades up clean. The tuning-in sound is rendered when the
-sound starts, so a CARD knob changed later in the overlay is heard on the
-next load.</li>
-<li>A title screen: the camera wanders the track by itself while the CORRUPT
-logo glitches on the beat; a start fades out into the race's countdown and
-fades back in (the TITLE knobs; <code>?title=0</code> skips it).</li>
-<li>Two tracks: <code>oval</code>, a wide, gentle test track (the default), and <code>loop</code>, curves of
-every tightness and a hairpin. Both have boost pads, the repair strip (the
-&quot;checksum lane&quot;) and ICE patches.</li>
-<li>A 3-lap race against five rivals in three machine designs. They follow the
-racing line, bump, and move across to block you. Live place, a countdown
-with a start card, and a finish panel with every machine's race time.</li>
-<li>The integrity meter. Boosts (from lap 2) spend it, walls cost it, and the
-checksum lane refills it. It drains in white with what you just spent, and
-pop-ups say why. At zero the cargo is corrupt.</li>
-<li>ICE patches (orange and red static). Crossing one scrambles your steering
-for 1.4 s.</li>
-<li>A sense of speed: the view widens and pulls back as you go faster, with
-streaks from the horizon and a punch when you boost.</li>
-<li>Reduced motion (the browser's preference, or <code>?motion=reduce</code>): the
-signal's effects keep their meaning in colour and the HUD, and nothing
-tears, ripples, rolls or flickers. A wall hit or ICE shows in the meter's
-flash and the pop-ups, with no glitch; corrupt cargo turns the picture red
-without tearing it; a tracer's amber reticle stands still on the road,
-with no ripple; low integrity's interference keeps its red bleed in the
-sky and the HUD, standing still. Blinking text (ICE, TRACED., the title's
-prompts, the meter under 30) is shown steady in its colour, and so are the
-machines' thrusters; damage pop-ups appear in place, each in a row of its
-own, and fade instead of rising; the camera's kick and the horizon's dip
-are off; the speed lines stand still, still swelling on a boost.
-<code>scripts/gate-motion</code> checks it.</li>
-<li>Placeholder sound, synthesized: an engine that follows your speed, a boost
-whoosh, a wall scrape. On the web it starts at your first key or tap.</li>
-<li>The best lap's ghost, see-through, from your second lap on (per track, for
-the session).</li>
-<li>The uplink gate over the start line.</li>
-</ul>
-<p>Screenshots and a short recording are in <code>docs/shots/</code>, and on the hosted
-site under <code>/shots/</code>.</p>
+<p>The race follows the song's shape. Lap 1 is the verse, and your boost
+comes online with the chorus on lap 2. The final lap is the drop, and
+that's when Gibson finally traces you. You only hear the song's melody
+whole when you cross the uplink. From your second lap on, your best lap
+races alongside you as a ghost.</p>
+<p>If your system asks for reduced motion, the game respects it: every
+effect keeps its meaning in color and in the HUD, but nothing tears,
+ripples or flickers. You can also turn it on with <code>?motion=reduce</code> in the
+address.</p>
 <h2>Controls</h2>
 <table>
 <thead>
@@ -121,664 +92,93 @@ site under <code>/shots/</code>.</p>
 <td>R</td>
 <td>Back</td>
 </tr>
-<tr>
-<td>Tuning overlay</td>
-<td>Tab</td>
-<td></td>
-</tr>
-<tr>
-<td>Palette, dither</td>
-<td>P, /</td>
-<td></td>
-</tr>
-<tr>
-<td>FPS, frame graph, sound readout</td>
-<td>F3</td>
-<td></td>
-</tr>
-<tr>
-<td>Print the hitch log (console)</td>
-<td>F4</td>
-<td></td>
-</tr>
-<tr>
-<td>Pause or resume</td>
-<td>F5</td>
-<td></td>
-</tr>
 </tbody>
 </table>
-<p><strong>On a phone</strong> the machine accelerates by itself. Three schemes, picked with
-the SCHEME button (top left) or <code>?touch=zones|drag|stick</code>:</p>
+<p><strong>On a phone</strong> the machine accelerates by itself, and you pick one of three
+touch schemes with the SCHEME button at the top left:</p>
 <ul>
-<li><strong>zones</strong> (the default): a thumb on the left half steers left, on the right
-half steers right; both thumbs brake; the BOOST button boosts.</li>
-<li><strong>drag</strong>: one finger anywhere steers by how far it has slid sideways from
-where it landed (60 px is full lock); a second finger boosts as it lands
-and drifts while held.</li>
-<li><strong>stick</strong>: a floating stick under the left thumb (sideways steers, pull
-down to brake); a thumb landing on the right half boosts, and drifts
-while held.</li>
+<li><strong>zones</strong> (the default): a thumb on the left half of the screen steers
+left, on the right half steers right, both thumbs brake, and the BOOST
+button boosts.</li>
+<li><strong>drag</strong>: one finger anywhere steers by how far it slides sideways from
+where it landed. A second finger boosts as it lands and drifts while held.</li>
+<li><strong>stick</strong>: a floating stick under your left thumb steers (pull down to
+brake). A thumb landing on the right half boosts, and drifts while held.</li>
 </ul>
-<h2>Reading F3 while you drive</h2>
-<p>F3 (or <code>?fps</code>) shows three lines and a graph at the bottom:</p>
+<h2>How it was made</h2>
+<p>I designed Signal Overdrive and I direct every part of how it's made. AI
+agents write the code, the music and the pixel art from my direction, and
+I play every build, listen to every sound, and decide what stays. No image
+generator was used: the machines, the track and the city are drawn by
+scripts an agent wrote. If the use of AI is a dealbreaker for you, I
+understand! The source and its commit history are all here, so you can see
+exactly how it was made.</p>
+<h2>Building and running</h2>
+<p>You'll need the Sigil toolchain version the repo pins (the <code>sigil:</code> line in
+<code>package.sgl</code>; <code>sigil cli use</code> picks it) and, for the native build, the C
+libraries that <code>manifest.scm</code> lists. <code>scripts/dev</code> runs a command inside
+that environment through Guix.</p>
+<pre><code>scripts/dev sigil deps install                the dependencies, from sigil.lock
+scripts/dev sigil build                       the native dev build
+scripts/dev ./build/dev/bin/signal-overdrive  run it
+scripts/dev sigil build --config release      the native release build
+scripts/dev sigil build --config web          the browser build, in build/web
+</code></pre>
+<p>To play the browser build, serve it locally:</p>
+<pre><code>node scripts/serve.mjs build/web 8080 --loopback
+</code></pre>
+<p>and open <a href="http://127.0.0.1:8080/">http://127.0.0.1:8080/</a>. The game needs the cross-origin
+isolation headers that <code>serve.mjs</code> sends, so opening <code>index.html</code> straight
+from disk won't work.</p>
+<p>The tests are in <code>test/</code>. Run one file with
+<code>scripts/dev sigil test --sgl test/test-handling.sgl</code> (and likewise for
+<code>test-race</code>, <code>test-track</code>, <code>test-fx</code> and the rest).</p>
+<h3>Where things are</h3>
 <ul>
-<li><code>60 FPS 16.7 MS SIM 1.2 DRAW 2.4</code>: frames a second, the frame's interval,
-and the CPU's share in ms: SIM is the race, DRAW is building the frame.
-A slow frame with small SIM and DRAW is the GPU's.</li>
-<li><code>MAX 34MS HITCH 3 AUD 1.8MS F4 LOG</code>: the longest frame in the last three
-seconds, how many frames have run over 33 ms (a hitch), and the sound's
-own ms a frame. F4 prints every hitch with its SIM, DRAW, AUDIO and
-garbage collections to the browser console.</li>
-<li><code>SAB 250MS UR 0 CUE WORKLET 0</code>: the audio stream's mode (SAB is the best:
-off the main thread with shared memory; MSG works; SPROC is on the main
-thread, the worst), the queue, UR the underruns (times the device ran
-dry: each is a hitch you hear), and the cue mode with its lag.</li>
-<li>The graph: one bar a frame for the last 180 frames; the dim line is
-16.7 ms (60 fps), the red line 33 ms; red bars are hitches.</li>
+<li><code>src/signal/mode7/</code> is the Mode 7 camera and renderer: a fragment shader
+that projects the tiled track toward the horizon.</li>
+<li><code>src/signal/handling.sgl</code> is one machine's handling, <code>track.sgl</code> the
+tracks, <code>race.sgl</code> the grid, laps, rivals and the finish, and
+<code>scene.sgl</code> the frame: the Mode 7 pass, the palette and dither pass,
+and the HUD.</li>
+<li><code>src/signal/music/</code> and <code>music/</code> are the soundtrack. The songs are
+written for the <a href="https://codeberg.org/sigil/motif">motif</a> synth engine,
+and <code>docs/CONDUCTOR.md</code> describes how the race and the song keep time.</li>
+<li><code>scripts/art/</code> holds the generators for every image in <code>assets/signal/</code>
+(Node, no dependencies).</li>
 </ul>
-<p>If the sound hitches, the numbers that say why: UR rising means the
-queue ran dry (a deeper <code>?audiodepth=</code> will help); red bars with a large
-SIM, DRAW or AUD point at the game; red bars with small ones point at the
-GPU or the machine being busy.</p>
-<h2>Tuning</h2>
-<p>Tab opens the overlay: Up/Down pick a knob, Left/Right change it (hold to
-repeat), 0 resets it. The overlay's last line is the query string for the
-current values, and every knob takes a URL parameter of the same name, so
-&quot;grip 8.5 felt right&quot; is <code>?grip=8.5</code>. Natively, the same as
-<code>--grip=8.5</code>. Knobs that change the race (track, laps, rivals, rival pace) restart
-it on the grid.</p>
-<p>Other parameters: <code>?track=oval|loop</code> (the same as <code>track=0|1</code>), <code>?mute</code>,
-<code>?musicdepth=MS</code> (the song's queue, default 250),
-<code>?audiodepth=MS</code> (the engine sound's queue, default 250), <code>?cues=0</code> (the one-shot sounds in
-the stream instead of as cues, the old way), <code>?hitchlog</code> (every frame over 33 ms to the console),
-<code>?touch=zones|drag|stick</code>, <code>?autopilot</code> (the player drives the racing line),
-<code>?start</code> (skip the title), <code>?fps</code> (the F3 readout from the start),
-<code>?motion=reduce|full</code> (reduced motion, else the browser's preference).</p>
-<p>The knobs, from <code>signal-overdrive --knobs</code> (units are world texels, seconds and radians; a texel is about 25 cm, so 560 texels/s is 504 km/h):</p>
-<table>
-<thead>
-<tr>
-<th>Knob (URL parameter)</th>
-<th>Group</th>
-<th>Default</th>
-<th>Range</th>
-<th>Step</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>accel</code> ACCEL</td>
-<td>handling</td>
-<td>300</td>
-<td>50 to 1200</td>
-<td>10</td>
-</tr>
-<tr>
-<td><code>top</code> TOP SPEED</td>
-<td>handling</td>
-<td>560</td>
-<td>200 to 1200</td>
-<td>10</td>
-</tr>
-<tr>
-<td><code>brake</code> BRAKE</td>
-<td>handling</td>
-<td>700</td>
-<td>100 to 2000</td>
-<td>50</td>
-</tr>
-<tr>
-<td><code>coast</code> COAST DRAG</td>
-<td>handling</td>
-<td>70</td>
-<td>0 to 400</td>
-<td>5</td>
-</tr>
-<tr>
-<td><code>steer</code> STEER</td>
-<td>handling</td>
-<td>2.5</td>
-<td>0.5 to 6</td>
-<td>0.05</td>
-</tr>
-<tr>
-<td><code>steer-high</code> STEER AT TOP</td>
-<td>handling</td>
-<td>0.62</td>
-<td>0.1 to 1.5</td>
-<td>0.02</td>
-</tr>
-<tr>
-<td><code>steer-in</code> STEER RAMP IN</td>
-<td>handling</td>
-<td>8</td>
-<td>1 to 60</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>steer-out</code> STEER RETURN</td>
-<td>handling</td>
-<td>12</td>
-<td>1 to 60</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>grip</code> GRIP</td>
-<td>handling</td>
-<td>7</td>
-<td>0.5 to 30</td>
-<td>0.25</td>
-</tr>
-<tr>
-<td><code>drift</code> DRIFT GRIP</td>
-<td>handling</td>
-<td>0.3</td>
-<td>0 to 1</td>
-<td>0.02</td>
-</tr>
-<tr>
-<td><code>drift-steer</code> DRIFT STEER</td>
-<td>handling</td>
-<td>1.4</td>
-<td>1 to 3</td>
-<td>0.05</td>
-</tr>
-<tr>
-<td><code>transfer</code> TRANSFER</td>
-<td>handling</td>
-<td>0.75</td>
-<td>0 to 1</td>
-<td>0.05</td>
-</tr>
-<tr>
-<td><code>boost-speed</code> BOOST SPEED</td>
-<td>handling</td>
-<td>1.35</td>
-<td>1 to 2</td>
-<td>0.05</td>
-</tr>
-<tr>
-<td><code>boost-accel</code> BOOST ACCEL</td>
-<td>handling</td>
-<td>700</td>
-<td>0 to 3000</td>
-<td>50</td>
-</tr>
-<tr>
-<td><code>boost-time</code> BOOST TIME</td>
-<td>handling</td>
-<td>1.3</td>
-<td>0.2 to 4</td>
-<td>0.1</td>
-</tr>
-<tr>
-<td><code>boost-cost</code> BOOST COST</td>
-<td>handling</td>
-<td>12</td>
-<td>0 to 50</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>pad-time</code> PAD TIME</td>
-<td>handling</td>
-<td>0.9</td>
-<td>0 to 3</td>
-<td>0.1</td>
-</tr>
-<tr>
-<td><code>bounce</code> WALL BOUNCE</td>
-<td>handling</td>
-<td>0.55</td>
-<td>0 to 1.2</td>
-<td>0.05</td>
-</tr>
-<tr>
-<td><code>wall-drag</code> WALL DRAG</td>
-<td>handling</td>
-<td>0.3</td>
-<td>0 to 1</td>
-<td>0.05</td>
-</tr>
-<tr>
-<td><code>wall-damage</code> WALL DAMAGE</td>
-<td>handling</td>
-<td>0.045</td>
-<td>0 to 0.3</td>
-<td>0.005</td>
-</tr>
-<tr>
-<td><code>repair</code> REPAIR RATE</td>
-<td>handling</td>
-<td>24</td>
-<td>0 to 100</td>
-<td>2</td>
-</tr>
-<tr>
-<td><code>ice-time</code> ICE SCRAMBLE TIME</td>
-<td>handling</td>
-<td>1.4</td>
-<td>0 to 5</td>
-<td>0.1</td>
-</tr>
-<tr>
-<td><code>radius</code> RADIUS</td>
-<td>handling</td>
-<td>9</td>
-<td>4 to 30</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>overspeed-drag</code> OVERSPEED DRAG</td>
-<td>handling</td>
-<td>240</td>
-<td>0 to 2000</td>
-<td>20</td>
-</tr>
-<tr>
-<td><code>track</code> TRACK (0 OVAL 1 LOOP)</td>
-<td>race</td>
-<td>0</td>
-<td>0 to 1</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>laps</code> LAPS</td>
-<td>race</td>
-<td>3</td>
-<td>1 to 9</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>rivals</code> RIVALS</td>
-<td>race</td>
-<td>5</td>
-<td>0 to 5</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>rival-pace</code> RIVAL PACE</td>
-<td>race</td>
-<td>0.97</td>
-<td>0.7 to 1.2</td>
-<td>0.01</td>
-</tr>
-<tr>
-<td><code>boost-lap</code> BOOST FROM LAP</td>
-<td>race</td>
-<td>2</td>
-<td>1 to 9</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>bump</code> BUMP</td>
-<td>race</td>
-<td>0.6</td>
-<td>0 to 1</td>
-<td>0.05</td>
-</tr>
-<tr>
-<td><code>fov</code> FOV</td>
-<td>camera</td>
-<td>1.15</td>
-<td>0.6 to 2</td>
-<td>0.05</td>
-</tr>
-<tr>
-<td><code>cam-height</code> CAM HEIGHT</td>
-<td>camera</td>
-<td>40</td>
-<td>6 to 90</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>cam-dist</code> CAM DIST</td>
-<td>camera</td>
-<td>92</td>
-<td>20 to 240</td>
-<td>2</td>
-</tr>
-<tr>
-<td><code>pitch</code> PITCH</td>
-<td>camera</td>
-<td>0.16</td>
-<td>-0.3 to 0.7</td>
-<td>0.01</td>
-</tr>
-<tr>
-<td><code>horizon</code> HORIZON</td>
-<td>camera</td>
-<td>80</td>
-<td>30 to 180</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>cam-lag</code> CAM LAG</td>
-<td>camera</td>
-<td>0.35</td>
-<td>0 to 0.95</td>
-<td>0.05</td>
-</tr>
-<tr>
-<td><code>sprite-size</code> MACHINE SIZE</td>
-<td>camera</td>
-<td>18</td>
-<td>8 to 60</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>speed-fov</code> FOV AT SPEED</td>
-<td>camera</td>
-<td>0.18</td>
-<td>0 to 0.8</td>
-<td>0.02</td>
-</tr>
-<tr>
-<td><code>speed-pull</code> PULL BACK AT SPEED</td>
-<td>camera</td>
-<td>12</td>
-<td>0 to 60</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>speed-lines</code> SPEED LINES</td>
-<td>look</td>
-<td>1</td>
-<td>0 to 1</td>
-<td>0.1</td>
-</tr>
-<tr>
-<td><code>fog</code> FOG</td>
-<td>look</td>
-<td>1</td>
-<td>0 to 1</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>fog-start</code> FOG START</td>
-<td>look</td>
-<td>900</td>
-<td>100 to 4000</td>
-<td>50</td>
-</tr>
-<tr>
-<td><code>fog-end</code> FOG END</td>
-<td>look</td>
-<td>2800</td>
-<td>200 to 8000</td>
-<td>100</td>
-</tr>
-<tr>
-<td><code>far-start</code> FAR FADE FROM</td>
-<td>look</td>
-<td>1.4</td>
-<td>0.5 to 8</td>
-<td>0.1</td>
-</tr>
-<tr>
-<td><code>far-end</code> FAR FADE TO</td>
-<td>look</td>
-<td>3.2</td>
-<td>0.5 to 12</td>
-<td>0.1</td>
-</tr>
-<tr>
-<td><code>dither</code> DITHER</td>
-<td>look</td>
-<td>1</td>
-<td>0 to 1</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>spread</code> SPREAD</td>
-<td>look</td>
-<td>8</td>
-<td>0 to 64</td>
-<td>4</td>
-</tr>
-<tr>
-<td><code>lut</code> DITHER BY LOOKUP</td>
-<td>look</td>
-<td>1</td>
-<td>0 to 1</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>palette</code> PALETTE</td>
-<td>look</td>
-<td>0</td>
-<td>0 to 1</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>fx-dip</code> FX HORIZON DIP</td>
-<td>fx</td>
-<td>1</td>
-<td>0 to 2</td>
-<td>0.1</td>
-</tr>
-<tr>
-<td><code>fx-pools</code> FX LIGHT POOLS</td>
-<td>fx</td>
-<td>1</td>
-<td>0 to 2</td>
-<td>0.1</td>
-</tr>
-<tr>
-<td><code>fx-chase</code> FX RAIL CHASE</td>
-<td>fx</td>
-<td>1</td>
-<td>0 to 1</td>
-<td>0.1</td>
-</tr>
-<tr>
-<td><code>fx-sky</code> FX SKYLINE LIFE</td>
-<td>fx</td>
-<td>1</td>
-<td>0 to 1</td>
-<td>0.1</td>
-</tr>
-<tr>
-<td><code>fx-glitch</code> FX ICE GLITCH</td>
-<td>fx</td>
-<td>1</td>
-<td>0 to 1</td>
-<td>0.1</td>
-</tr>
-<tr>
-<td><code>fx-warp</code> FX ICE WARP</td>
-<td>fx</td>
-<td>1</td>
-<td>0 to 1</td>
-<td>0.1</td>
-</tr>
-<tr>
-<td><code>fx-interf</code> FX INTERFERENCE</td>
-<td>fx</td>
-<td>1</td>
-<td>0 to 1</td>
-<td>0.1</td>
-</tr>
-<tr>
-<td><code>fx-solo</code> FX SOLO (0 ALL)</td>
-<td>fx</td>
-<td>0</td>
-<td>0 to 7</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>fx-tier</code> FX INTEGRITY (-1 REAL)</td>
-<td>fx</td>
-<td>-1</td>
-<td>-1 to 100</td>
-<td>5</td>
-</tr>
-<tr>
-<td><code>fx-speed</code> FX SPEED (-1 REAL)</td>
-<td>fx</td>
-<td>-1</td>
-<td>-1 to 1</td>
-<td>0.1</td>
-</tr>
-<tr>
-<td><code>fx-showcase</code> FX SHOWCASE</td>
-<td>fx</td>
-<td>0</td>
-<td>0 to 1</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>fx-passes</code> FX GROUND PASSES</td>
-<td>fx</td>
-<td>1</td>
-<td>1 to 512</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>fx-hold</code> FX HOLD AT PEAK (COST)</td>
-<td>fx</td>
-<td>0</td>
-<td>0 to 1</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>title</code> TITLE SCREEN</td>
-<td>title</td>
-<td>1</td>
-<td>0 to 1</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>title-out</code> TITLE FADE OUT</td>
-<td>title</td>
-<td>0.5</td>
-<td>0 to 3</td>
-<td>0.05</td>
-</tr>
-<tr>
-<td><code>title-in</code> TITLE FADE IN</td>
-<td>title</td>
-<td>0.5</td>
-<td>0 to 3</td>
-<td>0.05</td>
-</tr>
-<tr>
-<td><code>title-speed</code> TITLE CAMERA SPEED</td>
-<td>title</td>
-<td>240</td>
-<td>0 to 400</td>
-<td>10</td>
-</tr>
-<tr>
-<td><code>title-height</code> TITLE CAMERA HEIGHT</td>
-<td>title</td>
-<td>96</td>
-<td>6 to 200</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>title-dist</code> TITLE CAMERA DIST</td>
-<td>title</td>
-<td>150</td>
-<td>20 to 200</td>
-<td>2</td>
-</tr>
-<tr>
-<td><code>card</code> CARD</td>
-<td>card</td>
-<td>1</td>
-<td>0 to 1</td>
-<td>1</td>
-</tr>
-<tr>
-<td><code>card-height</code> CARD START HEIGHT</td>
-<td>card</td>
-<td>2600</td>
-<td>200 to 4000</td>
-<td>50</td>
-</tr>
-<tr>
-<td><code>card-hold</code> CARD HOLD (HIGH)</td>
-<td>card</td>
-<td>0.4</td>
-<td>0 to 3</td>
-<td>0.05</td>
-</tr>
-<tr>
-<td><code>card-zoom</code> CARD ZOOM TIME</td>
-<td>card</td>
-<td>1.8</td>
-<td>0.2 to 5</td>
-<td>0.05</td>
-</tr>
-<tr>
-<td><code>card-tilt</code> CARD TILT TIME</td>
-<td>card</td>
-<td>1.4</td>
-<td>0.2 to 5</td>
-<td>0.05</td>
-</tr>
-<tr>
-<td><code>card-move</code> CARD MOVE TIME</td>
-<td>card</td>
-<td>1.4</td>
-<td>0.2 to 5</td>
-<td>0.05</td>
-</tr>
-<tr>
-<td><code>card-ease</code> CARD EASE</td>
-<td>card</td>
-<td>2</td>
-<td>1 to 5</td>
-<td>0.1</td>
-</tr>
-<tr>
-<td><code>tone-lo</code> TONE FROM HZ</td>
-<td>card</td>
-<td>180</td>
-<td>60 to 600</td>
-<td>10</td>
-</tr>
-<tr>
-<td><code>tone-hi</code> TONE TO HZ</td>
-<td>card</td>
-<td>880</td>
-<td>200 to 2000</td>
-<td>10</td>
-</tr>
-<tr>
-<td><code>card-song-fade</code> CARD SONG FADE-IN</td>
-<td>card</td>
-<td>0.8</td>
-<td>0 to 4</td>
-<td>0.05</td>
-</tr>
-</tbody>
-</table>
-<h2>How it's built</h2>
+<h3>Development tools</h3>
+<p>The game carries the tools I use to tune it. Tab opens the tuning overlay
+(Up/Down pick a knob, Left/Right change it, 0 resets it), and every knob
+also takes a URL parameter of the same name, so <code>?grip=8.5</code> sets the grip
+from the address. <code>signal-overdrive --knobs</code> prints the full table.</p>
 <ul>
-<li><code>src/signal/mode7/</code> the Mode 7 camera and renderer (nothing racing-specific;
-the seed of a later substratic-mode7 package)</li>
-<li><code>src/signal/handling.sgl</code> one machine's handling, pure, with tests</li>
-<li><code>src/signal/track.sgl</code> where a point is on a track; <code>track/oval-data.sgl</code> and <code>track/loop-data.sgl</code> are generated</li>
-<li><code>src/signal/race.sgl</code> the grid, laps, rivals, the finish and corrupt cargo</li>
-<li><code>src/signal/scene.sgl</code> the frame: the Mode 7 pass, the dither pass, the HUD</li>
-<li><code>src/signal/lut.sgl</code> the dither pass by lookup texture (<code>scripts/art/gen-lut.mjs</code>); <code>dither.sgl</code> is Phantom Burn's exact pass</li>
-<li><code>src/signal/sound.sgl</code> the synthesized sound; <code>shell/audio.sgl</code> pushes it to the device</li>
-<li><code>scripts/touch-check.mjs</code> drives the touch schemes in a headless phone viewport;
-<code>scripts/shot-web.mjs</code> takes web screenshots; <code>scripts/host</code> serves the build on wg0</li>
-<li><code>scripts/art/</code> the generators for every image in <code>assets/signal/</code> (node, no dependencies)</li>
+<li>F3 (or <code>?fps</code>) shows the frame rate, the frame's timings and the audio
+readout, with a graph of the last 180 frames. F4 prints every hitch to
+the console, and F5 pauses.</li>
+<li>P switches the palette and / toggles the dither.</li>
+<li><code>?dev</code> adds the effects panel to the browser build (the EFFECTS button,
+or E): each effect's toggle and intensity, solo, and a button that fires
+each trigger. <code>docs/effects.html</code> describes the effects.</li>
+<li>Other parameters: <code>?track=loop</code> (a second test track, with a hairpin),
+<code>?start</code> (skip the title), <code>?card=0</code> (skip the card before it), <code>?mute</code>,
+<code>?autopilot</code>, and <code>?touch=zones|drag|stick</code>.</li>
 </ul>
-<p>Tests: <code>scripts/dev sigil test --sgl test/test-handling.sgl</code> (and
-<code>test-track</code>, <code>test-camera</code>, <code>test-race</code>, <code>test-sound</code>).</p>
-<p>Conductor checks: <code>scripts/test-conductor</code>, <code>scripts/test-score</code> and
-<code>scripts/test-reference</code>; effects state checks are in <code>test/test-fx.sgl</code>.
-The captured-audio drift gate is a separate opt-in target, currently
-<strong>known RED</strong>, with unchanged thresholds and reproducible evidence in
-<a href="scripts/drift/README.md"><code>scripts/drift/README.md</code></a>. It does not make
-the default tests or effects gates fail. The stable song/tick interface
-for effects and title integration is in
-<a href="docs/CONDUCTOR.md"><code>docs/CONDUCTOR.md</code></a>.</p>
+<h2>Licenses</h2>
+<p>The code is GPL-3.0-or-later (<code>LICENSE</code>). The art, the music, the sound and
+the content are CC-BY-4.0 (<code>assets/LICENSE</code>), credit David Wilson / Flux
+Harmonic, except the reserved marks in <code>assets/RESERVED.md</code>: the name, the
+logo and the Flux Harmonic mark. The third-party notices, including the
+site's font, are in <code>NOTICE</code>.</p>
+<h2>Links</h2>
+<ul>
+<li><a href="https://signaloverdrive.net/">signaloverdrive.net</a>, the game's site</li>
+<li><a href="https://github.com/FluxHarmonic/signal-overdrive">github.com/FluxHarmonic/signal-overdrive</a>, the source</li>
+<li><a href="https://fluxharmonic.com/">Flux Harmonic</a>, which makes it, along with
+<a href="https://crashthestack.com/">Crash The Stack</a>,
+<a href="https://harkfell.com/">Harkfell</a> and
+<a href="https://phantomburn.net/">Phantom Burn</a></li>
+</ul>
 <h2>Screenshots</h2>
 <p><img src="shots/1-title.png" alt="1-title.png"></p>
 <p><img src="shots/2-race.png" alt="2-race.png"></p>

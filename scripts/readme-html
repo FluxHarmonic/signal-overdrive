@@ -10,7 +10,7 @@ BODY="$(guix shell cmark-gfm -- cmark-gfm --unsafe -e table README.md)"
   cat <<'HEAD'
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Signal Overdrive: the prototype</title>
+<title>Signal Overdrive</title>
 <style>
 body { background: #0D0A1A; color: #CCE6FF; font: 16px/1.5 ui-sans-serif, system-ui, sans-serif; max-width: 980px; margin: 2em auto; padding: 0 1em; }
 a { color: #4DF2D9; } h1, h2 { color: #FF59D9; } code { color: #FFCC33; }
