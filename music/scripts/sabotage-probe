@@ -3,8 +3,8 @@
 # parameter inside (carrier inserts) while keeping the built (clean)
 # values, rebuilds release, runs the probe, and restores by hash.
 set -u
-cd /home/daviwil/Projects/Code/sigil/task-signal-m0/music
-OUT=/tmp/claude-1000/sabotage-$(date +%s); mkdir -p $OUT
+cd "$(dirname "$0")/.." || exit 2
+OUT=${TMPDIR:-/tmp}/sabotage-$(date +%s); mkdir -p $OUT
 plant() { # name file awk-program expected-changed-lines
   local name=$1 F=$2 prog=$3 want=$4
   local ORIG; ORIG=$(sha256sum $F | cut -d" " -f1)

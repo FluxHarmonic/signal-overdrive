@@ -65,8 +65,9 @@ const server = http.createServer((req, res) => {
 if (!URL_BASE) await new Promise((r) => server.listen(PORT, "127.0.0.1", r));
 
 const udd = fs.mkdtempSync("/tmp/so-shot-chrome-");
-// The audio rule (worker-instructions): --mute-audio AND PULSE_SINK=worker-null,
-// because --mute-audio alone still opens a stream on David's audio device.
+// Audio: --mute-audio AND PULSE_SINK=worker-null, so a check never plays
+// through the speakers: --mute-audio alone still opens a stream on the
+// default audio device.
 // The null sink is made if missing (best effort: no pactl, no sink to make).
 try {
   const sinks = execFileSync("pactl", ["list", "short", "sinks"], { encoding: "utf8" });

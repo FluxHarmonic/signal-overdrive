@@ -164,3 +164,7 @@ count-in whose clean alias a bar away outscores the noisy true lag
 
 `sh scripts/drift/test-candidate RUNDIR` runs the default project tests with
 the native dependency harness the DSP checks need.
+
+The three candidate scripts run `$SIGIL`, or `sigil` from PATH when it is
+unset. Its version must be the one `package.sgl` pins (`sigil: "0.22.11"`);
+otherwise RESULT is SETUP-FAILED and nothing is built.

@@ -29,7 +29,8 @@
 //
 // Exit 0 when every step ran and the console showed no error; 1 on a
 // console error; 2 (SETUP-FAILED) when the page never said ready.
-// Audio: --mute-audio and PULSE_SINK=worker-null (worker-instructions).
+// Audio: --mute-audio and PULSE_SINK=worker-null, so a check never plays
+// through the speakers.
 
 import http from "node:http";
 import fs from "node:fs";
