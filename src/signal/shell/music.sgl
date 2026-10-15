@@ -247,8 +247,6 @@
           ;; a new player starts clean; the integrity passed in reaches it
           ;; at once (worse is never delayed)
           (set! *damage* (damage-path-new))
-          ;; a new song (tick 0) lifts a CORRUPT fade-out; a resume keeps it
-          (when (= 0 (conductor-tick c)) (set! *fade-out* #f))
           (set! *dip* #f)
           (set! *locks* (quote ()))
           (set! *epoch* (transport-start-epoch plan))
@@ -474,10 +472,17 @@
 
     (define (music-frame! c paused?
                           (keys: (clock-fraction 0.0) (frame-jiffy #f)
-                                 (integrity 100.0) (boost #f)))
-      (set! *integrity* integrity)
-      (set! *boost* boost)
+                                 (integrity #f) (boost 'keep)))
+      ;; a caller with no say (a focus change, F5) keeps what the last
+      ;; frame passed: a resume primes its queue at the real damage
+      (when integrity (set! *integrity* integrity))
+      (unless (eq? boost 'keep) (set! *boost* boost))
       (let ((t0 (current-jiffy)))
+        ;; A new song (a restart) lifts a CORRUPT fade-out; a resume keeps it.
+        (when (and *first-log*
+                   (or (< (conductor-tick c) *last-tick*)
+                       (not (eq? *first-log* (car (reverse (conductor-log c)))))))
+          (set! *fade-out* #f))
         ;; A restart replaces the conductor's initial log even when it
         ;; occurs before another tick. Its tick also returns to zero.
         (when (and *stream*

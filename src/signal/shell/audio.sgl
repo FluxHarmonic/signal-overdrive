@@ -200,6 +200,8 @@
         ((wall)
          (let ((s (exact->inexact strength)))
            (cond ((>= s HIT-IMPACT)
+                  ;; the hit carries its own grind: no scrape on top of it
+                  (set! *last-scrape* (current-jiffy))
                   (or (play! 'hit (min 1.0 (+ 0.6 (/ (- s HIT-IMPACT) 500.0))))
                       (synth-event! *synth* 'wall strength)))
                  ((>= (- (current-jiffy) *last-scrape*) (* SCRAPE-HOLD (jiffies-per-second)))

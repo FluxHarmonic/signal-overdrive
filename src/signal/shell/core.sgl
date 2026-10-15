@@ -131,6 +131,7 @@
     ;; *theme-session*: the title has owned the music since the boot, so
     ;; the card's release went to the theme and the race song needs none.
     (define *theme-session* #f)
+    (define *damage-on* #t)
     (define PAUSE-FADE-IN 0.6)
     (define PAUSE-FADE-OUT 0.25)
     (define (theme-service!)
@@ -433,6 +434,9 @@
                (music-sabotage! arm)))
             ((string=? kv "cues=0") (audio-cues! #f))
             ((string=? kv "sfx=0") (audio-sfx! #f) (say "sfx off: engine silent, no one-shots"))
+            ;; a diagnostic for timing checks (the drift gate): the song stays
+            ;; clean, with no dips, whatever the integrity
+            ((string=? kv "damage=0") (set! *damage-on* #f) (say "damage off: the song stays clean"))
             ((and (> (string-length kv) 14) (string=? (substring kv 0 14) "audio-latency="))
              (let ((v (string->number (substring kv 14 (string-length kv)))))
                (when v (music-latency! (/ v 1000.0)) (theme-latency! (/ v 1000.0)))))
@@ -1050,18 +1054,19 @@
         (if *theme-session* (music-unhold!) (song-gate!))
         ;; the immediate path: a hard wall hit dips the song to 40% for
         ;; 40 ms, an ICE strike drops it for a 16th, CORRUPT fades it out
+        (when *damage-on*
         (for-each (lambda (e)
                     (cond ((and (pair? e) (eq? (car e) 'wall) (>= (cdr e) HIT-IMPACT))
                            (music-dip! 0.04 0.4))
                           ((eq? e 'ice) (music-dip! (/ 15.0 SONG-BPM) 0.0))
                           ((eq? e 'corrupt) (music-fade-out! 0.5))
                           (else #f)))
-                  *frame-events*)
+                  *frame-events*))
         (music-frame! (race-song *race*) (music-held?)
                       clock-fraction: (clock-acc *clock*)
                       frame-jiffy: *frame-jiffy*
-                      integrity: (machine-integrity m)
-                      boost: (> (machine-boost m) 0.0))
+                      integrity: (if *damage-on* (machine-integrity m) 100.0)
+                      boost: (and *damage-on* (> (machine-boost m) 0.0)))
         ;; a repair's snap, as it reaches the ear: the lock
         (when (music-lock-due!) (audio-lock!))
         (unless (= *music-generation* (music-generation))

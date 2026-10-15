@@ -6,8 +6,8 @@
 ;;;   gains 3 ms linear (the lead's dropouts, stems leaving), cutoffs 24 ms
 ;;;   on a log scale (a Butterworth cutoff jumped in one sample once made a
 ;;;   two-sample spike to +11 dBFS), the chorus and makeup 20 ms linear.
-;;; Bits, rate-div and drive step: they are distinct effects, and drive
-;;; moves only at a boost's edges, where the boost's whoosh sounds.
+;;; Bits and rate-div step: they are distinct effects. Drive ramps over
+;;; 30 ms at a boost's edges.
 ;;;
 ;;;   ch 1-3  drums  crush (drive bits rate-div) -> gain
 ;;;   ch 4    bass   low-pass (cutoff)                          protected
@@ -32,7 +32,9 @@
 
     (define (crush-stage x)
       (g:crush x
-               (g:param 'drive 0.0 0.0 8.0)
+               ;; a boost's overdrive comes in and out over 30 ms (any drive above
+               ;; 0 still adds 2.4 dB at once: the crush is the identity only at 0)
+               (g:param 'drive 0.0 0.0 8.0 smooth: 30.0)
                (g:param 'bits 24.0 1.0 24.0)
                (g:param 'rate-div 1.0 1.0 16.0)))
 

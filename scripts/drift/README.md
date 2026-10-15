@@ -17,6 +17,12 @@ node scripts/drift/rejudge.mjs RUNDIR      # re-judge a saved capture with the c
 
 ## What is captured: the music alone
 
+Every capture also runs with `damage=0`: the song stays clean whatever
+the integrity, with no dips. The gate measures timing, and its offline
+reference is the clean song; the damage (crushed stems, dropped 16ths,
+an ICE strike's silent 16th) would only lower the correlation, and a
+silence the reference does not have reads as a device dropout.
+
 The gate judges a **music-only capture**: the game runs with `sfx=0`, which
 silences the engine (gain 0) and drops the one-shots while the synth keeps
 rendering, so the frame's work and allocation are unchanged. The conductor

@@ -22,7 +22,7 @@
 ;;;                          it is split)
 ;;;   SFX-KINDS              ((kind seconds) ...)
 (define-library (signal sfx)
-  (import (sigil core) (sigil math))
+  (import (sigil core) (sigil math) (only (signal sound) lcg-next))
   (export sfx-steps SFX-KINDS SCRAPE-HOLD HIT-IMPACT render-sfx)
   (begin
     (define PI 3.141592653589793)
@@ -31,10 +31,11 @@
     (define HIT-IMPACT 150.0)
     (define SFX-KINDS '((scrape 0.30) (hit 0.62) (whoosh 1.8) (lock 0.4)))
 
-    ;; -1..1, deterministic per cue
+    ;; -1..1, deterministic per cue; (signal sound)'s generator, which stays
+    ;; in fixnum range (a 1103515245 multiplier made a bignum a call)
     (define (make-rand seed)
       (lambda ()
-        (set! seed (modulo (+ (* seed 1103515245) 12345) 2147483648))
+        (set! seed (lcg-next seed))
         (- (* 2.0 (/ seed 2147483648.0)) 1.0)))
 
     ;; an RBJ band-pass (0 dB peak); (bp x) -> y, (bp 'tune f q) retunes it

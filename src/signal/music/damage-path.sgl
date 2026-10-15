@@ -34,7 +34,8 @@
       (tier default: 'clean mutable: #t)
       (snap default: #f mutable: #t)        ; render frame of a planned snap, or #f
       (applied default: '() mutable: #t)    ; ((ch . name) . value) as last set
-      (cut default: 1.0 mutable: #t))       ; the song's gain now (cutouts)
+      (cut default: 1.0 mutable: #t)        ; the song's gain now (cutouts)
+      (inputs default: #f mutable: #t))     ; (integrity tier boost?) of the last targets
 
     (define (damage-path-new) (damage-path))
 
@@ -109,11 +110,20 @@
                      (tier (damage-path-tier d))
                      (bar (exact (floor (/ song bar-len))))
                      (s16 (modulo (exact (floor (/ song s16-len))) 16))
-                     (next16 (max 1 (- (exact (round (* (+ (floor (/ song s16-len)) 1) s16-len))) song)))
+                     ;; the next 16th's first frame (ceiling: a fractional 16th, as at
+                     ;; 48 kHz, must not round below its line), split there only
+                     ;; while the lead is gated or the song cut
+                     (next16 (if (>= (damage-rank tier) 2)
+                                 (max 1 (- (exact (ceiling (* (+ (floor (/ song s16-len)) 1) s16-len))) song))
+                                 frames))
                      (to-snap (and (damage-path-snap d) (- (damage-path-snap d) rendered)))
                      (n (min (- frames done) next16 (if (and to-snap (> to-snap 0)) to-snap frames))))
-                (for-each (lambda (s) (target! d p (car s) (cadr s) (caddr s)))
-                          (damage-params (damage-clamp integrity tier) boost?))
+                ;; the targets, worked out again only when what sets them changed
+                (let ((inputs (list (damage-clamp integrity tier) tier boost?)))
+                  (unless (equal? inputs (damage-path-inputs d))
+                    (for-each (lambda (s) (target! d p (car s) (cadr s) (caddr s)))
+                              (damage-params (car inputs) boost?))
+                    (set-damage-path-inputs! d inputs)))
                 (target! d p 6 (quote gain) (damage-gate tier bar s16))
                 ;; the pull takes its offset in bytes: 8 a stereo frame
                 (playback-pull! b c out (* 8 (+ offset done)) n)

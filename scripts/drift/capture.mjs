@@ -100,7 +100,9 @@ try {
   capture.stderr.on("data", bytes => fs.appendFileSync(path.join(RUN, "parec.log"), bytes));
   await sleep(300);
   if (capture.exitCode !== null) throw new Error("parec failed to open the verified monitor");
-  game = launch(path.join(ROOT, "scripts/dev"), [BIN, "--start", "--autopilot", "--track=loop", "--musiclog",
+  // --damage=0: the gate measures timing; its reference is the clean song,
+  // and an ICE strike's dropout would read as a device dropout
+  game = launch(path.join(ROOT, "scripts/dev"), [BIN, "--start", "--autopilot", "--track=loop", "--musiclog", "--damage=0",
     ...(HEADLESS ? ["--music-headless"] : []),
     ...(MUSIC_ONLY ? ["--sfx=0"] : []),
     `--music-sabotage=${ARM === "normal" ? "none" : ARM}`, "--quit-after", "400"],
