@@ -250,21 +250,23 @@
     ;; web, E is the page's panel instead, with ?dev in the URL). On both,
     ;; F6 solos the next effect, F7 the showcase, F8 a wall hit, F9 an ICE
     ;; strike (a tracer: marked on the next downbeat, striking on the one
-    ;; after), F10 the drop, F2 the next integrity tier.
+    ;; after), F10 the drop, F2 the next integrity tier. All of them are
+    ;; development keys (dev-keys?): on the web they need ?dev.
     (define (fx-keys!)
-      (when (and (pressed? 'e) (not (eq? *platform* 'web)))
-        (set! *overlay* (if *overlay* #f
-                            (let find ((ks KNOBS) (i 0))
-                              (cond ((null? ks) 0) ((eq? (knob-group (car ks)) 'fx) i) (else (find (cdr ks) (+ i 1))))))))
-      (when (pressed? 'f6)
-        (set! *tuning* (tuning-set *tuning* 'fx-solo (modulo (+ 1 (exact (round (tuning-ref *tuning* 'fx-solo)))) 8)))
-        (say "fx solo " (number->string (exact (round (tuning-ref *tuning* 'fx-solo))))))
-      (when (pressed? 'f7)
-        (set! *tuning* (tuning-set *tuning* 'fx-showcase (if (showcase?) 0.0 1.0))))
-      (when (pressed? 'f8) (fx-fire! 'wall))
-      (when (pressed? 'f9) (fx-fire! 'ice))
-      (when (pressed? 'f10) (fx-fire! 'drop))
-      (when (pressed? 'f2) (fx-fire! 'tier)))
+      (when (dev-keys?)
+        (when (and (pressed? 'e) (not (eq? *platform* 'web)))
+          (set! *overlay* (if *overlay* #f
+                              (let find ((ks KNOBS) (i 0))
+                                (cond ((null? ks) 0) ((eq? (knob-group (car ks)) 'fx) i) (else (find (cdr ks) (+ i 1))))))))
+        (when (pressed? 'f6)
+          (set! *tuning* (tuning-set *tuning* 'fx-solo (modulo (+ 1 (exact (round (tuning-ref *tuning* 'fx-solo)))) 8)))
+          (say "fx solo " (number->string (exact (round (tuning-ref *tuning* 'fx-solo))))))
+        (when (pressed? 'f7)
+          (set! *tuning* (tuning-set *tuning* 'fx-showcase (if (showcase?) 0.0 1.0))))
+        (when (pressed? 'f8) (fx-fire! 'wall))
+        (when (pressed? 'f9) (fx-fire! 'ice))
+        (when (pressed? 'f10) (fx-fire! 'drop))
+        (when (pressed? 'f2) (fx-fire! 'tier))))
 
     (define (fx-describe)
       (string-append " fx-ms " (number->string (/ (round (* 100.0 *fx-ms*)) 100.0))
@@ -277,6 +279,11 @@
 
     (define *overlay* #f)         ; the selected knob's row while the overlay is open
     (define *platform* 'desktop)
+    ;; The development keys (Tab's overlay, F2 to F10) are always on
+    ;; natively; on the web only with ?dev in the URL (any value, as the
+    ;; page's effects panel reads it), so a player can't trip them.
+    (define *dev* #f)
+    (define (dev-keys?) (or *dev* (not (eq? *platform* 'web))))
     (define *tapped* #f)
     ;; the page's touch scheme sends its whole state at once:
     ;; steer throttle brake boost drift
@@ -331,7 +338,9 @@
             ((and (> (string-length kv) 8) (string=? (substring kv 0 8) "fx-fire="))
              (fx-fire! (string->symbol (substring kv 8 (string-length kv)))))
             ((string=? kv "showcase") (core-param! "fx-showcase=1"))
-            ((string=? kv "fps") (set! *fps-on* #t))
+            ((string=? kv "fps") (set! *fps-on* #t) (say "fps readout on"))
+            ((or (string=? kv "dev") (and (> (string-length kv) 3) (string=? (substring kv 0 4) "dev=")))
+             (set! *dev* #t) (say "dev keys on"))
             ;; no HUD: clean captures, and the P15 gate's static frame
             ((string=? kv "nohud") (set! *no-hud* #t))
             ;; no machines or gate: the P15 gate's frame must not move, and the
@@ -539,7 +548,7 @@
     ;; --- the overlay and the other keys ------------------------------------------------------
 
     (define (overlay-keys!)
-      (when (pressed? 'tab)
+      (when (and (dev-keys?) (pressed? 'tab))
         (set! *overlay* (if *overlay* #f 0))
         (say "overlay " (if *overlay* "on" "off")))
       (when (pressed? 'p)
@@ -775,7 +784,7 @@
               (set! *hitches* (let take ((l (cons h *hitches*)) (k 0))
                                 (if (or (null? l) (>= k 60)) '() (cons (car l) (take (cdr l) (+ k 1))))))
               (when *hitch-print* (say "hitch " (hitch-text h)))))))
-      (when (pressed? 'f4)
+      (when (and (dev-keys?) (pressed? 'f4))
         (say "hitch log: " (number->string *hitch-count*) " hitches; newest first")
         (for-each (lambda (h) (say "  " (hitch-text h))) *hitches*)))
     (define (r1 v) (number->string (/ (round (* 10.0 v)) 10.0)))
@@ -808,14 +817,17 @@
     (define (core-advance! dt)
       (set! *frame-jiffy* (current-jiffy))
       (set! *frame-wall* (* 1000.0 (current-second)))
-      (when (pressed? 'f5)
+      (when (and (dev-keys?) (pressed? 'f5))
         (set! *paused* (not *paused*))
         (audio-pause! (core-paused?))
         (music-frame! (race-song *race*) (core-paused?)))
       (when (> dt 0.0)
         (set! *fps* (+ (* 0.95 *fps*) (* 0.05 (/ 1.0 dt))))
         (set! *frame-ms* (+ (* 0.95 *frame-ms*) (* 0.05 (* 1000.0 dt)))))
-      (when (pressed? 'f3) (set! *fps-on* (not *fps-on*)))
+      ;; ?fps turns the readout on for anyone; F3 toggles it with ?dev
+      (when (and (dev-keys?) (pressed? 'f3))
+        (set! *fps-on* (not *fps-on*))
+        (say "fps readout " (if *fps-on* "on" "off")))
       (overlay-keys!)
       (fx-keys!)
       (when (or (pressed? 'r) (pad-pressed? *pad* 'back))

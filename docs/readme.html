@@ -148,18 +148,23 @@ and <code>docs/CONDUCTOR.md</code> describes how the race and the song keep time
 (Node, no dependencies).</li>
 </ul>
 <h3>Development tools</h3>
-<p>The game carries the tools I use to tune it. Tab opens the tuning overlay
-(Up/Down pick a knob, Left/Right change it, 0 resets it), and every knob
-also takes a URL parameter of the same name, so <code>?grip=8.5</code> sets the grip
-from the address. <code>signal-overdrive --knobs</code> prints the full table.</p>
+<p>The game carries the tools I use to tune it. In the native build they're
+always on. In the browser build, add <code>?dev</code> to the address to turn them on,
+so a player can't trip them by accident.</p>
 <ul>
-<li>F3 (or <code>?fps</code>) shows the frame rate, the frame's timings and the audio
-readout, with a graph of the last 180 frames. While it's on, F4 prints
-the recent hitches to the console. F5 pauses the native build.</li>
-<li>P switches the palette and / toggles the dither.</li>
-<li><code>?dev</code> adds the effects panel to the browser build (the EFFECTS button,
-or E): each effect's toggle and intensity, solo, and a button that fires
-each trigger. <code>docs/effects.html</code> describes the effects.</li>
+<li>Tab opens the tuning overlay (Up/Down pick a knob, Left/Right change it,
+0 resets it). Every knob also takes a URL parameter of the same name,
+with or without <code>?dev</code>, so <code>?grip=8.5</code> sets the grip from the address.
+<code>signal-overdrive --knobs</code> prints the full table.</li>
+<li><code>?fps</code> shows the frame rate, the frame's timings and the audio readout,
+with a graph of the last 180 frames, and works for anyone. F3 toggles
+it. While it's on, F4 prints the recent hitches to the console. F5
+pauses the native build.</li>
+<li>With <code>?dev</code>, the browser build also gets the effects panel (the EFFECTS
+button, or E): each effect's toggle and intensity, solo, and a button
+that fires each trigger. F2 and F6 to F10 do the same from the keyboard.
+<code>docs/effects.html</code> describes the effects.</li>
+<li>P switches the palette and / toggles the dither, in every build.</li>
 <li>Other parameters: <code>?track=loop</code> (a second test track, with a hairpin),
 <code>?start</code> (skip the title), <code>?card=0</code> (skip the card before it), <code>?mute</code>,
 <code>?autopilot</code>, and <code>?touch=zones|drag|stick</code>.</li>

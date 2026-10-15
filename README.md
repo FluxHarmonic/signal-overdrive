@@ -119,18 +119,23 @@ The tests are in `test/`. Run one file with
 
 ### Development tools
 
-The game carries the tools I use to tune it. Tab opens the tuning overlay
-(Up/Down pick a knob, Left/Right change it, 0 resets it), and every knob
-also takes a URL parameter of the same name, so `?grip=8.5` sets the grip
-from the address. `signal-overdrive --knobs` prints the full table.
+The game carries the tools I use to tune it. In the native build they're
+always on. In the browser build, add `?dev` to the address to turn them on,
+so a player can't trip them by accident.
 
-- F3 (or `?fps`) shows the frame rate, the frame's timings and the audio
-  readout, with a graph of the last 180 frames. While it's on, F4 prints
-  the recent hitches to the console. F5 pauses the native build.
-- P switches the palette and / toggles the dither.
-- `?dev` adds the effects panel to the browser build (the EFFECTS button,
-  or E): each effect's toggle and intensity, solo, and a button that fires
-  each trigger. `docs/effects.html` describes the effects.
+- Tab opens the tuning overlay (Up/Down pick a knob, Left/Right change it,
+  0 resets it). Every knob also takes a URL parameter of the same name,
+  with or without `?dev`, so `?grip=8.5` sets the grip from the address.
+  `signal-overdrive --knobs` prints the full table.
+- `?fps` shows the frame rate, the frame's timings and the audio readout,
+  with a graph of the last 180 frames, and works for anyone. F3 toggles
+  it. While it's on, F4 prints the recent hitches to the console. F5
+  pauses the native build.
+- With `?dev`, the browser build also gets the effects panel (the EFFECTS
+  button, or E): each effect's toggle and intensity, solo, and a button
+  that fires each trigger. F2 and F6 to F10 do the same from the keyboard.
+  `docs/effects.html` describes the effects.
+- P switches the palette and / toggles the dither, in every build.
 - Other parameters: `?track=loop` (a second test track, with a hairpin),
   `?start` (skip the title), `?card=0` (skip the card before it), `?mute`,
   `?autopilot`, and `?touch=zones|drag|stick`.
