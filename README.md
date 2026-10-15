@@ -58,7 +58,7 @@ address.
 | Restart | R | Back |
 
 **On a phone** the machine accelerates by itself, and you pick one of three
-touch schemes with the SCHEME button at the top left:
+touch schemes with the button at the top left (it shows the current scheme's name):
 
 - **zones** (the default): a thumb on the left half of the screen steers
   left, on the right half steers right, both thumbs brake, and the BOOST
@@ -95,9 +95,9 @@ To play the browser build, serve it locally:
 
     node scripts/serve.mjs build/web 8080 --loopback
 
-and open <http://127.0.0.1:8080/>. The game needs the cross-origin
-isolation headers that `serve.mjs` sends, so opening `index.html` straight
-from disk won't work.
+and open <http://127.0.0.1:8080/>. `serve.mjs` also sends the cross-origin
+isolation headers that give the game its best audio path. Opening
+`index.html` straight from disk won't work.
 
 The tests are in `test/`. Run one file with
 `scripts/dev sigil test --sgl test/test-handling.sgl` (and likewise for
@@ -125,8 +125,8 @@ also takes a URL parameter of the same name, so `?grip=8.5` sets the grip
 from the address. `signal-overdrive --knobs` prints the full table.
 
 - F3 (or `?fps`) shows the frame rate, the frame's timings and the audio
-  readout, with a graph of the last 180 frames. F4 prints every hitch to
-  the console, and F5 pauses.
+  readout, with a graph of the last 180 frames. While it's on, F4 prints
+  the recent hitches to the console. F5 pauses the native build.
 - P switches the palette and / toggles the dither.
 - `?dev` adds the effects panel to the browser build (the EFFECTS button,
   or E): each effect's toggle and intensity, solo, and a button that fires
@@ -137,8 +137,8 @@ from the address. `signal-overdrive --knobs` prints the full table.
 
 ## Licenses
 
-The code is GPL-3.0-or-later (`LICENSE`). The art, the music, the sound and
-the content are CC-BY-4.0 (`assets/LICENSE`), credit David Wilson / Flux
+The code is GPL-3.0-or-later (`LICENSE`). The art, the music and the
+content are CC-BY-4.0 (`assets/LICENSE`), credit David Wilson / Flux
 Harmonic, except the reserved marks in `assets/RESERVED.md`: the name, the
 logo and the Flux Harmonic mark. The third-party notices, including the
 site's font, are in `NOTICE`.
