@@ -281,8 +281,17 @@
   // panel's keys, clicks and taps stay in the panel: the game never sees
   // them. Tab moves between controls, arrows set a slider, Enter or Space
   // presses a button, E or Escape closes.
+  //
+  // The panel is a development tool: it is there only with ?dev in the URL
+  // (?dev&fx-solo=2, say). Without it the button and the panel are removed
+  // and E does nothing on the page.
   (function () {
     "use strict";
+    var params = new URLSearchParams(location.search);
+    if (!params.has("dev")) {
+      ["fx-open", "fx-panel"].forEach(function (id) { var e = document.getElementById(id); if (e) e.remove(); });
+      return;
+    }
     var FX = [
       { k: "fx-dip", name: "HORIZON DIP", max: 2, fire: "drop", label: "DROP" },
       { k: "fx-pools", name: "LIGHT POOLS", max: 2 },
@@ -294,7 +303,6 @@
     ];
     var MANAGED = ["fx-dip", "fx-pools", "fx-chase", "fx-sky", "fx-glitch", "fx-warp", "fx-interf", "fx-solo", "fx-showcase", "fx-tier", "showcase"];
     var TIERS = [["REAL", -1], ["WORN", 70], ["DAMAGED", 45], ["FAILING", 20], ["CRITICAL", 5]];
-    var params = new URLSearchParams(location.search);
     var num = function (k, d) { var v = parseFloat(params.get(k)); return isNaN(v) ? d : v; };
     var state = { solo: num("fx-solo", 0), showcase: num("fx-showcase", params.has("showcase") ? 1 : 0), tier: num("fx-tier", -1) };
     var last = {};

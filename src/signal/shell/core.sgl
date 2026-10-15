@@ -246,9 +246,9 @@
                (say "fx tier " (if (< next 0.0) "real" (tier-name (integrity-tier next))))))
             (else (set! *fx-fires* (cons what *fx-fires*)) (say "fx fire " (symbol->string what)))))
 
-    ;; Natively, and on the web too: E opens the tuning overlay at the
-    ;; effects' knobs (the web page has its own panel on E as well), F6
-    ;; solos the next effect, F7 the showcase, F8 a wall hit, F9 an ICE
+    ;; Natively, E opens the tuning overlay at the effects' knobs (on the
+    ;; web, E is the page's panel instead, with ?dev in the URL). On both,
+    ;; F6 solos the next effect, F7 the showcase, F8 a wall hit, F9 an ICE
     ;; strike (a tracer: marked on the next downbeat, striking on the one
     ;; after), F10 the drop, F2 the next integrity tier.
     (define (fx-keys!)
