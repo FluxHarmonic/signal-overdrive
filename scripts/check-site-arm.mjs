@@ -540,13 +540,15 @@ try {
 
   // ---- version: no release number in the copy ---------------------------------------------
   // the page names no version (GET IN, not PLAY 0.1), so nothing in the copy
-  // needs changing per release; a license id like GPL-3.0-or-later is not one
+  // needs changing per release; a license id is not one: GPL-3.0-or-later
+  // (the pattern skips it) and CC BY 4.0 (removed before matching)
   {
     const detail = [];
     const VER = /(?<![\w.:-])v?\d+\.\d+(?:\.\d+)?(?![\w-]|\.\d)/g;
+    const LICENSE = /\bCC BY(?:-(?:SA|NC|ND))*\s+\d+\.\d+\b/g;
     for (const p of ["/", MISSING]) {
       await visit(p);
-      const t = await evalJS(`[document.title, (document.querySelector('meta[name="description"]') || {}).content || "", ...[...document.querySelectorAll('meta[property^="og:"], meta[name^="twitter:"]')].map((m) => m.content), document.body.innerText].join("\\n")`);
+      const t = (await evalJS(`[document.title, (document.querySelector('meta[name="description"]') || {}).content || "", ...[...document.querySelectorAll('meta[property^="og:"], meta[name^="twitter:"]')].map((m) => m.content), document.body.innerText].join("\\n")`)).replace(LICENSE, "");
       const hits = [...new Set(t.match(VER) || [])];
       if (hits.length) detail.push(`${p} names ${hits.join(", ")}`);
       if (!t.length) detail.push(`${p}: no text read`);
