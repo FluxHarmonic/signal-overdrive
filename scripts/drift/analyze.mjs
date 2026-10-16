@@ -383,10 +383,11 @@ export function analyze(run) {
     let sum = 0; for (let i = a; i < b; i++) sum += ref.values[i];
     return b > a ? sum / (b - a) : 0;
   }
-  // A resync cuts every sounding note, and a held part stays silent until
-  // its next note: silence heard within a second of a resync (the ring's
-  // 250 ms plus latency, then the gap) is the product's own resync, not a
-  // device fault. Reported apart from dropouts.
+  // A resync with the ear ahead splices in silence for the gap before a
+  // bar line (a resync made by a player jump, before the splice, cut every
+  // held note instead): silence heard within a second of a resync (the
+  // ring's 250 ms plus latency, then the gap) is the product's own resync,
+  // not a device fault. Reported apart from dropouts.
   const resyncWalls = [];
   for (let i = 1; i < clocks.length; i++)
     if (clocks[i].metrics.resyncs !== clocks[i - 1].metrics.resyncs) resyncWalls.push(clocks[i].wall);

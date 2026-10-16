@@ -99,6 +99,8 @@
              (when (string=? payload "trace-touch") (set! *trace-touch* #t))
              (core-param! payload) 0)
             ((string=? type "focus")
+             ;; "1" focused, "0" blurred, "h" hidden (blurred too)
+             (core-visible! (not (string=? payload "h")))
              (core-focus! (string=? payload "1")) 1)
             ((string=? type "audio-latency")
              (core-param! (string-append "audio-latency=" payload)) 1)

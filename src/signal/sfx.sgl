@@ -1,0 +1,146 @@
+;;; (signal sfx) - The felt one-shots M0's damage audition settled (David,
+;;; 2026-10-13: an impact must be felt, "the car scraping the wall sounded
+;;; like a single hi hat"), rendered once at the device's rate as cues:
+;;;
+;;;   scrape  a grind for a wall contact: band-passed noise with an
+;;;           irregular pressure, metal partials, a low rumble for weight,
+;;;           pops; 5 ms attack, SCRAPE-HOLD s of contact, a 40 ms decay.
+;;;           The shell retriggers it while the contact lasts.
+;;;   hit     a hard hit: a sine falling 140 -> 42 Hz, a dull burst and a
+;;;           metal clang ringing 0.35 s, over a short scrape
+;;;   whoosh  a boost: noise through a band-pass sweeping 350 -> 2600 Hz over
+;;;           a rising tone, for the boost's 1.3 s
+;;;   lock    a repair's snap: a short bright chime, D6 and A6
+;;;
+;;; Levels are M0's, baked in: the shell plays them at volume 1 (the wall's
+;;; scaled by impact). Cues mix after the music's limiter, so these leave
+;;; it headroom (M0: the thump at 0.5 put samples at full scale; 0.38 none).
+;;;
+;;;   (sfx-steps kind rate)  a procedure rendering up to N more frames a
+;;;                          call; the finished stereo f32 bytevector, #f
+;;;                          while frames remain (the same bytes however
+;;;                          it is split)
+;;;   SFX-KINDS              ((kind seconds) ...)
+(define-library (signal sfx)
+  (import (sigil core) (sigil math) (only (signal sound) lcg-next))
+  (export sfx-steps SFX-KINDS SCRAPE-HOLD HIT-IMPACT render-sfx)
+  (begin
+    (define PI 3.141592653589793)
+    (define SCRAPE-HOLD 0.18)
+    ;; a wall impact (texels/s into the wall) at or over this is a hard hit
+    (define HIT-IMPACT 150.0)
+    (define SFX-KINDS '((scrape 0.30) (hit 0.62) (whoosh 1.8) (lock 0.4)))
+
+    ;; -1..1, deterministic per cue; (signal sound)'s generator, which stays
+    ;; in fixnum range (a 1103515245 multiplier made a bignum a call)
+    (define (make-rand seed)
+      (lambda ()
+        (set! seed (lcg-next seed))
+        (- (* 2.0 (/ seed 2147483648.0)) 1.0)))
+
+    ;; an RBJ band-pass (0 dB peak); (bp x) -> y, (bp 'tune f q) retunes it
+    (define (make-bandpass sr f q)
+      (let ((b0 0.0) (b2 0.0) (a1 0.0) (a2 0.0) (x1 0.0) (x2 0.0) (y1 0.0) (y2 0.0))
+        (define (tune! f q)
+          (let* ((w (/ (* 2.0 PI f) sr)) (alpha (/ (sin w) (* 2.0 q))) (a0 (+ 1.0 alpha)))
+            (set! b0 (/ alpha a0)) (set! b2 (/ (- alpha) a0))
+            (set! a1 (/ (* -2.0 (cos w)) a0)) (set! a2 (/ (- 1.0 alpha) a0))))
+        (tune! f q)
+        (lambda (x . more)
+          (if (eq? x 'tune)
+              (begin (tune! (car more) (cadr more)) 0.0)
+              (let ((y (- (+ (* b0 x) (* b2 x2)) (* a1 y1) (* a2 y2))))
+                (set! x2 x1) (set! x1 x) (set! y2 y1) (set! y1 y)
+                y)))))
+
+    (define (make-onepole sr f)
+      (let ((y 0.0) (a (- 1.0 (exp (/ (* -2.0 PI f) sr)))))
+        (lambda (x) (set! y (+ y (* a (- x y)))) y)))
+
+    ;; a smoothed random walk at RATE Hz: a grind's irregular pressure
+    (define (make-grind sr rand rate)
+      (let ((target 0.0) (lp (make-onepole sr (* 2.0 rate))) (hold (exact (round (/ sr rate)))) (k 0))
+        (lambda ()
+          (when (= 0 (modulo k hold)) (set! target (rand)))
+          (set! k (+ k 1))
+          (lp target))))
+
+    ;; sample k of a scrape of DUR seconds of contact at LEVEL
+    (define (scrape-voice sr level dur seed)
+      (let* ((rand (make-rand seed))
+             (bp1 (make-bandpass sr 900.0 1.2)) (bp2 (make-bandpass sr 2800.0 2.0))
+             (rumble (make-onepole sr 160.0)) (grind (make-grind sr rand 38.0)) (grind2 (make-grind sr rand 9.0))
+             (pop 0.0))
+        (lambda (k)
+          (let* ((t (/ k (* 1.0 sr)))
+                 (env (* (min 1.0 (/ t 0.005)) (if (> t dur) (exp (/ (- dur t) 0.04)) 1.0)))
+                 (g (+ 0.55 (* 0.45 (grind)) (* 0.25 (grind2))))
+                 (n (rand))
+                 (noise (+ (bp1 n) (* 0.7 (bp2 n))))
+                 (metal (+ (* 0.10 (sin (* 2.0 PI 410.0 t))) (* 0.07 (sin (* 2.0 PI 1130.0 t)))
+                           (* 0.06 (sin (* 2.0 PI 1790.0 t))) (* 0.04 (sin (* 2.0 PI 2970.0 t)))))
+                 (low (+ (* 2.2 (rumble (rand))) (* 0.35 (sin (* 2.0 PI 52.0 t))))))
+            (set! pop (if (< (abs (rand)) 0.0012) (rand) (* pop 0.93)))
+            (* level env (+ (* g (+ (* 1.1 noise) metal)) (* (+ 0.6 (* 0.4 g)) low) (* 0.6 pop)))))))
+
+    (define (hit-voice sr)
+      (let ((rand (make-rand 13579)) (lp (make-onepole sr 1500.0)) (ph 0.0)
+            (scrape (scrape-voice sr 0.3 0.18 97531)))
+        (lambda (k)
+          (let* ((t (/ k (* 1.0 sr)))
+                 (f (+ 42.0 (* 98.0 (exp (/ t -0.04))))))
+            (set! ph (+ ph (/ (* 2.0 PI f) sr)))
+            (let* ((body (* (sin ph) (min 1.0 (/ t 0.002)) (exp (/ t -0.22))))
+                   (burst (* (lp (rand)) (exp (/ t -0.025))))
+                   (clang (* (exp (/ t -0.35))
+                             (+ (* 0.12 (sin (* 2.0 PI 230.0 t))) (* 0.09 (sin (* 2.0 PI 587.0 t)))
+                                (* 0.07 (sin (* 2.0 PI 1093.0 t))) (* 0.05 (sin (* 2.0 PI 1720.0 t)))))))
+              (+ (* 0.38 (+ body (* 1.4 burst) clang)) (scrape k)))))))
+
+    (define (whoosh-voice sr)
+      (let ((rand (make-rand 24680)) (bp (make-bandpass sr 350.0 1.5)) (ph 0.0) (dur 1.3))
+        (lambda (k)
+          (let* ((t (/ k (* 1.0 sr)))
+                 (rise (min 1.0 (/ t 0.7)))
+                 (env (cond ((< t 0.25) (/ t 0.25)) ((< t dur) 1.0) (else (exp (/ (- dur t) 0.15)))))
+                 (tone-f (+ 180.0 (* 340.0 rise))))
+            (set! ph (+ ph (/ (* 2.0 PI tone-f) sr)))
+            (when (= 0 (modulo k 64)) (bp 'tune (* 350.0 (expt (/ 2600.0 350.0) rise)) 1.5))
+            (* 0.3 env (+ (* 1.6 (bp (rand))) (* 0.18 (sin ph)) (* 0.08 (sin (* 2.0 ph)))))))))
+
+    (define (lock-voice sr)
+      (lambda (k)
+        (let* ((t (/ k (* 1.0 sr)))
+               (env (* (min 1.0 (/ t 0.002)) (exp (/ t -0.11)))))
+          (* 0.16 env (+ (sin (* 2.0 PI 1174.66 t))
+                         (* 0.6 (sin (* 2.0 PI 1760.0 t)))
+                         (* 0.15 (sin (* 2.0 PI 3523.98 t))))))))
+
+    (define (voice kind sr)
+      (case kind
+        ((scrape) (scrape-voice sr 0.32 SCRAPE-HOLD 11111))
+        ((hit) (hit-voice sr))
+        ((whoosh) (whoosh-voice sr))
+        ((lock) (lock-voice sr))
+        (else (error "unknown sfx" kind))))
+
+    (define (sfx-frames kind sr)
+      (exact (floor (* (cadr (assq kind SFX-KINDS)) sr))))
+
+    (define (sfx-steps kind sr)
+      (let* ((v (voice kind sr))
+             (n (sfx-frames kind sr))
+             (buf (make-bytevector (* 8 n) 0))
+             (done 0))
+        (lambda (frames)
+          (let ((end (min n (+ done (max 0 frames)))))
+            (let loop ((k done))
+              (when (< k end)
+                (let ((x (v k)))
+                  (bytevector-ieee-single-set! buf (* 8 k) x 'little)
+                  (bytevector-ieee-single-set! buf (+ 4 (* 8 k)) x 'little))
+                (loop (+ k 1))))
+            (set! done end)
+            (and (= done n) buf)))))
+
+    (define (render-sfx kind sr) ((sfx-steps kind sr) (sfx-frames kind sr)))))

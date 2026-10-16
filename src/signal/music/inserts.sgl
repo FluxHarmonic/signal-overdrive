@@ -1,35 +1,94 @@
-;;; The seven-channel insert path, initially clean. Damage policy waits
-;;; for M0's audition; the live path and its cost can already be measured.
+;;; The music's per-stem damage inserts (design P5, §3.1), as M0's damage
+;;; audition built them, built clean. Every input damage moves is a live
+;;; g:param, set by (signal shell music) from (signal music damage)'s
+;;; targets; Motif interpolates each new target per sample (smooth:), so a
+;;; target set once a pull never steps:
+;;;   gains 3 ms linear (the lead's dropouts, stems leaving), cutoffs 24 ms
+;;;   on a log scale (a Butterworth cutoff jumped in one sample once made a
+;;;   two-sample spike to +11 dBFS), the chorus and makeup 20 ms linear.
+;;; Bits and rate-div step: they are distinct effects. Drive ramps over
+;;; 30 ms at a boost's edges.
+;;;
+;;;   ch 1-3  drums  crush (drive bits rate-div) -> gain
+;;;   ch 4    bass   low-pass (cutoff)                          protected
+;;;   ch 5    pad    low-pass (cutoff) -> chorus (rate depth mix) -> gain
+;;;   ch 6    lead   chorus (rate depth mix) -> makeup -> crush (drive bits
+;;;                  rate-div) -> low-pass (cutoff) -> gain
+;;;   ch 7    arp    crush (drive bits rate-div) -> low-pass (cutoff) -> gain
+;;;   ch 8    ICE    no damage (Gibson is the attacker); the signal's static
+;;;                  is added here: band-passed hiss and a sparse crackle
+;;;
+;;; At rest the crush is the identity: drive 0 (sigil-dsp's crush saturates
+;;; as tanh(x(1+drive))/tanh(1+drive), so drive 1 adds up to 6.3 dB to quiet
+;;; hits and any drive above 0 at least 2.4 dB) and bits 24. The low-passes
+;;; are open at OPEN-CUTOFF: Butterworth pairs, level-transparent there but
+;;; not sample-transparent (phase). The static is silent at rest.
 (define-library (signal music inserts)
   (import (motif graph))
-  (export MUSIC-INSERTS)
+  (export MUSIC-INSERTS OPEN-CUTOFF music-inserts-with)
   (begin
-    ;; At rest the crush must be the identity: drive 0 (sigil-dsp's crush
-    ;; saturates as tanh(x(1+drive))/tanh(1+drive), so drive 1 adds up to
-    ;; 6.3 dB to quiet hits and soft-clips the loud ones), bits 16 or more.
-    (define (drum-insert signal)
-      (g:crush signal
-               (g:param 'drive 0.0 0.0 8.0)
+    ;; open: under 0.45 of the lowest rate the game runs at (44.1 kHz)
+    (define OPEN-CUTOFF 19000.0)
+
+    (define (crush-stage x)
+      (g:crush x
+               ;; a boost's overdrive comes in and out over 30 ms (any drive above
+               ;; 0 still adds 2.4 dB at once: the crush is the identity only at 0)
+               (g:param 'drive 0.0 0.0 8.0 smooth: 30.0)
                (g:param 'bits 24.0 1.0 24.0)
                (g:param 'rate-div 1.0 1.0 16.0)))
 
-    (define (bass-insert signal)
-      (g:butlp signal (g:param 'cutoff 16000.0 20.0 20000.0)))
+    (define (lowpass-stage x)
+      (let ((c (lambda () (g:param 'cutoff OPEN-CUTOFF 20.0 OPEN-CUTOFF smooth: 24.0 shape: 'log))))
+        (g:butlp (g:butlp x (c)) (c))))
 
-    (define (pad-insert signal)
-      (g:chorus (g:butlp signal (g:param 'cutoff 16000.0 20.0 20000.0))
+    (define (gain-stage x)
+      (g:mul x (g:param 'gain 1.0 0.0 1.0 smooth: 3.0)))
+
+    ;; At full wet the chorus averages two detuned copies, which beat and
+    ;; partly cancel (the lead measured 2.8 dB quieter); makeup restores it.
+    (define (chorus-stage x)
+      (g:chorus x
                 (g:param 'rate 0.5 0.0 8.0)
-                (g:param 'depth 0.0 0.0 20.0)
-                (g:param 'mix 0.0 0.0 1.0)))
+                (g:param 'depth 0.0 0.0 20.0 smooth: 20.0)
+                (g:param 'mix 0.0 0.0 1.0 smooth: 20.0)))
+
+    (define (drum-insert signal) (gain-stage (crush-stage signal)))
+
+    (define (bass-insert signal) (lowpass-stage signal))
+
+    (define (pad-insert signal) (gain-stage (chorus-stage (lowpass-stage signal))))
 
     (define (lead-insert signal)
-      (g:mul (g:chorus signal
-                       (g:param 'rate 0.5 0.0 8.0)
-                       (g:param 'depth 0.0 0.0 20.0)
-                       (g:param 'mix 0.0 0.0 1.0))
-             (g:param 'gain 1.0 0.0 1.0)))
+      (gain-stage
+        (lowpass-stage
+          (crush-stage
+            (g:mul (chorus-stage signal) (g:param 'makeup 1.0 0.0 2.0 smooth: 20.0))))))
 
-    (define MUSIC-INSERTS
-      (list (cons 1 drum-insert) (cons 2 drum-insert) (cons 3 drum-insert)
-            (cons 4 bass-insert) (cons 5 pad-insert) (cons 6 lead-insert)
-            (cons 7 drum-insert)))))
+    (define (arp-insert signal) (gain-stage (lowpass-stage (crush-stage signal))))
+
+    ;; The signal's static: hiss (noise band-passed around 4 kHz) and a
+    ;; crackle (noise cubed, so mostly quiet with sparse peaks, high-passed),
+    ;; each at its level, both scaled by `static`.
+    (define (static-insert signal)
+      (let* ((hiss (g:butlp (g:buthp (g:noise) 2500.0) 6500.0))
+             (n (g:noise))
+             (crackle (g:buthp (g:mul (g:mul n n) n) 1200.0))
+             (noise (g:add (g:mul hiss (g:param 'hiss 0.0 0.0 1.0 smooth: 20.0))
+                           (g:mul crackle (g:param 'crackle 0.0 0.0 1.0 smooth: 20.0)))))
+        (g:add signal (g:mul noise (g:param 'static 0.0 0.0 1.0 smooth: 20.0)))))
+
+    ;; The inserts, each channel's input replaced by (SOURCE ch) when that
+    ;; is a procedure: a gate plays a test tone through the real chain
+    ;; (M0's probe did the same).
+    (define (music-inserts-with source)
+      (map (lambda (entry)
+             (let ((ch (car entry)) (build (cdr entry)))
+               (cons ch (lambda (in)
+                          (let ((s (source ch)))
+                            (build (if s (s) in)))))))
+           (list (cons 1 drum-insert) (cons 2 drum-insert) (cons 3 drum-insert)
+                 (cons 4 bass-insert) (cons 5 pad-insert) (cons 6 lead-insert)
+                 (cons 7 arp-insert) (cons 8 static-insert))))
+
+    (define MUSIC-INSERTS (music-inserts-with (lambda (ch) #f)))))

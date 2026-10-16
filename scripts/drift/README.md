@@ -17,6 +17,12 @@ node scripts/drift/rejudge.mjs RUNDIR      # re-judge a saved capture with the c
 
 ## What is captured: the music alone
 
+Every capture also runs with `damage=0`: the song stays clean whatever
+the integrity, with no dips. The gate measures timing, and its offline
+reference is the clean song; the damage (crushed stems, dropped 16ths,
+an ICE strike's silent 16th) would only lower the correlation, and a
+silence the reference does not have reads as a device dropout.
+
 The gate judges a **music-only capture**: the game runs with `sfx=0`, which
 silences the engine (gain 0) and drops the one-shots while the synth keeps
 rendering, so the frame's work and allocation are unchanged. The conductor
@@ -74,8 +80,8 @@ Each capture is then classified by cause:
   or a race that misses sections: product FAIL, never re-run.
 - **Device dropouts**: exact digital silence where the aligned reference
   sounds, not starting 100-700 ms after a resync frame (when the resync is
-  heard: a resync cuts every note, and a held part stays silent until its
-  next note; those are reported as `resync_silences`). One over 50 ms, or more than 250 ms in total, means
+  heard: a resync with the ear ahead splices in silence for the gap before
+  a bar line; those are reported as `resync_silences`). One over 50 ms, or more than 250 ms in total, means
   the capture did not play in real time: **SETUP-FAILED**, re-run. Shorter
   ones are reported only: a 256-frame PipeWire quantum (5.3 ms) of silence
   appears even for a plain `pacat` tone into the null sink on a loaded host.

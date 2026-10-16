@@ -58,10 +58,12 @@
 (define-library (signal shell audio)
   (import (sigil audio sink)
           (signal sound)
-          (signal cuebank))
+          (signal cuebank)
+          (signal sfx)
+          (sigil time))
 
-  (export audio-mute! audio-depth! audio-cues! audio-sfx! audio-prepare! audio-start! audio-frame! audio-started? audio-readout
-          audio-context audio-pause! audio-tune! audio-tune-in! audio-stop-tune-in!)
+  (export audio-mute! audio-depth! audio-cues! audio-sfx! audio-engine-db! audio-prepare! audio-start! audio-frame! audio-started? audio-readout
+          audio-context audio-pause! audio-tune! audio-tune-in! audio-stop-tune-in! audio-lock!)
 
   (begin
     (define RATE 22050)
@@ -84,9 +86,16 @@
     ;; A diagnostic, not a setting: the drift check's music-only capture.
     ;; The synth keeps its per-frame work so the timing is unchanged.
     (define *sfx-on* #t)
+    (define *engine-gain* 1.0)
     (define (audio-sfx! on?)
       (set! *sfx-on* on?)
-      (synth-engine-gain! *synth* (if on? 1.0 0.0)))
+      (synth-engine-gain! *synth* (if on? *engine-gain* 0.0)))
+    ;; The engine and the wind under the music (the engine-db knob).
+    (define (audio-engine-db! db)
+      (let ((g (expt 10.0 (/ db 20.0))))
+        (unless (= g *engine-gain*)
+          (set! *engine-gain* g)
+          (when *sfx-on* (synth-engine-gain! *synth* g)))))
     (define (audio-started?) (and *stream* #t))
     (define (audio-context) *ctx*)
     (define (depth-frames) (exact (floor (/ (* *depth-ms* RATE) 1000))))
@@ -174,16 +183,38 @@
             (when *started* (audio-start!)))))
 
     ;; A one-shot: a cue when there is one, else into the synth's stream.
-    (define (one-shot! kind strength)
+    ;; The felt cues ((signal sfx)) carry their levels; the synth's play
+    ;; at 0.8. A wall: a hard impact is a hit (louder with the impact), a
+    ;; lighter one a scrape, at most one each SCRAPE-HOLD while the contact
+    ;; lasts. A boost is the whoosh.
+    (define *last-scrape* 0)
+    (define (play! kind volume)
       (let ((c (assq kind *cues*)))
-        (if c
-            (begin
-              (guard (e (#t #f))
-                (play-audio-cue (cdr c)
-                                volume: (if (eq? kind 'wall) (min 1.0 (/ (exact->inexact strength) 250.0)) 0.8)
-                                pan: 0.0))
-              (set! *cue-plays* (+ *cue-plays* 1)))
-            (synth-event! *synth* kind strength))))
+        (and c
+             (begin
+               (guard (e (#t #f)) (play-audio-cue (cdr c) volume: volume pan: 0.0))
+               (set! *cue-plays* (+ *cue-plays* 1))
+               #t))))
+    (define (one-shot! kind strength)
+      (case kind
+        ((wall)
+         (let ((s (exact->inexact strength)))
+           (cond ((>= s HIT-IMPACT)
+                  ;; the hit carries its own grind: no scrape on top of it
+                  (set! *last-scrape* (current-jiffy))
+                  (or (play! 'hit (min 1.0 (+ 0.6 (/ (- s HIT-IMPACT) 500.0))))
+                      (synth-event! *synth* 'wall strength)))
+                 ((>= (- (current-jiffy) *last-scrape*) (* SCRAPE-HOLD (jiffies-per-second)))
+                  (set! *last-scrape* (current-jiffy))
+                  (or (play! 'scrape (min 1.0 (+ 0.5 (/ s 300.0))))
+                      (synth-event! *synth* 'wall strength)))
+                 (else #f))))
+        ((boost) (or (play! 'whoosh 1.0) (synth-event! *synth* 'boost strength)))
+        (else (or (play! kind 0.8) (synth-event! *synth* kind strength)))))
+
+    ;; A repair's snap, heard (the music says when): the lock.
+    (define (audio-lock!)
+      (when (and *sfx-on* (not *paused*)) (play! 'lock 1.0)))
 
     (define (audio-frame! speed throttle boost events)
       (fade-step!)

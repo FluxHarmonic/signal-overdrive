@@ -12,12 +12,14 @@
           (signal music clock)
           (signal music transport)
           (signal music playback)
-          (signal music inserts))
+          (signal music inserts)
+          (signal music damage-path))
   (export music-prepare! music-prepare-playback! music-prepared? music-start! music-frame! music-close! music-reset! music-running?
           music-audible-seconds music-depth! music-latency! music-readout
           music-request-resync! music-resync-in-flight? music-log music-sabotage! music-generation
           music-opened-jiffy
-          music-hold! music-release-at!)
+          music-hold! music-release-at! music-unhold! music-context! music-context
+          music-lock-due! music-tier music-dip! music-fade-out!)
   (begin
     (define PUSH 256)
     (define *ctx* #f)
@@ -64,6 +66,15 @@
     (define *fade-secs* 0.8)
     (define *volume* #f)          ; the stream's volume as last set
     (define (music-hold!) (set! *env* 'held))
+    ;; No envelope at all: the title's theme took the card's release, so
+    ;; the race song starts at full level when the race starts.
+    (define (music-unhold!) (set! *env* 'done))
+    ;; The context, bound without starting: the audio start while the
+    ;; song is held (the title's theme owns the music); music-frame!
+    ;; starts the song on it once the hold ends.
+    (define (music-context! ctx) (set! *ctx* ctx))
+    ;; The context the music plays on (the theme's stream shares it), or #f.
+    (define (music-context) *ctx*)
     (define (music-release-at! t fade)
       (unless (eq? *env* 'done)
         (set! *fade-secs* (max 0.0 fade))
@@ -82,9 +93,34 @@
       (when *stream*
         (let ((g (env-gain heard)))
           (when (and (number? *env*) (>= g 1.0)) (set! *env* 'done))
-          (unless (eqv? g *volume*)
-            (set-audio-stream-volume! *stream* g)
-            (set! *volume* g)))))
+          (let ((g (* g (dip-gain))))
+            (unless (eqv? g *volume*)
+              (set-audio-stream-volume! *stream* g)
+              (set! *volume* g))))))
+
+    ;; The immediate path (design §3.2): the stream's volume, applied as
+    ;; the device plays, so these are heard at once, a sink depth before
+    ;; anything the song itself does. Wall-clock timed: they belong to
+    ;; the moment, not to the song.
+    ;;   (music-dip! seconds level)   a hard hit (0.04 0.4), an ICE strike
+    ;;                                (a 16th, 0): LEVEL for SECONDS
+    ;;   (music-fade-out! seconds)    CORRUPT: to nothing, and it stays
+    ;;                                there until the next song starts
+    (define *dip* #f)             ; (end-jiffy . level)
+    (define *fade-out* #f)        ; (start-jiffy . seconds)
+    (define (dip-gain)
+      (let ((now (current-jiffy)) (per (* 1.0 (jiffies-per-second))))
+        (when (and *dip* (>= now (car *dip*))) (set! *dip* #f))
+        (* (if *dip* (cdr *dip*) 1.0)
+           (if *fade-out*
+               (max 0.0 (- 1.0 (/ (- now (car *fade-out*)) (* per (max 0.001 (cdr *fade-out*))))))
+               1.0))))
+    (define (music-dip! seconds level)
+      (let ((end (+ (current-jiffy) (exact (round (* seconds (jiffies-per-second)))))))
+        (set! *dip* (if (and *dip* (< (cdr *dip*) level)) (cons (max end (car *dip*)) (cdr *dip*)) (cons end level)))
+        (env-volume! (or (music-audible-seconds) *epoch*))))
+    (define (music-fade-out! seconds)
+      (unless *fade-out* (set! *fade-out* (cons (current-jiffy) seconds))))
 
     (define (music-depth! ms)
       (set! *depth-ms* (max 10 (min 2000 ms))))
@@ -132,8 +168,10 @@
       (music-audible-seconds)
       (or *resync-pending* (pair? *epoch-changes*)))
 
+    ;; the playback's landings, then the resync splices (each list oldest first)
     (define (music-log)
-      (if *playback* (reverse (playback-log *playback*)) '()))
+      (append (if *playback* (reverse (playback-log *playback*)) '())
+              (reverse *splice-log*)))
 
     (define (music-close!)
       (when *stream*
@@ -147,6 +185,10 @@
         (playback-close! *playback*)
         (set! *playback* #f))
       (set! *resync-pending* #f)
+      (set! *splice* #f)
+      (set! *fade-in-left* 0)
+      (set! *splice-log* '())
+      (set! *locks* '())
       (set! *epoch-changes* '()))
 
     ;; A new shell session must bind its own current context. Closing
@@ -202,6 +244,11 @@
           ;; Construct all voice/insert graphs before exposing an empty
           ;; ring to the device callback. This also applies on restart.
           (set! *playback* (start-playback (transport-start-conductor plan)))
+          ;; a new player starts clean; the integrity passed in reaches it
+          ;; at once (worse is never delayed)
+          (set! *damage* (damage-path-new))
+          (set! *dip* #f)
+          (set! *locks* (quote ()))
           (set! *epoch* (transport-start-epoch plan))
           (set! *last-resync-bar* -1)
           (set! *start-conductor* (transport-start-conductor plan))
@@ -242,17 +289,200 @@
                            (if silence? *silence* PUSH))))
               (if silence?
                   (set! *silence* (- *silence* n))
-                  (playback-pull! *playback*
-                                  (if (< (conductor-tick c) (conductor-tick *start-conductor*))
-                                      *start-conductor*
-                                      c)
-                                  samples (* 8 offset) n))
+                  (damage-pulled! (pull-conductor c) samples offset n))
               (pull (+ offset n)))))
         samples))
 
+    ;; ---- Resync by splice ---------------------------------------------
+    ;; A resync moves what the stream delivers, never the player: the
+    ;; player renders on, so held notes ring through it (a player-jump!
+    ;; released every note, and a long lead or pad note stayed silent until
+    ;; its next onset). It runs just before a bar line, so the downbeat
+    ;; lands whole and on time:
+    ;;   - the ear behind the simulation by d: the last d frames before the
+    ;;     bar line are rendered and dropped, the splice crossfaded over
+    ;;     SPLICE-FRAMES (equal power);
+    ;;   - the ear ahead by s: the bar's last SPLICE-FRAMES fade out, s of
+    ;;     silence follow, and the downbeat fades in over SPLICE-FRAMES.
+    ;; Either way the song's time at the ear changes by the gap when the
+    ;; splice reaches the ear (an epoch change), as a jump's did.
+    (define SPLICE-FRAMES 128)
+    (define *splice* #f)          ; #(render frame to splice at, its bar line) or #f
+    (define *fade-in-left* 0)     ; frames of the downbeat's fade-in still to apply
+    (define *splice-log* '())     ; #(resync drop|insert change-frame shift-frames splice-frame), newest first
+    (define *buf-a* (make-bytevector (* 8 SPLICE-FRAMES) 0))
+    (define *buf-b* (make-bytevector (* 8 SPLICE-FRAMES) 0))
+    (define *discard* (make-bytevector (* 8 PUSH) 0))
+
+    ;; Heard now against the simulation now. Conductor state is dated at
+    ;; frame entry and depth is sampled now: include the intervening
+    ;; simulation and refill work so callback consumption cannot bias it.
+    (define (measured-gap c clock-fraction frame-jiffy t0)
+      (let ((elapsed (/ (- (current-jiffy) (or frame-jiffy t0)) (* 1.0 (jiffies-per-second)))))
+        (- (music-audible-seconds) (+ (/ (conductor-tick c) 60.0) clock-fraction elapsed))))
+
+    ;; The render head can reach the joining bar before the simulation
+    ;; does. Use the projected start plan until the simulation has caught
+    ;; up to that bar.
+    (define (pull-conductor c)
+      (if (< (conductor-tick c) (conductor-tick *start-conductor*)) *start-conductor* c))
+
+    (define (push! bv n)
+      (let ((accepted (push-audio-samples *stream* bv n)))
+        ;; Room can only increase while the callback drains; a short write
+        ;; indicates an unusable/closed stream.
+        (unless (= accepted n)
+          (music-close!)
+          (error "music sink refused reserved frames" n accepted))
+        (set! *delivered* (+ *delivered* accepted))))
+
+    (define HALF-PI 1.5707963267948966)
+    (define (f32 bv i) (bytevector-ieee-single-ref bv (* 4 i) 'little))
+    (define (f32! bv i x) (bytevector-ieee-single-set! bv (* 4 i) x 'little))
+
+    ;; The downbeat after an inserted silence comes in over SPLICE-FRAMES.
+    (define (fade-in! bv n)
+      (when (> *fade-in-left* 0)
+        (let loop ((k 0))
+          (when (and (< k n) (> *fade-in-left* 0))
+            (let ((g (sin (* HALF-PI (/ (+ 0.5 (- SPLICE-FRAMES *fade-in-left*)) SPLICE-FRAMES)))))
+              (f32! bv (* 2 k) (* g (f32 bv (* 2 k))))
+              (f32! bv (+ 1 (* 2 k)) (* g (f32 bv (+ 1 (* 2 k))))))
+            (set! *fade-in-left* (- *fade-in-left* 1))
+            (loop (+ k 1))))))
+
+    ;; The splice point: NEED frames before the first bar line at least
+    ;; NEED frames past the render head. Bar lines are whole bars of song
+    ;; time from the song's reset, in render frames through the origin.
+    ;; The splice decides by the gap it measures when it runs; the gap now
+    ;; only sizes the room a drop needs (at least twice the threshold, so
+    ;; a gap that grows on the way still fits).
+    (define (plan-splice! gap)
+      (let* ((d (max (exact (round (* (abs gap) *rate*)))
+                     (exact (round (* 2 RESYNC-GAP *rate*)))))
+             (need (+ d SPLICE-FRAMES))
+             (rendered (playback-rendered *playback*))
+             (origin (playback-origin-frame *playback*))
+             (bar-len (* (song-bar-seconds) *rate*))
+             (bar (exact (ceiling (/ (+ origin rendered need) bar-len))))
+             (line (- (exact (round (* bar bar-len))) origin)))
+        (set! *splice* (vector (max rendered (- line need)) line 'any))))
+
+    (define (latest-epoch)
+      (if (pair? *epoch-changes*) (cdr (car (reverse *epoch-changes*))) *epoch*))
+
+    ;; Run the planned splice now, with the gap as measured now. At the
+    ;; drop point, a gap the other way becomes an insert, planned at the
+    ;; bar line's fade and reached by ordinary pulls. Returns the frames
+    ;; pushed.
+    (define (run-splice! pc gap bar)
+      (let ((line (vector-ref *splice* 1))
+            (mode (vector-ref *splice* 2)))
+        (cond
+          ((or (<= (abs gap) RESYNC-GAP) (and (eq? mode 'insert) (< gap 0)))
+           (set! *splice* #f)
+           (set! *resync-pending* #f)
+           (set! *resync-cancels* (+ *resync-cancels* 1))
+           0)
+          ((< gap 0)
+           ;; drop: A is what would play now, B what leads into the bar
+           ;; line; the frames between are rendered and dropped
+           (let* ((room (- line (playback-rendered *playback*) SPLICE-FRAMES))
+                  (d (max SPLICE-FRAMES (min (exact (round (* (- gap) *rate*))) room)))
+                  (at *delivered*))
+             (set! *splice* #f)
+             (set! *resync-pending* #f)
+             (playback-pull! *playback* pc *buf-a* 0 SPLICE-FRAMES)
+             (let drop ((left (- d SPLICE-FRAMES)))
+               (when (> left 0)
+                 (let ((n (min PUSH left)))
+                   (playback-pull! *playback* pc *discard* 0 n)
+                   (drop (- left n)))))
+             (playback-pull! *playback* pc *buf-b* 0 SPLICE-FRAMES)
+             (let mix ((k 0))
+               (when (< k SPLICE-FRAMES)
+                 (let* ((w (* HALF-PI (/ (+ 0.5 k) SPLICE-FRAMES)))
+                        (ga (cos w)) (gb (sin w)))
+                   (f32! *buf* (* 2 k) (+ (* ga (f32 *buf-a* (* 2 k))) (* gb (f32 *buf-b* (* 2 k)))))
+                   (f32! *buf* (+ 1 (* 2 k)) (+ (* ga (f32 *buf-a* (+ 1 (* 2 k))))
+                                                (* gb (f32 *buf-b* (+ 1 (* 2 k)))))))
+                 (mix (+ k 1))))
+             (push! *buf* SPLICE-FRAMES)
+             (splice-done! 'drop at (+ at (quotient SPLICE-FRAMES 2)) d bar)
+             SPLICE-FRAMES))
+          ((eq? mode 'any)
+           ;; the ear is ahead: wait for the bar's last SPLICE-FRAMES
+           (set! *splice* (vector (- line SPLICE-FRAMES) line 'insert))
+           0)
+          (else
+           ;; insert: the bar's tail fades out, then silence, then the
+           ;; downbeat fades in (fade-in!)
+           (let ((s (exact (round (* gap *rate*))))
+                 (at *delivered*))
+             (set! *splice* #f)
+             (set! *resync-pending* #f)
+             (playback-pull! *playback* pc *buf* 0 SPLICE-FRAMES)
+             (let fade ((k 0))
+               (when (< k SPLICE-FRAMES)
+                 (let ((g (cos (* HALF-PI (/ (+ 0.5 k) SPLICE-FRAMES)))))
+                   (f32! *buf* (* 2 k) (* g (f32 *buf* (* 2 k))))
+                   (f32! *buf* (+ 1 (* 2 k)) (* g (f32 *buf* (+ 1 (* 2 k))))))
+                 (fade (+ k 1))))
+             (push! *buf* SPLICE-FRAMES)
+             (set! *silence* (+ *silence* s))
+             (set! *fade-in-left* SPLICE-FRAMES)
+             (splice-done! 'insert at *delivered* (- s) bar)
+             SPLICE-FRAMES)))))
+
+    ;; SHIFT frames of song time skipped (negative: held back) from the
+    ;; stream frame CHANGE on, heard when that frame reaches the ear.
+    (define (splice-done! kind at change shift bar)
+      (set! *epoch-changes*
+        (append *epoch-changes* (list (cons change (+ (latest-epoch) (/ shift (* 1.0 *rate*)))))))
+      (set! *splice-log* (cons (vector 'resync kind change shift at) *splice-log*))
+      (set! *last-resync-bar* bar)
+      (set! *resyncs* (+ *resyncs* 1)))
+
+    ;; ---- Damage --------------------------------------------------------
+    ;; The song's damage ((signal music damage-path)): the integrity and
+    ;; boost the shell passes each frame reach every pull. A repair's snap
+    ;; queues the lock cue for the stream frame where it lands; the shell
+    ;; plays it when that frame is heard (music-lock-due!).
+    (define *damage* (damage-path-new))
+    (define *integrity* 100.0)
+    (define *boost* #f)
+    (define *locks* '())          ; stream frames of snaps not yet heard
+
+    ;; FRAMES of the song into OUT at frame OFFSET, damaged
+    (define (damage-pulled! pc out offset frames)
+      (let ((at (+ *delivered* offset)))
+        (for-each (lambda (k) (set! *locks* (append *locks* (list (+ at k)))))
+                  (damage-pull! *damage* *playback* pc out offset frames *integrity* *boost*))))
+
+    ;; A snap's lock is due once its frame reaches the ear: #t once each.
+    (define (music-lock-due!)
+      (and *stream* (pair? *locks*)
+           (let ((heard (- *delivered* (audio-stream-depth *stream*)
+                           (exact (round (* *latency* *rate*))))))
+             (and (>= heard (car *locks*))
+                  (begin (set! *locks* (cdr *locks*)) #t)))))
+
+    ;; the tier the song is playing (the clock line)
+    (define (music-tier) (damage-path-tier *damage*))
+
     (define (music-frame! c paused?
-                          (keys: (clock-fraction 0.0) (frame-jiffy #f)))
+                          (keys: (clock-fraction 0.0) (frame-jiffy #f)
+                                 (integrity #f) (boost 'keep)))
+      ;; a caller with no say (a focus change, F5) keeps what the last
+      ;; frame passed: a resume primes its queue at the real damage
+      (when integrity (set! *integrity* integrity))
+      (unless (eq? boost 'keep) (set! *boost* boost))
       (let ((t0 (current-jiffy)))
+        ;; A new song (a restart) lifts a CORRUPT fade-out; a resume keeps it.
+        (when (and *first-log*
+                   (or (< (conductor-tick c) *last-tick*)
+                       (not (eq? *first-log* (car (reverse (conductor-log c)))))))
+          (set! *fade-out* #f))
         ;; A restart replaces the conductor's initial log even when it
         ;; occurs before another tick. Its tick also returns to zero.
         (when (and *stream*
@@ -269,59 +499,33 @@
             (let* ((room (audio-stream-room *stream*))
                    (available (min PUSH room remaining))
                    (silence? (> *silence* 0))
-                   (seek? (and *resync-pending* (not silence?)
-                               (not (= *last-resync-bar* (conductor-bar c)))
-                               (playback-can-resync? *playback*)))
-                   (boundary (and seek? (playback-bar-distance *playback*)))
-                   (n (cond
-                        (silence? (min available *silence*))
-                        (boundary (min available boundary))
-                        (else available))))
-              (when (and (> available 0) boundary (= boundary 0))
-                ;; Conductor state is dated at frame entry; depth is
-                ;; sampled now. Include intervening simulation/refill
-                ;; work so callback consumption cannot bias the seek.
-                (let* ((elapsed (/ (- (current-jiffy) (or frame-jiffy t0))
-                                   (* 1.0 (jiffies-per-second))))
-                       ;; The request can be up to a bar old, and the
-                       ;; nudge may have closed the gap since: measure it
-                       ;; again, heard now against the simulation now.
-                       (gap (- (music-audible-seconds)
-                               (+ (/ (conductor-tick c) 60.0) clock-fraction elapsed))))
-                  (if (> (abs gap) RESYNC-GAP)
-                      (let* ((ahead (+ (/ (audio-stream-depth *stream*) (* 1.0 *rate*))
-                                       *latency* clock-fraction elapsed))
-                             (target (transport-render-target c ahead))
-                             (frame (playback-resync! *playback* target)))
-                        (set! *epoch-changes*
-                          (append *epoch-changes* (list (cons *delivered* (/ (- frame *delivered*) (* 1.0 *rate*))))))
-                        (set! *start-conductor* target)
-                        (set! *resync-pending* #f)
-                        (set! *last-resync-bar* (conductor-bar c))
-                        (set! *resyncs* (+ *resyncs* 1)))
-                      (begin
-                        (set! *resync-pending* #f)
-                        (set! *resync-cancels* (+ *resync-cancels* 1)))))
-                (loop remaining))
-              (when (> n 0)
-                (unless silence?
-                  ;; The render head can reach the joining bar before
-                  ;; the simulation does. Use the projected start plan
-                  ;; until the simulation has caught up to that bar.
-                  (playback-pull! *playback*
-                                  (if (< (conductor-tick c) (conductor-tick *start-conductor*))
-                                      *start-conductor*
-                                      c)
-                                  *buf* 0 n))
-                (let ((accepted (push-audio-samples *stream* (if silence? *zero* *buf*) n)))
-                  ;; Room can only increase while the callback drains;
-                  ;; a short write indicates an unusable/closed stream.
-                  (unless (= accepted n)
-                    (music-close!)
-                    (error "music sink refused reserved frames" n accepted))
-                  (set! *delivered* (+ *delivered* accepted))
-                  (when silence? (set! *silence* (- *silence* accepted))))
-                (loop (- remaining n)))))
+                   (gap (lambda () (measured-gap c clock-fraction frame-jiffy t0))))
+              ;; A request plans its splice at once: the bar line far
+              ;; enough ahead to take it, its gap as measured now.
+              (when (and *resync-pending* (not *splice*) (not silence?)
+                         (not (= *last-resync-bar* (conductor-bar c))))
+                (plan-splice! (gap)))
+              (let* ((to-splice (and *splice* (not silence?)
+                                     (- (vector-ref *splice* 0) (playback-rendered *playback*))))
+                     (n (cond
+                          (silence? (min available *silence*))
+                          (to-splice (min available (max 0 to-splice)))
+                          (else available))))
+                (cond
+                  ((and to-splice (<= to-splice 0))
+                   (when (>= available SPLICE-FRAMES)
+                     ;; The request can be up to a bar old, and the nudge
+                     ;; may have closed the gap since: measure it again,
+                     ;; heard now against the simulation now.
+                     (let ((pushed (run-splice! (pull-conductor c) (gap) (conductor-bar c))))
+                       (loop (max 0 (- remaining pushed))))))
+                  ((> n 0)
+                   (unless silence?
+                     (damage-pulled! (pull-conductor c) *buf* 0 n)
+                     (fade-in! *buf* n))
+                   (push! (if silence? *zero* *buf*) n)
+                   (when silence? (set! *silence* (- *silence* n)))
+                   (loop (- remaining n)))))))
           (env-volume! (or (music-audible-seconds) *epoch*))
           (set! *last-tick* (conductor-tick c)))
         (set! *cost-ms* (/ (* 1000.0 (- (current-jiffy) t0)) (jiffies-per-second)))))

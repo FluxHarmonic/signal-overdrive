@@ -52,9 +52,9 @@
            version: "0.13.0")
   (package name: "motif"
            url: "codeberg:sigil/motif"
-           ref: "^0.8.1"
-           sha: "152e703c81d84f53d040c4ae18fe740810efe0ea"
-           version: "0.8.1")
+           ref: "^0.9.0"
+           sha: "1f225d57c20f502cf3c024944aa929a62b45fe72"
+           version: "0.9.0")
   (package name: "sigil-wasm-audio"
            url: "codeberg:sigil/sigil"
            ref: ">=0.22.11, <0.22.12"
@@ -78,22 +78,11 @@
            ref: "^0.16.0"
            sha: "55c9e74712b5f79b45d41c65cfe0aef2c8f7e155"
            version: "0.16.0")
-  (package name: "sigil-args"
-           url: "codeberg:sigil/sigil"
-           ref: ">=0.19"
-           sha: "318332fd7f005d4a6cdc834cb8a1e632c0ba923f"
-           package-selector: "sigil-args"
-           version: "0.22.11")
   (package name: "sigil-dsp"
            url: "codeberg:sigil/sigil-dsp"
            ref: "^0.3.4"
            sha: "d71f7cd58177b582ce004a0f62d9bf9e7ed9b1e7"
            version: "0.3.4")
-  (package name: "sigil-mcp"
-           url: "codeberg:sigil/sigil-mcp"
-           ref: "^0.18"
-           sha: "197a398550b76c29b9f5b464c2407d81ba6cbe34"
-           version: "0.18.1")
   (package name: "sigil-crypto"
            url: "codeberg:sigil/sigil-crypto"
            ref: "^0.16.0"
@@ -104,30 +93,4 @@
            ref: "^0.16.0"
            sha: "569ef1063dda8f5989968644af31fc09c64b4bfe"
            version: "0.16.3")
-  (package name: "sigil-log"
-           url: "codeberg:sigil/sigil-log"
-           ref: "^0.16"
-           sha: "56e4fc5a52dc370c037ef14502bb8d6d2876dc53"
-           version: "0.16.0")
-  (package name: "sigil-http"
-           url: "codeberg:sigil/sigil-http"
-           ref: "^0.18.5"
-           sha: "5710232220dc274c901b436b5e3c856d71b3dbd7"
-           version: "0.18.7")
-  (package name: "sigil-nrepl"
-           url: "codeberg:sigil/sigil-nrepl"
-           ref: "^0.17.1"
-           sha: "666cb4d09af907e22c5146e74a0b5766ba53a751"
-           version: "0.17.2")
-  (package name: "sigil-tls"
-           url: "codeberg:sigil/sigil-tls"
-           ref: "^0.16.5"
-           sha: "8b1c4658df861b1c31cd7674d9607249ca7d6a27"
-           version: "0.16.7")
-  (package name: "sigil-repl"
-           url: "codeberg:sigil/sigil"
-           ref: ">=0.19"
-           sha: "318332fd7f005d4a6cdc834cb8a1e632c0ba923f"
-           package-selector: "sigil-repl"
-           version: "0.22.11")
 )

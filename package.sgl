@@ -92,7 +92,7 @@
     ;; on the web (sigil-wasm-audio), as Phantom Burn.
     (from-git url: "codeberg:sigil/sigil-audio" version: "^0.13.0")
     ;; The live adaptive song; its channel inserts are the measured music path.
-    (from-git url: "codeberg:sigil/motif" version: "^0.8.1")
+    (from-git url: "codeberg:sigil/motif" version: "^0.9.0")
     (from-git url: sigil-repo package: "sigil-wasm-audio" version: ">=0.22.11, <0.22.12" configs: '(web)))
 
   dev-dependencies: (list
@@ -118,6 +118,9 @@
           (let ((status (process-run "scripts/compile-score")))
             (unless (= status 0)
               (error "music score compilation failed" status)))
+          (let ((status (process-run "scripts/compile-theme")))
+            (unless (= status 0)
+              (error "theme compilation failed" status)))
           ctx)
         (compile-c-sources sources: '("src/c/desktop-focus.c")
                            flags: (with-sigil-c-flags '("-std=c99")))

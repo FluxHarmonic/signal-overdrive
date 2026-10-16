@@ -1,0 +1,150 @@
+;;; (signal music damage) - What integrity does to the song (design §3.1,
+;;; P5), as M0's approved damage audition settled it. Pure: the shell's
+;;; music adapter turns these into live insert targets and stream gains.
+;;;
+;;; Integrity is 0 to 100; each tier starts at its threshold. Subtle
+;;; parameters (cutoffs, the lead's detune) move continuously inside a
+;;; tier; distinct ones (bits, rate, dropouts, stems leaving, static,
+;;; cutouts) switch at tier edges.
+;;;
+;;;   (damage-tier integrity)           clean worn damaged failing critical corrupt
+;;;   (damage-rank tier)                0 to 4 (corrupt is 4)
+;;;   (damage-params integrity boost?)  ((channel param value) ...): every
+;;;                                     insert target but the lead's gate
+;;;   (damage-gate tier bar s16)        the lead's gain on 16th s16 of bar
+;;;   (damage-cut tier bar s16)         the whole song's gain on that 16th
+;;;   (damage-clamp integrity tier)     integrity kept inside a tier's band
+;;;                                     (a repair holds the old tier until
+;;;                                     its snap lands on a beat)
+;;;
+;;; Departures from M0, all inaudible or for the game's path: bits rest at
+;;; 24, not 16 (the identity); "open" is OPEN-CUTOFF; the static is the
+;;; music's channel-8 insert, rendered with the song, not a looping cue.
+(define-library (signal music damage)
+  (import (sigil math)
+          (signal music inserts))
+  (export damage-tier damage-rank damage-params damage-gate damage-cut damage-clamp
+          damage-better? DAMAGE-TIERS)
+  (begin
+    (define DAMAGE-TIERS '(clean worn damaged failing critical))
+
+    (define (damage-tier i)
+      (cond ((>= i 80) 'clean) ((>= i 55) 'worn) ((>= i 30) 'damaged)
+            ((>= i 10) 'failing) ((> i 0) 'critical) (else 'corrupt)))
+
+    (define (damage-rank tier)
+      (case tier ((clean) 0) ((worn) 1) ((damaged) 2) ((failing) 3) (else 4)))
+
+    ;; Is tier a less damaged than tier b?
+    (define (damage-better? a b) (< (damage-rank a) (damage-rank b)))
+
+    ;; integrity inside tier's band (the bands are half open: CLEAN from 80)
+    (define (damage-clamp i tier)
+      (case tier
+        ((clean) (max i 80.0))
+        ((worn) (max 55.0 (min i 79.999)))
+        ((damaged) (max 30.0 (min i 54.999)))
+        ((failing) (max 10.0 (min i 29.999)))
+        ((critical) (max 0.001 (min i 9.999)))
+        (else 0.0)))
+
+    ;; linear from (i0, v0) to (i1, v1), clamped; and the same on a log scale
+    (define (lerp i i0 v0 i1 v1)
+      (let ((k (max 0.0 (min 1.0 (/ (- i i0) (- i1 i0))))))
+        (+ v0 (* k (- v1 v0)))))
+    (define (log-lerp i i0 v0 i1 v1)
+      (exp (lerp i i0 (log v0) i1 (log v1))))
+
+    (define (pick rank values) (list-ref values rank))
+
+    ;; Every damage target but the lead's gate (channel 6's gain, damage-gate)
+    ;; and the cutouts (damage-cut). Boost overdrives: the drums lose three
+    ;; bits (not below 3) and the drums, lead and arp crush drive.
+    (define (damage-params i boost?)
+      (let* ((tier (damage-tier i))
+             (rank (damage-rank tier))
+             ;;                     CLEAN WORN DAMAGED FAILING CRITICAL
+             (drum-bits (pick rank '(24.0 10.0  7.0    5.0     4.0)))
+             (drum-bits (if boost? (max 3.0 (- (min drum-bits 16.0) 3.0)) drum-bits))
+             (drum-rate (pick rank '(1.0  1.0   3.0    6.0     8.0)))
+             (drum-drive (if boost? 1.6 0.0))
+             ;; the bass is protected: low-pass only, and later than the rest
+             (bass-cut (pick rank (list OPEN-CUTOFF OPEN-CUTOFF 1500.0 700.0 400.0)))
+             (pad-cut (case tier
+                        ((clean) OPEN-CUTOFF)
+                        ((worn) (log-lerp i 80.0 8000.0 55.0 5000.0))
+                        ((damaged) 2000.0)
+                        (else 1200.0)))
+             (pad-chorus (if (>= rank 2) 0.7 0.0))
+             (pad-gain (pick rank '(1.0 1.0 1.0 0.35 0.0)))
+             ;; the lead's detune: chorus depth in ms at 0.5 Hz, full wet
+             ;; (4 x depth x rate either side: 2 ms is about +-7 cents)
+             (lead-depth (case tier
+                           ((clean) 0.0)
+                           ((worn) (lerp i 80.0 1.5 55.0 2.5))
+                           ((damaged) (lerp i 55.0 4.0 30.0 6.0))
+                           ((failing) (lerp i 30.0 8.0 10.0 10.0))
+                           (else 10.0)))
+             (lead-mix (if (= rank 0) 0.0 1.0))
+             (lead-bits (pick rank '(24.0 24.0 9.0 6.0 4.0)))
+             (lead-rate (pick rank '(1.0 1.0 1.0 2.0 3.0)))
+             (lead-cut (pick rank (list OPEN-CUTOFF 7000.0 4000.0 2500.0 2000.0)))
+             (arp-bits (pick rank '(24.0 12.0 6.0 6.0 6.0)))
+             (arp-rate (if (>= rank 2) 2.0 1.0))
+             (arp-gain (if (>= rank 3) 0.0 1.0))
+             (snare-gain (if (= rank 4) 0.0 1.0))
+             ;; the static, from DAMAGED down: (level hiss crackle). M0's levels;
+             ;; hiss and crackle set so each part's RMS on channel 8 matches
+             ;; M0's static (hiss / pops RMS: DAMAGED 0.0013 / 0.0038, FAILING
+             ;; 0.0053 / 0.0085, CRITICAL 0.0101 / 0.0118), from the insert's
+             ;; measured unit levels (hiss 0.134, crackle 0.196 RMS)
+             (static (pick rank '((0.0 0.0 0.0) (0.0 0.0 0.0) (0.22 0.044 0.089)
+                                  (0.30 0.133 0.144) (0.34 0.221 0.177)))))
+        (append
+         (map (lambda (ch) (list ch 'bits drum-bits)) '(1 2 3))
+         (map (lambda (ch) (list ch 'rate-div drum-rate)) '(1 2 3))
+         (map (lambda (ch) (list ch 'drive drum-drive)) '(1 2 3))
+         (list (list 2 'gain snare-gain) (list 3 'gain snare-gain)
+               (list 4 'cutoff bass-cut)
+               (list 5 'cutoff pad-cut) (list 5 'depth (* 5.0 pad-chorus)) (list 5 'mix pad-chorus)
+               (list 5 'gain pad-gain)
+               (list 6 'rate 0.5) (list 6 'depth lead-depth) (list 6 'mix lead-mix)
+               (list 6 'makeup (if (> lead-mix 0.0) 1.38 1.0))
+               (list 6 'bits lead-bits) (list 6 'rate-div lead-rate) (list 6 'cutoff lead-cut)
+               (list 6 'drive (if boost? 0.9 0.0))
+               (list 7 'bits arp-bits) (list 7 'rate-div arp-rate)
+               (list 7 'drive (if boost? 1.0 0.0)) (list 7 'gain arp-gain)
+               (list 8 'static (car static)) (list 8 'hiss (cadr static))
+               (list 8 'crackle (caddr static))))))
+
+    ;; The lead's gate: (from16 to16) holes per bar, moving round a
+    ;; four-bar cycle so they read as a failing signal, not a rhythm.
+    (define DAMAGED-HOLES '(((5 6) (10 11) (13 14)) ((2 3) (8 9) (14 15))
+                            ((6 7) (10 11) (12 13)) ((3 4) (9 10) (15 16))))
+    (define FAILING-HOLES '(((2 4) (6 9) (12 15)) ((0 2) (5 8) (10 11) (13 16))
+                            ((3 6) (8 10) (12 16)) ((1 3) (6 7) (9 12) (14 16))))
+    (define (lead-holes tier bar)
+      (case tier
+        ((damaged) (list-ref DAMAGED-HOLES (modulo bar 4)))  ; three 16ths a bar
+        ((failing) (list-ref FAILING-HOLES (modulo bar 4)))  ; about half the bar
+        ((critical corrupt) '((3 16)))                       ; one note a bar
+        (else '())))
+
+    ;; Whole-song cutouts to 6%: FAILING two a bar, CRITICAL three, cycling.
+    (define FAILING-CUTS '(((7 8) (13 14)) ((3 4) (11 12)) ((9 10) (15 16)) ((1 2) (6 7))))
+    (define CRITICAL-CUTS '(((2 3) (7 8) (12 14)) ((5 6) (9 10) (14 15))
+                            ((1 2) (8 9) (11 13)) ((4 5) (10 11) (15 16))))
+    (define (cut-holes tier bar)
+      (case tier
+        ((failing) (list-ref FAILING-CUTS (modulo bar 4)))
+        ((critical corrupt) (list-ref CRITICAL-CUTS (modulo bar 4)))
+        (else '())))
+
+    (define (in-hole? holes s16)
+      (let loop ((hs holes))
+        (and (pair? hs)
+             (or (and (>= s16 (car (car hs))) (< s16 (cadr (car hs))))
+                 (loop (cdr hs))))))
+
+    (define (damage-gate tier bar s16) (if (in-hole? (lead-holes tier bar) s16) 0.0 1.0))
+    (define (damage-cut tier bar s16) (if (in-hole? (cut-holes tier bar) s16) 0.06 1.0))))

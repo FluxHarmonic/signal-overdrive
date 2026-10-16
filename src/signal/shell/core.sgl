@@ -37,13 +37,16 @@
           (signal fx state)
           (signal fx showcase)
           (signal shell music)
+          (signal shell theme)
           (signal music conductor)
-          (signal music clock))
+          (signal music clock)
+          (only (signal music song) SONG-BPM)
+          (only (signal sfx) HIT-IMPACT))
 
   (export core-boot! core-frame! core-keys core-sticks core-pad core-param! core-touch!
           core-tap! core-race core-tuning core-describe core-probe core-knobs-markdown GAME-NAME
           core-audio-start! core-focus! core-paused? core-advance! core-headless-frame! core-gesture!
-          core-startup-mark!)
+          core-startup-mark! core-visible!)
 
   (begin
     (define GAME-NAME "signal-overdrive")
@@ -86,6 +89,77 @@
 
     (define (core-paused?) (or *paused* (not *focused*)))
 
+    ;; Whether anyone can see the game: the web page says when its tab is
+    ;; hidden (a hidden tab is paused and silent; a blurred but visible
+    ;; one shows PAUSED and plays the pause music). Natively, always.
+    (define *visible* #t)
+    ;; Hidden, the page draws no frames, so the theme stops here, not in
+    ;; the next frame's service.
+    (define (core-visible! visible?)
+      (set! *visible* visible?)
+      (unless visible? (theme-stop! 0)))
+
+    ;; The title's music is the main theme, from the card's lock through
+    ;; the title's attract; the race song waits for the race. With the
+    ;; title skipped or off, the race song plays as before.
+    (define (title-owns-music?)
+      (and *race* (eq? (race-phase *race*) 'title)
+           ;; with the title off, never: before its first tick a title
+           ;; still reads as showing
+           (>= (tuning-ref *tuning* 'title) 0.5)
+           (title-active? *title*)
+           (or (intro-active? *intro*) (eq? (title-phase *title*) 'attract))))
+    ;; The race song is silent while paused, while the title owns the
+    ;; music, and through the title's fade-out after a start (the theme
+    ;; fades then; the race song opens at the race's tick 0): closed, with
+    ;; ticks on wall time, as before a gesture.
+    (define (music-held?)
+      (or (core-paused?)
+          (title-owns-music?)
+          (and *theme-session* *race* (eq? (race-phase *race*) 'title)
+               (title-active? *title*) (eq? (title-phase *title*) 'out))))
+
+    ;; The theme's part, decided each frame from where the game is:
+    ;;   - a hidden page: silence;
+    ;;   - PAUSED showing: the menu version, faded in; on the title the
+    ;;     title's own player ramps to it, elsewhere it starts at calm;
+    ;;   - the title owning the music: the full version, from the top at
+    ;;     the card's lock (silence queued until then), fading in over the
+    ;;     card's song fade; the gate holds it;
+    ;;   - otherwise off: faded over the title's fade-out at a start,
+    ;;     quickly at a resume.
+    ;; *theme-session*: the title has owned the music since the boot, so
+    ;; the card's release went to the theme and the race song needs none.
+    (define *theme-session* #f)
+    (define *damage-on* #t)
+    (define PAUSE-FADE-IN 0.6)
+    (define PAUSE-FADE-OUT 0.25)
+    (define (theme-service!)
+      (let ((ctx (music-context))
+            (owns? (title-owns-music?)))
+        (when owns? (set! *theme-session* #t))
+        (cond
+          ((not *visible*) (theme-stop! 0))
+          ;; The card freezes with the race while paused, so before its
+          ;; lock the theme must not run on: closed, it starts again on
+          ;; the resume with the preroll left.
+          ((and (core-paused?) owns?
+                (let ((wait (intro-song-wait *intro* *tuning*))) (or (not wait) (> wait 0))))
+           (theme-stop! 0))
+          ((core-paused?)
+           (theme-play! ctx 'menu (if (or owns? (theme-playing?)) #f 'calm) PAUSE-FADE-IN 0.0))
+          (owns?
+           (let ((wait (intro-song-wait *intro* *tuning*))
+                 (fade (tuning-ref *tuning* 'card-song-fade)))
+             (when wait
+               (when (= wait 0) (theme-release-now!))
+               (theme-play! ctx 'full #f fade (/ wait 60.0)))))
+          (else
+           (theme-stop! (if (eq? (title-phase *title*) 'out)
+                            (tuning-ref *tuning* 'title-out)
+                            PAUSE-FADE-OUT))))
+        (theme-frame!)))
+
     (define (core-focus! focused?)
       (unless (eq? focused? *focused*)
         (set! *focused* focused?)
@@ -97,7 +171,7 @@
         ;; must not owe catch-up ticks after the race was paused.
         (set! *skip-interval* #t)
         (audio-pause! (core-paused?))
-        (when *race* (music-frame! (race-song *race*) (core-paused?)))))
+        (when *race* (music-frame! (race-song *race*) (music-held?)))))
     (define *keys* (make-keys))
     (define *sticks* (make-sticks))
     (define *pad* (make-pad))
@@ -308,6 +382,8 @@
       (set! *skip-interval* #f)
       (set! *resync-requests* 0)
       (music-reset!)
+      (theme-reset!)
+      (set! *theme-session* #f)
       (music-prepare!)
       ;; the song waits for the card (song-gate!)
       (music-hold!)
@@ -358,9 +434,12 @@
                (music-sabotage! arm)))
             ((string=? kv "cues=0") (audio-cues! #f))
             ((string=? kv "sfx=0") (audio-sfx! #f) (say "sfx off: engine silent, no one-shots"))
+            ;; a diagnostic for timing checks (the drift gate): the song stays
+            ;; clean, with no dips, whatever the integrity
+            ((string=? kv "damage=0") (set! *damage-on* #f) (say "damage off: the song stays clean"))
             ((and (> (string-length kv) 14) (string=? (substring kv 0 14) "audio-latency="))
              (let ((v (string->number (substring kv 14 (string-length kv)))))
-               (when v (music-latency! (/ v 1000.0)))))
+               (when v (music-latency! (/ v 1000.0)) (theme-latency! (/ v 1000.0)))))
             ((and (> (string-length kv) 11) (string=? (substring kv 0 11) "musicdepth="))
              (let ((v (string->number (substring kv 11 (string-length kv)))))
                (when v (music-depth! v))))
@@ -431,7 +510,8 @@
     ;; The tuning-in sound's knobs, for the cue bank.
     (define (tune-audio!)
       (audio-tune! (tuning-ref *tuning* 'tone-lo) (tuning-ref *tuning* 'tone-hi)
-                   (intro-lock *tuning*) (intro-length *tuning*)))
+                   (intro-lock *tuning*) (intro-length *tuning*))
+      (audio-engine-db! (tuning-ref *tuning* 'engine-db)))
     ;; Open the sound (again, to resume a context the browser suspended).
     (define (core-audio-start!)
       ;; the time since the last step (on the web, the wait for a
@@ -440,7 +520,10 @@
       (tune-audio!)
       (audio-start!)
       (core-startup-mark! "engine-and-cues")
-      (when (and *race* (not (core-paused?)))
+      ;; held or not, the race song gets this context: its frame starts
+      ;; it there when the hold ends (the title's theme gives way)
+      (music-context! (audio-context))
+      (when (and *race* (not (music-held?)))
         (song-gate!)
         (music-start! (audio-context) (race-song *race*))
         (core-startup-mark! "music-start")
@@ -699,7 +782,18 @@
                        " resync-requests " (number->string *resync-requests*)
                        " resyncs " (number->string (list-ref m 7))
                        " resync-cancels " (number->string (list-ref m 9))
-                       " dropped-ms " (r1 (* 1000.0 (clock-dropped *clock*))))))
+                       " dropped-ms " (r1 (* 1000.0 (clock-dropped *clock*)))
+                       " tier " (symbol->string (music-tier))
+                       (theme-text))))
+
+    ;; The main theme's stream: on (or fading, or off), its version, its
+    ;; sounding underruns and how many times it has opened.
+    (define (theme-text)
+      (let ((t (theme-readout)))
+        (string-append " theme " (cond ((not (car t)) "off") ((cadr t) "fading") (else "on"))
+                       " theme-version " (symbol->string (list-ref t 2))
+                       " theme-underruns " (number->string (list-ref t 4))
+                       " theme-opens " (number->string (list-ref t 5)))))
 
     ;; The reference uses these simulation landings, never driver landings.
     ;; Clock samples are dated at frame advancement, before draw/render CPU.
@@ -820,7 +914,7 @@
       (when (and (dev-keys?) (pressed? 'f5))
         (set! *paused* (not *paused*))
         (audio-pause! (core-paused?))
-        (music-frame! (race-song *race*) (core-paused?)))
+        (music-frame! (race-song *race*) (music-held?)))
       (when (> dt 0.0)
         (set! *fps* (+ (* 0.95 *fps*) (* 0.05 (/ 1.0 dt))))
         (set! *frame-ms* (+ (* 0.95 *frame-ms*) (* 0.05 (* 1000.0 dt)))))
@@ -916,7 +1010,7 @@
                                                          (or (intro-active? *intro*) (memq (title-phase *title*) '(attract out)))
                                                          (lambda (c) (intro-draw-mark! c *race*))))
                           (cons (quote draw-3d) (and (title-active? *title*) (not (intro-active? *intro*))
-                                                     (lambda () (title-draw-logo! *title* (title-beat (conductor-tick (race-song *race*)))))))
+                                                     (lambda () (title-draw-logo! *title* (or (theme-beat) (title-beat (conductor-tick (race-song *race*))))))))
                           (cons (quote draw-2d) (cond ((eq? (intro-phase *intro*) 'gate)
                                                        (lambda (centred!) (centred! (intro-gate-line *touch-device*) 130 "#4DF2D9" 2)))
                                                       ((intro-active? *intro*) #f)
@@ -955,10 +1049,26 @@
 
     (define (service-audio!)
       (let ((m (racer-machine (race-player *race*))) (t0 (current-jiffy)))
-        (song-gate!)
-        (music-frame! (race-song *race*) (core-paused?)
+        (theme-service!)
+        ;; the theme took the card's release: the race song needs none
+        (if *theme-session* (music-unhold!) (song-gate!))
+        ;; the immediate path: a hard wall hit dips the song to 40% for
+        ;; 40 ms, an ICE strike drops it for a 16th, CORRUPT fades it out
+        (when *damage-on*
+        (for-each (lambda (e)
+                    (cond ((and (pair? e) (eq? (car e) 'wall) (>= (cdr e) HIT-IMPACT))
+                           (music-dip! 0.04 0.4))
+                          ((eq? e 'ice) (music-dip! (/ 15.0 SONG-BPM) 0.0))
+                          ((eq? e 'corrupt) (music-fade-out! 0.5))
+                          (else #f)))
+                  *frame-events*))
+        (music-frame! (race-song *race*) (music-held?)
                       clock-fraction: (clock-acc *clock*)
-                      frame-jiffy: *frame-jiffy*)
+                      frame-jiffy: *frame-jiffy*
+                      integrity: (if *damage-on* (machine-integrity m) 100.0)
+                      boost: (and *damage-on* (> (machine-boost m) 0.0)))
+        ;; a repair's snap, as it reaches the ear: the lock
+        (when (music-lock-due!) (audio-lock!))
         (unless (= *music-generation* (music-generation))
           (set! *music-generation* (music-generation))
           ;; A new stream bounds the next interval at its opening (in
@@ -990,7 +1100,10 @@
         ;; player is built there too, in one frame, while the music is off.
         (tune-audio!)
         (audio-prepare! (if (audio-started?) 3.0 8.0) (eq? *platform* 'web))
-        (when (eq? *platform* 'web)
+        ;; The theme's player first (the title plays it first), the race
+        ;; song's on a later frame: each build is about a frame's work.
+        (when (and (eq? *platform* 'web)
+                   (not (theme-prepare! (audio-context))))
           (music-prepare-playback! (audio-context) (race-song *race*)))
         (set! *audio-ms* (ease *audio-ms* (ms-since t0)))))
 

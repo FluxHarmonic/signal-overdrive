@@ -1,0 +1,321 @@
+;;; The main theme as the title's and the pause screen's music: its player
+;;; ((signal music theme)) rendered offline, and its stream ((signal shell
+;;; theme)) on the native ring drained by the sink's test shim. No audio
+;;; device initializes.
+(import (sigil test)
+        (sigil math)
+        (sigil list)
+        (sigil audio)
+        (motif tune)
+        (motif tune player)
+        (signal music theme)
+        (signal music theme-score)
+        (signal shell theme))
+
+(define RATE 48000)
+(define BAR (exact (round (* (theme-bar-seconds) RATE))))
+
+(define (sample bv i) (bytevector-ieee-single-ref bv (* 4 i) 'little))
+
+;; Pull FRAMES from P in 512-frame blocks (the game pulls 256; the theme's
+;; renders were made at 512). AT: (frame . thunk) run before that frame's
+;; block, so a version change lands on a block edge as it does in the game.
+(define (render p frames (keys: (at '())))
+  (let ((out (make-bytevector (* 8 frames) 0)))
+    (let pull ((done 0) (at at))
+      (if (>= done frames)
+          out
+          (let* ((due (and (pair? at) (<= (car (car at)) done)))
+                 (_ (when due ((cdr (car at)))))
+                 (at (if due (cdr at) at))
+                 (limit (if (pair? at) (min frames (car (car at))) frames))
+                 (n (min 512 (- limit done))))
+            (player-pull! p out (* 8 done) n)
+            (pull (+ done n) at))))))
+
+(define (peak bv from to)
+  (let loop ((i (* 2 from)) (m 0.0))
+    (if (>= i (* 2 to)) m (loop (+ i 1) (max m (abs (sample bv i)))))))
+
+(define (energy bv from to)
+  (let loop ((i (* 2 from)) (sum 0.0))
+    (if (>= i (* 2 to)) sum (loop (+ i 1) (+ sum (* (sample bv i) (sample bv i)))))))
+
+;; The left channel's energy above 3 kHz: two Butterworth high-pass
+;; biquads in series (24 dB an octave), run from the start of the render
+;; so the filter has settled by FROM.
+(define (bright bv from to)
+  (let* ((w (/ (* 2.0 3.14159265358979 3000.0) RATE))
+         (c (cos w))
+         (alpha (/ (sin w) (* 2.0 0.70710678)))
+         (a0 (+ 1.0 alpha))
+         (b0 (/ (/ (+ 1.0 c) 2.0) a0)) (b1 (/ (- (+ 1.0 c)) a0)) (b2 b0)
+         (a1 (/ (* -2.0 c) a0)) (a2 (/ (- 1.0 alpha) a0)))
+    (let loop ((k 0) (sum 0.0)
+               (x1 0.0) (x2 0.0) (y1 0.0) (y2 0.0)
+               (z1 0.0) (z2 0.0))
+      (if (>= k to)
+          sum
+          (let* ((x (sample bv (* 2 k)))
+                 (y (- (+ (* b0 x) (* b1 x1) (* b2 x2)) (* a1 y1) (* a2 y2)))
+                 (z (- (+ (* b0 y) (* b1 y1) (* b2 y2)) (* a1 z1) (* a2 z2))))
+            (loop (+ k 1) (if (>= k from) (+ sum (* z z)) sum)
+                  x x1 y y1 z z1))))))
+
+(define (db ratio) (* 10.0 (/ (log (max ratio 1e-30)) (log 10.0))))
+
+(define (soloed version ch frames (keys: (from 'calm) (dry #f)))
+  (let ((p (theme-open RATE version from: from)))
+    (player-solo! p ch)
+    (when dry (player-set-bus-mix! p 0.0))
+    (let ((bv (render p frames)))
+      (player-close! p)
+      bv)))
+
+(test-group "theme: the player"
+  (test "the generated tune is the theme, eight channels with calm at bar 4"
+    (let ((t (theme-tune)))
+      (assert-equal 140 THEME-BPM)
+      (assert-equal 8 (tune-channels t))
+      (assert-equal 4 THEME-CALM)
+      (assert-equal 4 (tune-mark t 'calm))))
+
+  (test "every filtered channel has a live cutoff, open at 0.45 of the rate"
+    (let ((p (theme-open RATE 'full)))
+      (for-each (lambda (ch)
+                  (assert-equal (* 0.45 RATE) (player-insert-param p ch 'cutoff)))
+                THEME-FILTERED)
+      (player-close! p)))
+
+  (test "the menu version: every cutoff at 1500 Hz"
+    (let ((p (theme-open RATE 'menu)))
+      (for-each (lambda (ch)
+                  (assert-equal THEME-MENU-CUTOFF (player-insert-param p ch 'cutoff)))
+                THEME-FILTERED)
+      (player-close! p)))
+
+  (test "the menu version silences the drums"
+    (for-each
+      (lambda (ch)
+        (let ((full (energy (soloed 'full ch BAR) 0 BAR))
+              (menu (energy (soloed 'menu ch BAR) 0 BAR)))
+          (assert-true (> full 1e-3))
+          (assert-true (< menu (* 1e-9 full)))))
+      THEME-DRUMS))
+
+  ;; Above 3 kHz the menu version's 1500 Hz Butterworth pair is 24 dB
+  ;; down; the lead's own patch already stops near 3.4 kHz.
+  (test "the menu version takes the lead's top off (15 dB or more above 3 kHz)"
+    (let* ((n (* 2 BAR)) (from (quotient BAR 8))
+           (full (bright (soloed 'full 6 n dry: #t) from n))
+           (menu (bright (soloed 'menu 6 n dry: #t) from n)))
+      (assert-true (> full 1e-6))
+      (unless (< (db (/ menu full)) -15.0)
+        (assert-equal 'pass (list full menu (db (/ menu full)))))))
+
+  ;; The theme's own measurement of its menu render: 12.7 dB less above
+  ;; 3 kHz than the full mix.
+  (test "the menu version's mix has 12 dB or more less above 3 kHz"
+    (let* ((n (* 2 BAR)) (from (quotient BAR 8))
+           (mix (lambda (version)
+                  (let* ((p (theme-open RATE version from: 'calm)) (bv (render p n)))
+                    (player-close! p)
+                    (bright bv from n))))
+           (full (mix 'full)) (menu (mix 'menu)))
+      (unless (< (db (/ menu full)) -12.0)
+        (assert-equal 'pass (list full menu (db (/ menu full)))))))
+
+  (test "the bass keeps its body in the menu version (within 3 dB)"
+    (let ((full (energy (soloed 'full 4 (* 2 BAR)) 0 (* 2 BAR)))
+          (menu (energy (soloed 'menu 4 (* 2 BAR)) 0 (* 2 BAR))))
+      (assert-true (< (abs (db (/ menu full))) 3.0))))
+
+  (test "the generated tune text is music/theme/redline.cts"
+    (assert-true (equal? THEME-TUNE-TEXT (tune->string (read-tune-file "music/theme/redline.cts")))))
+
+  ;; The tripwire for a version change that jumps: a jumped cutoff is one
+  ;; step of 14x (21.6 kHz to 1.5 kHz). A ramp moves once per pull.
+  (test "a version change moves the cutoff in small steps, once per pull"
+    (let ((p (theme-open RATE 'full from: 'calm))
+          (buf (make-bytevector (* 8 256) 0)))
+      (player-pull! p buf 0 256)
+      (theme-version! p 'menu RATE 600)
+      (let loop ((i 0) (prev (player-insert-param p 4 'cutoff)) (worst 1.0))
+        (if (< i 120)               ; 120 pulls of 256: 640 ms
+            (begin
+              (player-pull! p buf 0 256)
+              (let ((now (player-insert-param p 4 'cutoff)))
+                (assert-true (<= now prev))
+                (loop (+ i 1) now (max worst (/ prev now)))))
+            (begin
+              (assert-equal THEME-MENU-CUTOFF prev)
+              (unless (< worst 1.25) (assert-equal 'small-steps worst)))))
+      (player-close! p)))
+
+  ;; A ceiling only: an instant switch did not trip it on this material.
+  ;; The step test above is what catches a jump.
+  (test "a version change ramps: no sample above the full version's peak"
+    ;; Full for a bar, then to menu and back, 600 ms each way.
+    (let* ((frames (* 4 BAR))
+           (plain (let ((p (theme-open RATE 'full from: 'calm)))
+                    (let ((bv (render p frames))) (player-close! p) bv)))
+           (p (theme-open RATE 'full from: 'calm))
+           (ramped (render p frames
+                           at: (list (cons BAR (lambda () (theme-version! p 'menu RATE 600)))
+                                     (cons (* 2 BAR) (lambda () (theme-version! p 'full RATE 600)))))))
+      (player-close! p)
+      (assert-true (<= (peak ramped 0 frames) (* 1.0 (peak plain 0 frames))))
+      ;; and the ramp arrives: the menu version's bar is dark
+      (assert-true (< (db (/ (bright ramped (+ BAR (quotient BAR 2)) (* 2 BAR))
+                             (bright plain (+ BAR (quotient BAR 2)) (* 2 BAR))))
+                      -6.0))))
+
+  (test "turning back mid-ramp starts from where the ramp is"
+    (let ((p (theme-open RATE 'full from: 'calm)))
+      (render p 512)
+      (theme-version! p 'menu RATE 600)
+      (render p (exact (round (* 0.3 RATE))))
+      (let ((mid (player-insert-param p 4 'cutoff)))
+        ;; halfway on a log ramp from 21.6 kHz to 1.5 kHz: about 5.7 kHz
+        (unless (< 3000.0 mid 12000.0)
+          (assert-equal (quote pass) (list mid (player-insert-param p 5 (quote cutoff)) (player-insert-param p 6 (quote cutoff)))))
+        (theme-version! p 'full RATE 600)
+        ;; a ramp moves at the top of each pull after the one it starts in
+        (render p 1024)
+        (assert-true (> (player-insert-param p 4 'cutoff) mid)))
+      (player-close! p)))
+
+  (test "the loop keeps playing past the tune's end"
+    ;; The last bar (43) jumps back to bar 4: three bars from bar 42 cross
+    ;; it, and the third bar is the hook, not silence.
+    (let* ((p (open-tune-player (theme-tune) RATE start: (cons 42 0) loop: #t
+                                inserts: (theme-inserts RATE)))
+           (bv (render p (* 3 BAR))))
+      (assert-false (player-ended? p))
+      (assert-true (> (peak bv (* 2 BAR) (* 3 BAR)) 0.05))
+      (player-close! p))))
+
+(define NATIVE 44100)
+(define out (make-bytevector (* 8 NATIVE) 0))
+(define (clear!) (set! out (make-bytevector (* 8 NATIVE) 0)))
+(define (silent? frames)
+  (let loop ((i 0))
+    (or (>= i (* 2 frames))
+        (and (= 0.0 (sample out i)) (loop (+ i 1))))))
+(define (loud? frames) (> (peak out 0 frames) 0.01))
+(define (drain! frames)
+  (clear!)
+  (%audio-stream-drain-for-test out frames 2)
+  (theme-frame!))
+
+(test-group "theme: the stream"
+  (test "a preroll is silence, then the song fades in from its first sample"
+    (assert-false (audio-initialized?))
+    (theme-drop!)
+    (theme-latency! 0.0)
+    (theme-play! 'offline-test-context 'full 'top 0.0 0.3)
+    (assert-true (theme-playing?))
+    (assert-false (theme-beat))
+    ;; 0.3 s of preroll: 13,230 frames, drained in steps under the ring
+    (drain! 4410) (assert-true (silent? 4410))
+    (drain! 4410) (assert-true (silent? 4410))
+    (drain! 4411) (assert-true (silent? 4411))
+    (assert-true (< (theme-beat) 0.01))
+    (drain! 4410)
+    (assert-true (loud? 4410))
+    (assert-true (< (abs (- (theme-beat) (* (/ 4410.0 NATIVE) (/ 140 60.0)))) 0.01))
+    ;; what played is the song from its first frame: the preroll queued
+    ;; silence, not song (a fresh player at the top, frames 1 to 4410)
+    (let* ((p (theme-open NATIVE 'full))
+           (fresh (render p 4411)))
+      (player-close! p)
+      (let loop ((k 0) (worst 0.0))
+        (if (< k (* 2 4410))
+            (loop (+ k 1) (max worst (abs (- (sample out k) (sample fresh (+ k 2))))))
+            (unless (< worst 1e-4) (assert-equal 'song-from-bar-0 worst)))))
+    (theme-stop! 0)
+    (assert-false (theme-playing?))
+    (assert-false (audio-initialized?)))
+
+  (test "a release drops the rest of the preroll"
+    (theme-reset!)
+    (theme-play! 'offline-test-context 'full 'top 0.0 5.0)
+    (drain! 4410)
+    (assert-equal '(silent) (list (if (silent? 4410) 'silent (peak out 0 4410))))
+    (theme-release-now!)
+    ;; what was queued (at most the 250 ms ring) still plays out
+    (drain! 11025)
+    (drain! 4410)
+    (drain! 4410)
+    (unless (loud? 4410)
+      (assert-equal 'loud (list (peak out 0 4410) (theme-readout) (theme-beat))))
+    (theme-stop! 0))
+
+  (test "a stop fades over its time, then closes"
+    (theme-reset!)
+    (theme-play! 'offline-test-context 'full 'top 0.0 0.0)
+    (drain! 4410)
+    (theme-stop! 0.2)
+    (assert-true (theme-closing?))
+    (drain! 4410)
+    (assert-true (theme-playing?))
+    (drain! 4410) (drain! 4410)
+    (assert-false (theme-playing?)))
+
+  (test "playing again during a fade-out takes it back"
+    (theme-reset!)
+    (theme-play! 'offline-test-context 'full 'top 0.0 0.0)
+    (drain! 4410)
+    (theme-stop! 0.2)
+    (theme-play! 'offline-test-context 'full #f 0.1 0.0)
+    (assert-false (theme-closing?))
+    (drain! 4410) (drain! 4410) (drain! 4410)
+    (assert-true (theme-playing?))
+    (assert-true (loud? 4410))
+    (theme-stop! 0))
+
+  (test "the pause screen: the menu version from calm; the title's player ramps to it"
+    (theme-reset!)
+    (theme-play! 'offline-test-context 'menu 'calm 0.0 0.0)
+    (assert-equal 'menu (theme-version-now))
+    (theme-stop! 0)
+    (theme-play! 'offline-test-context 'full 'top 0.0 0.0)
+    (theme-play! 'offline-test-context 'menu #f 0.6 0.0)
+    (assert-equal 'menu (theme-version-now))
+    (assert-true (theme-playing?))
+    ;; the player itself, not only the variable: 0.8 s on, the menu cutoff
+    (drain! 4410) (drain! 4410) (drain! 4410) (drain! 4410)
+    (drain! 4410) (drain! 4410) (drain! 4410) (drain! 4410)
+    (assert-equal THEME-MENU-CUTOFF (theme-cutoff-now))
+    (theme-stop! 0))
+
+  (test "a version set at once cancels a ramp still in flight"
+    ;; blur (a menu ramp starts), hide at once, come back: the full version
+    (theme-reset!)
+    (theme-play! 'offline-test-context 'full 'top 0.0 0.0)
+    (drain! 4410)
+    (theme-play! 'offline-test-context 'menu #f 0.6 0.0)
+    (drain! 4410)
+    (theme-stop! 0)
+    (theme-reset!)
+    (theme-play! 'offline-test-context 'full #f 0.0 0.0)
+    (drain! 4410) (drain! 4410) (drain! 4410) (drain! 4410)
+    (drain! 4410) (drain! 4410) (drain! 4410) (drain! 4410)
+    (assert-equal (* 0.45 NATIVE) (theme-cutoff-now))
+    (theme-stop! 0))
+
+  (test "a reopened theme keeps its beat"
+    (theme-reset!)
+    (theme-play! 'offline-test-context 'full 'top 0.0 0.0)
+    (drain! 4410) (drain! 4410)
+    (let ((before (theme-beat)))
+      (theme-stop! 0)
+      (theme-play! 'offline-test-context 'full #f 0.0 0.0)
+      (drain! 4410)
+      ;; the ring's 250 ms were dropped at the close: about 0.6 beats on
+      (let ((after (theme-beat)))
+        (unless (< (+ before 0.1) after (+ before 1.5))
+          (assert-equal 'beat-carried-on (list before after)))))
+    (theme-stop! 0)
+    (assert-equal 0 (list-ref (theme-readout) 4))
+    (assert-false (audio-initialized?))))

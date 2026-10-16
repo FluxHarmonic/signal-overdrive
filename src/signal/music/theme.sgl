@@ -1,0 +1,117 @@
+;;; (signal music theme) - The main theme, Redline, as a second player: the
+;;; title screen's music (the full arrangement from its intro, looping) and
+;;; the pause screen's (the menu version from its calm mark). It knows
+;;; Motif but no sink, like (signal music playback); the shell's theme
+;;; adapter streams it.
+;;;
+;;; The theme's own inserts, as its renders were made: channel 6 (the
+;;; overdriven lead) has a feedback delay, a dotted eighth at the tune's
+;;; tempo, then a low-pass; channels 4, 5, 7 and 8 have a low-pass. Every
+;;; low-pass is a Butterworth pair sharing one `cutoff` param, open at 0.45
+;;; of the rate as built.
+;;;
+;;; The menu version: channels 1-3 (the drums) at volume 0 and every cutoff
+;;; at 1500 Hz. A player changes version by ramps (theme-version!), the
+;;; cutoffs on a log ramp: a Butterworth cutoff jumped in one sample from
+;;; 1500 Hz to open has measured a two-sample spike to +11 dBFS.
+;;;
+;;; The tune loops (its last row jumps back to bar 4), so the player is
+;;; opened with loop: #t. Motif 0.8.2 or later is required: 0.8.1 stopped a
+;;; looping player after 200,000 walked ticks, 59.5 minutes at 140 BPM.
+
+(define-library (signal music theme)
+  (import (sigil math)
+          (motif tune)
+          (motif tune player)
+          (motif graph)
+          (signal music theme-score))
+  (export theme-tune theme-inserts theme-open theme-version! theme-jump!
+          theme-version-cutoff theme-open-cutoff theme-bar-seconds
+          THEME-DRUMS THEME-FILTERED THEME-MENU-CUTOFF)
+  (begin
+    (define THEME-DRUMS '(1 2 3))
+    (define THEME-FILTERED '(4 5 6 7 8))
+    (define THEME-MENU-CUTOFF 1500.0)
+
+    ;; 140 BPM, eight rows a beat, four beats a bar
+    (define (theme-bar-seconds) (* 4.0 (/ 60.0 THEME-BPM)))
+
+    (define *tune* #f)
+    (define (theme-tune)
+      (unless *tune* (set! *tune* (read-tune-string THEME-TUNE-TEXT)))
+      *tune*)
+
+    (define (theme-open-cutoff rate) (* 0.45 rate))
+    (define (theme-version-cutoff version rate)
+      (if (eq? version 'menu) THEME-MENU-CUTOFF (theme-open-cutoff rate)))
+
+    ;; Two Butterworth low-passes in series with one `cutoff` (24 dB per
+    ;; octave), open at 0.45 of the rate.
+    (define (lowpass-stage rate)
+      (let ((hi (theme-open-cutoff rate)))
+        (lambda (x)
+          (g:butlp (g:butlp x (g:param 'cutoff hi 20.0 hi)) (g:param 'cutoff hi 20.0 hi)))))
+
+    ;; Dry plus the delayed signal: a dotted eighth, feedback 0.35, at 0.25.
+    (define (lead-delay-insert rate)
+      (let ((t (* 0.75 (/ 60.0 THEME-BPM)))
+            (lp (lowpass-stage rate)))
+        (lambda (in) (lp (g:add in (g:mul (g:delay in t 0.35) 0.25))))))
+
+    (define (theme-inserts rate)
+      (cons (cons 6 (lead-delay-insert rate))
+            (map (lambda (ch) (cons ch (lowpass-stage rate))) '(4 5 7 8))))
+
+    ;; FROM: 'top (bar 0, the intro) or 'calm (bar 4, the loop's start).
+    (define (start-position from)
+      (if (eq? from 'calm) (cons THEME-CALM 0) (cons 0 0)))
+
+    ;; A looping player in VERSION ('full or 'menu), set before its first
+    ;; sample, so it starts there with no ramp.
+    (define (theme-open rate version (keys: (from 'top)))
+      (let ((p (open-tune-player (theme-tune) rate start: (start-position from)
+                                 loop: #t inserts: (theme-inserts rate))))
+        (theme-version! p version rate 0)
+        p))
+
+    ;; Move a player to FROM. player-jump! cuts every sounding note, which
+    ;; is what a fresh start wants.
+    (define (theme-jump! p from)
+      (let ((pos (start-position from)))
+        (player-jump! p (car pos) (cdr pos))))
+
+    ;; Where a player is between the versions: 1 full, 0 menu, read from
+    ;; channel 4's cutoff (Motif keeps channel volumes private). The drums'
+    ;; volume follows the same fraction, since both ramp together, the
+    ;; cutoff on a log scale.
+    (define (openness p rate)
+      (let ((now (player-insert-param p 4 'cutoff)))
+        (unless now (error "theme: channel 4 has no cutoff"))
+        (max 0.0 (min 1.0 (/ (log (/ now THEME-MENU-CUTOFF))
+                             (log (/ (theme-open-cutoff rate) THEME-MENU-CUTOFF)))))))
+
+    ;; Change version over MS milliseconds (0: at once), from wherever the
+    ;; player is, even mid-ramp. Raises if a cutoff set fails: a "menu"
+    ;; version left unfiltered must not pass quietly.
+    (define (theme-version! p version rate ms)
+      (let* ((volume (if (eq? version 'menu) 0.0 1.0))
+             (cutoff (theme-version-cutoff version rate))
+             (from-volume (openness p rate)))
+        ;; Every change goes through player-ramp!, a 0 ms one too: Motif
+        ;; replaces a target's ramp only through another ramp, so a direct
+        ;; set would leave one still in flight to undo it on the next pull.
+        (for-each
+          (lambda (ch)
+            (player-ramp! p (cons 'channel-volume ch) from-volume volume (max 0 ms))
+            (when (<= ms 0) (player-set-channel-volume! p ch volume)))
+          THEME-DRUMS)
+        (for-each
+          (lambda (ch)
+            (let ((now (player-insert-param p ch 'cutoff)))
+              (unless now (error "theme: channel has no cutoff" ch))
+              (player-ramp! p (cons 'insert-log (cons ch 'cutoff)) now cutoff (max 0 ms))
+              (when (<= ms 0)
+                (unless (player-set-insert-param! p ch 'cutoff cutoff)
+                  (error "theme: cutoff set failed" ch cutoff)))))
+          THEME-FILTERED)
+        p))))

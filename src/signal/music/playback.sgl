@@ -10,7 +10,7 @@
   (export playback-open playback-pull! playback-close! playback-player
           playback-origin-frame playback-walker-frame playback-log playback-missed
           playback-set-region! playback-bar-distance playback-resync! playback-seek-start!
-          playback-rendered playback-can-resync?)
+          playback-rendered playback-can-resync? playback-rate)
   (begin
     (define-struct playback
       (player)
@@ -38,9 +38,14 @@
               (player-set-region! (playback-player b) (car a) (+ 1 (car last))))
             (player-set-region! (playback-player b) #f #f))))
 
-    (define (playback-open tune rate c inserts (keys: (mode 'planned)))
+    ;; BYPASS-MASTER (tests only): the mix before Motif's master chain, so
+    ;; a gate can count a crush's levels the limiter would otherwise smear
+    (define (playback-open tune rate c inserts (keys: (mode 'planned) (bypass-master #f)))
       (let* ((start (conductor-position c))
-             (p (open-tune-player tune rate start: start loop: #f inserts: inserts))
+             (p (if bypass-master
+                    (open-tune-player tune rate start: start loop: #f inserts: inserts
+                                      test-bypass-master: #t)
+                    (open-tune-player tune rate start: start loop: #f inserts: inserts)))
              (row (tick->song-row (conductor-tick c)))
              (origin (exact (round (* row (/ (* 2.5 SONG-TICKS-PER-ROW) SONG-BPM) rate))))
              (b (playback player: p rate: rate origin-frame: origin mode: mode)))

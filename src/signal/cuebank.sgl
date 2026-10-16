@@ -20,6 +20,7 @@
   (import (sigil core)
           (sigil time)
           (signal sound)
+          (signal sfx)
           (signal tunein))
 
   (export cue-bank cue-bank-step! cue-bank-finish! cue-bank-done? CUE-BANK-ORDER)
@@ -28,9 +29,22 @@
     ;; Frames rendered between checks of the budget: about 2 ms of work on
     ;; the web at 48 kHz.
     (define CHUNK 1024)
+    ;; The felt cues ((signal sfx)) cost several times a synth cue a frame:
+    ;; their parts are a quarter the size, so the budget is checked as often.
+    (define SFX-CHUNK 256)
+    (define (part b)
+      (let ((current (vector-ref b 3))
+            (next (and (pair? (vector-ref b 2)) (car (vector-ref b 2)))))
+        (if (assq (if current (car current) next) SFX-KINDS) SFX-CHUNK CHUNK)))
     (define ALL 1073741823)
 
-    (define CUE-BANK-ORDER (cons 'tune-in (map car CUE-KINDS)))
+    ;; the felt one-shots ((signal sfx)) first, then the synth's that remain
+    (define CUE-BANK-ORDER
+      (cons 'tune-in (append (map car SFX-KINDS)
+                             (let keep ((ks (map car CUE-KINDS)))
+                               (cond ((null? ks) '())
+                                     ((memq (car ks) '(boost wall)) (keep (cdr ks)))
+                                     (else (cons (car ks) (keep (cdr ks)))))))))
 
     ;; #(rate tune queue current): queue holds the kinds not started,
     ;; current is (kind . stepper) or #f.
@@ -41,7 +55,9 @@
     (define (start! b kind)
       (vector-set! b 3 (cons kind (if (eq? kind 'tune-in)
                                       (apply tune-in-steps (vector-ref b 0) (vector-ref b 1))
-                                      (cue-steps kind (vector-ref b 0)))))
+                                      (if (assq kind SFX-KINDS)
+                                          (sfx-steps kind (vector-ref b 0))
+                                          (cue-steps kind (vector-ref b 0))))))
       (vector-set! b 2 (remove-kind kind (vector-ref b 2))))
 
     ;; Up to FRAMES more of the cue under way, starting the next in the
@@ -60,7 +76,7 @@
         (let loop ((first #t))
           (cond ((cue-bank-done? b) #t)
                 ((and (not first) (>= (current-jiffy) deadline)) #f)
-                (else (advance! b CHUNK load) (loop #f))))))
+                (else (advance! b (part b) load) (loop #f))))))
 
     ;; A different cue under way finishes first, so its work is kept.
     (define (cue-bank-finish! b kind load)
@@ -71,6 +87,7 @@
         (cond ((and current (eq? (car current) kind)) (advance! b ALL load))
               ((memq kind (vector-ref b 2)) (start! b kind) (advance! b ALL load))
               (else #f))))
+
 
     (define (remove-kind kind kinds)
       (cond ((null? kinds) '())

@@ -20,6 +20,9 @@
 ;; approved audition. Every channel but Gibson's plays in it.
 (define FRAMES (exact (round (* 2 (song-bar-seconds) RATE))))
 
+;; the inserts but channel 8's (the static)
+(define DRUM-PATH (filter (lambda (e) (not (= (car e) 8))) MUSIC-INSERTS))
+
 (define (render inserts solo)
   (let ((p (open-tune-player tune RATE start: (conductor-position (conductor-new 'lap2))
                              inserts: inserts))
@@ -56,20 +59,25 @@
            (g:param 'rate-div 1.0 1.0 16.0)))
 
 (test-group "inserts: the clean path is the dry path"
-  (test "the crush inserts leave the kick, snare, ticks and arp as rendered dry"
+  (test "the crush inserts leave the kick, snare and ticks as rendered dry"
     (for-each
       (lambda (channel)
         (let ((dry (render '() channel)))
           (assert-true (> (energy dry) 0.0))
-          (assert-true (< (max-difference (render MUSIC-INSERTS channel) dry) NOISE))))
-      '(1 2 3 7)))
+          ;; without channel 8: its static draws on the noise the hats and
+          ;; snare draw on, so with it they are a different take of the same
+          ;; noise (the static itself is checked silent below)
+          (let ((w (max-difference (render DRUM-PATH channel) dry)))
+            (unless (< w NOISE) (assert-equal (list (quote dry) channel) (list channel w))))))
+      (quote (1 2 3))))
 
-  (test "the lead's dry chorus and unity gain leave it as rendered dry"
-    (let ((dry (render '() 6)))
-      (assert-true (> (energy dry) 0.0))
-      (assert-true (< (max-difference (render MUSIC-INSERTS 6) dry) NOISE))))
+  ;; Gibson's channel is silent in this passage; at rest its static adds
+  ;; nothing (the floor here is the master chain's, about 4e-37)
+  (test "the static is silent at rest"
+    (let ((e (energy (render MUSIC-INSERTS 8))))
+      (unless (< e 1e-30) (assert-equal 'static-silent e))))
 
-  ;; The bass and pad pass 16 kHz Butterworth low-passes. Their phase
+  ;; The bass, pad, lead and arp pass Butterworth low-passes, open. Their phase
   ;; shift (about 5 degrees at 1 kHz) moves samples without changing what
   ;; is heard, so these compare level, not samples.
   (test "the bass, the pad and the whole mix keep their level within 0.1 dB"
@@ -77,11 +85,11 @@
       (lambda (solo)
         (let ((change (db (/ (energy (render MUSIC-INSERTS solo)) (energy (render '() solo))))))
           (assert-true (< (abs change) 0.1))))
-      '(4 5 #f)))
+      (quote (4 5 6 7 #f))))
 
   (test "control: a drum crush at drive 1 is caught, sample by sample and in level"
     (let ((driven (map (lambda (entry)
                          (if (memv (car entry) '(1 2 3 7)) (cons (car entry) driven-drum-insert) entry))
-                       MUSIC-INSERTS)))
+                       DRUM-PATH)))
       (assert-true (> (max-difference (render driven 3) (render '() 3)) NOISE))
       (assert-true (> (abs (db (/ (energy (render driven #f)) (energy (render '() #f))))) 0.1)))))

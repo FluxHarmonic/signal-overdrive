@@ -182,14 +182,20 @@ unfocused. Its small C addition queries GLFW's current application window;
 it creates no window or audio device and can move into the shared desktop
 library independently.
 
-When the clock requests resync, the music pull splits at an exact bar
-sample already in the walker's timeline. A pending Motif mark lands first,
-because `player-jump!` retains pending marks. The seek uses the conductor
-projected to the queue's future audible time, rounded to the nearest
-tracker row, and restores the cue loop. The simulation never changes.
-The stream's clock epoch changes only when the corrected sample reaches
-the ear, after queue depth and device latency. Resyncs execute at most
-once per simulation bar; diagnostics distinguish requests and completions.
+When the clock requests a resync, the music stream is spliced just before
+a bar line; the player is never moved, so held notes ring through. (A
+resync used to `player-jump!`, which released every note: a long lead or
+pad note stayed silent until its next onset.) With the ear behind by d,
+the last d frames before the bar line are rendered and dropped, and the
+join is crossfaded over 128 frames (equal power). With the ear ahead by
+s, the bar's last 128 frames fade out, s of silence follow, and the
+downbeat fades in over 128 frames. The splice is planned at the first bar
+line with room for twice the 60 ms threshold, and decides drop or insert
+from the gap it measures when it runs. The simulation never changes.
+The stream's clock epoch changes only when the splice reaches the ear,
+after queue depth and device latency; `--musiclog` lists each splice as
+`#(resync kind change shift at)`. Resyncs execute at most once per
+simulation bar; diagnostics distinguish requests and completions.
 One gap gets one correction. A resync is in flight from its request until
 its first corrected sample is heard, and the gap still reads the old
 epoch meanwhile, so the clock asks for no other resync until then. A
@@ -199,9 +205,11 @@ against the simulation now, and is cancelled if the gap is back within
 just short of a bar line was asked for again from its stale gap once the
 simulation entered the next bar, and a second jump, made with the gap
 already at 0, cut the held notes again a bar later.
-`test/test-resync.sgl` checks exact pull splitting, pending-mark safety,
-later planned landings and delayed audible epochs without a device, and
-one correction per gap through the shell's own frame.
+`test/test-resync.sgl` checks the playback's exact pull splitting,
+pending-mark safety, later planned landings and delayed audible epochs
+without a device, one correction per gap through the shell's own frame,
+and that after a drop splice the stream is the continuous song with its
+held notes sounding (a player jump in the drop path fails it).
 
 `core-advance!` is the same input/pacing/tick path used by each graphical
 frame, exposed without drawing for headless checks. The muted
@@ -326,3 +334,73 @@ in the first frames, more so on a loaded host. A resync requested from it
 is cancelled at the next render-head bar line when the nudge has brought
 the gap within 60 ms by then, and runs otherwise. Removing it needs a
 stream start that allows for the output latency.
+
+### Title and pause music
+
+The main theme (`music/theme/redline.cts`, compiled by
+`scripts/compile-theme` into `(signal music theme-score)`) plays on a
+second Motif player and its own stream, beside the race song's and the
+engine's; nothing about it paces the simulation. It has two versions:
+`full`, the whole arrangement, and `menu`, the drums at volume 0 and
+channels 4-8 behind a 1500 Hz low-pass. A change of version is a
+`player-ramp!`, so it never restarts the song.
+
+- **Title:** the full version from the top, from the title through the
+  card. The card's lock lands on the theme's time with no rendering work
+  then: the stream opens with the time left to the lock as silence
+  (preroll), then fades in over `card-song-fade`. The race song is held
+  until the title is done, through its fade-out (`title-out`).
+- **Pause:** the menu version whenever PAUSED shows, fading in over
+  0.6 s; resuming fades it out over 0.25 s. Paused in the race it starts
+  at the loop's first bar; paused on the title it carries on where it
+  was. A pause on the card before its lock closes the theme, and the
+  resume starts it again with the preroll left.
+- **Hidden:** a hidden browser page closes the theme at once.
+
+Fades are the stream's volume, which both sinks apply as the device plays,
+so a fade starts when it is asked for and never waits on the queue. The
+logo's beat follows the theme at the ear while it plays.
+`test/test-theme.sgl` and `test/test-card-song.sgl` check the versions,
+the preroll's lock, pause and resume, and that the race song starts after
+the title.
+
+### Damage and overdrive
+
+The machine's integrity damages the race song itself, through Motif inserts
+on each channel (`(signal music inserts)`), with per-sample smoothing on
+every continuous parameter. `(signal music damage)` holds the settled
+table; `(signal music damage-path)` drives the inserts from the music pull.
+
+| tier | integrity | what changes |
+|---|---|---|
+| clean | 80 and up | nothing heard: every insert at rest (level-transparent) |
+| worn | 55 to 80 | drums and arp lose bits, pad and lead darken, the lead detunes |
+| damaged | 30 to 55 | drums at a third of the rate; the lead gated for three 16ths a bar; static |
+| failing | 10 to 30 | the arp leaves, the pad drops 9 dB; two whole-song cutouts a bar |
+| critical | above 0 | the snare and pad leave; the lead one note a bar; three cutouts a bar |
+| corrupt | 0 | the stream fades to silence over 0.5 s |
+
+Continuous parameters (cutoffs, the lead's detune) move inside a tier;
+the rest switch at tier edges. The lead's gate and the cutouts (to 6%)
+follow fixed per-bar tables, applied per 16th with 2 ms edges. The bass
+is protected: low-pass only, from damaged down. Static (hiss and
+crackle) is channel 8's insert, so it is rendered with the song.
+
+- **Worse integrity** takes effect at once. **A repair** holds the old
+  tier until the first beat at least 0.1 s past the render head, then
+  snaps there; the lock chime plays when the snap is heard.
+- **Boost** overdrives: the drums lose three more bits and the drums,
+  lead and arp crush drive.
+- **The immediate path** is the stream's volume, applied as the device
+  plays: a hard wall hit dips it to 40% for 40 ms, an ICE strike silences it
+  for a 16th.
+
+`damage=0` (`--damage=0`, `?damage=0`) keeps the song clean whatever the
+integrity, with no dips; the drift gate's captures use it, since their
+reference is the clean song. `test/test-damage.sgl` measures each tier in
+audio against the settled numbers (holes 16th by 16th, the detune's
+peaks, bit depths, cutout depth, stem levels, static levels) and the
+repair's snap; `test/test-inserts.sgl` checks that the clean song is
+unchanged by the inserts and the static silent at rest.
+
+The engine's level is the `engine-db` tuning knob, -4 dB by default.

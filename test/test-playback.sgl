@@ -53,7 +53,7 @@
       (assert-true (> (abs (- 226800 (vector-ref land 3))) (* RATE 0.060)))
       (playback-close! b)))
 
-  (test "all seven insert channels expose their intended live parameters"
+  (test "all eight insert channels expose their intended live parameters"
     (let* ((b (playback-open tune RATE (conductor-new 'lap1) MUSIC-INSERTS))
            (p (playback-player b)))
       (for-each (lambda (channel)
@@ -63,5 +63,6 @@
       (assert-true (memq 'cutoff (player-insert-params p 4)))
       (assert-true (memq 'depth (player-insert-params p 5)))
       (assert-true (memq 'gain (player-insert-params p 6)))
-      (assert-equal '() (player-insert-params p 8))
+      ;; ICE takes no damage; its insert carries the signal's static
+      (assert-equal '(crackle hiss static) (list-sort (lambda (a b) (string<? (symbol->string a) (symbol->string b))) (player-insert-params p 8)))
       (playback-close! b))))
