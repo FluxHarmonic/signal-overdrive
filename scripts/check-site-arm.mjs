@@ -39,9 +39,9 @@
 //   logo       the wordmark steps through its glitch frames by itself, and
 //              under prefers-reduced-motion stays /logo.png for a whole
 //              glitch cycle (the glitch is the positive control)
-//   play       GET IN is a disabled button that says so, a click on it goes
-//              nowhere, the page says it is coming soon, and nothing on the
-//              landing links the game's path yet
+//   play       GET IN is a link to the game's path, not a disabled button,
+//              nothing says it is coming soon, and a click on it opens the
+//              game there (the game's own page, which comes up ready)
 //   carousel   the pictures change by themselves (the caption silent while they
 //              do), a click on a dot shows that picture and its caption and
 //              stops the rotation, keyboard focus on a dot pauses it, one
@@ -394,33 +394,34 @@ try {
     if (detail.length) bad("logo", detail.join("; "));
   }
 
-  // ---- play: disabled until 0.1 ------------------------------------------------------------
+  // ---- play: GET IN opens the game ---------------------------------------------------------
   {
     const detail = [];
     const p = await evalJS(`(() => {
-      const b = document.querySelector(".play button");
-      const links = [...document.querySelectorAll("a")].map((a) => new URL(a.href, location.href)).filter((u) => u.origin === location.origin && (u.pathname === "/${SLUG}" || u.pathname.startsWith("/${SLUG}/")));
-      return { button: !!b, disabled: b && b.disabled, text: b && b.textContent.trim(), how: (document.querySelector(".play .how") || {}).textContent || "",
-               anchor: !!document.querySelector(".play a"), gameLinks: links.map((u) => u.pathname) };
+      const a = document.querySelector(".play a");
+      const u = a && new URL(a.href, location.href);
+      return { anchor: !!a, same: !!u && u.origin === location.origin, path: u ? u.pathname : "", text: a && a.textContent.trim(),
+               button: !!document.querySelector(".play button"), how: (document.querySelector(".play .how") || {}).textContent || "" };
     })()`);
-    if (!p.button) detail.push("no PLAY button in .play");
+    if (!p.anchor) detail.push("no GET IN link in .play");
     else {
-      if (!p.disabled) detail.push("PLAY is not disabled");
-      if (p.text !== "GET IN") detail.push(`the button says "${p.text}"`);
+      if (!p.same || p.path !== `/${SLUG}/`) detail.push(`GET IN goes to ${p.same ? "" : "another origin, "}${p.path} (want /${SLUG}/)`);
+      if (p.text !== "GET IN") detail.push(`the link says "${p.text}"`);
     }
-    if (p.anchor) detail.push(".play holds a link");
-    if (!/coming soon/i.test(p.how)) detail.push(`the line under it says "${p.how}"`);
-    if (p.gameLinks.length) detail.push(`the landing links the game: ${p.gameLinks.join(", ")}`);
-    // a real click on it: the page must not go anywhere
-    if (p.button) {
-      const before = await evalJS("location.href");
-      const xy = await evalJS(`(() => { const b = document.querySelector(".play button"); b.scrollIntoView({block: "center"}); const r = b.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+    if (p.button) detail.push(".play still holds a button");
+    if (/coming soon/i.test(p.how)) detail.push(`the line under it says "${p.how}"`);
+    // a real click on it: the game's page, and the game comes up
+    if (p.anchor) {
+      const l0 = consoleLines.length;
+      const xy = await evalJS(`(() => { const a = document.querySelector(".play a"); a.scrollIntoView({block: "center"}); const r = a.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
       for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: xy[0], y: xy[1], button: "left", clickCount: 1 });
-      await sleep(800);
-      const after = await evalJS("location.href");
-      if (after !== before) detail.push(`a click on PLAY went to ${after}`);
+      const ready = await waitFor(async () => consoleLines.slice(l0).some((l) => READY.test(l)), 60000);
+      const after = await evalJS("location.pathname");
+      if (after !== `/${SLUG}/`) detail.push(`a click on GET IN went to ${after}`);
+      else if (!ready) detail.push(`a click on GET IN opened ${after}, but the game did not come up ready in 60 s`);
+      await visit("/");
     }
-    detail.length ? bad("play", detail.join("; ")) : ok("play", `GET IN is a disabled button, a click stays on /, "${p.how.trim()}", and nothing links /${SLUG}/ yet`);
+    detail.length ? bad("play", detail.join("; ")) : ok("play", `GET IN links /${SLUG}/, a click opens the game there and it comes up ready, "${p.how.trim()}"`);
   }
 
   // ---- carousel ----------------------------------------------------------------------------
@@ -493,7 +494,7 @@ try {
       const m = await evalJS(`(() => { const d = document.documentElement;
         const box = (s) => { const e = document.querySelector(s); if (!e) return null; const r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.right)]; };
         return { vw: window.innerWidth, screen: screen.width, sw: Math.max(d.scrollWidth, document.body.scrollWidth),
-                 play: box(".play button"), logo: box("h1.logo img") }; })()`);
+                 play: box(".play a"), logo: box("h1.logo img") }; })()`);
       got.push(`${p} ${m.sw}/${m.vw}`);
       // a mobile browser widens the layout to fit content wider than the
       // screen (and zooms out), so a wide page shows as innerWidth > 390
@@ -501,7 +502,7 @@ try {
       else if (m.vw > 390) detail.push(`${p} forced a ${m.vw} px layout on a 390 px phone (something is wider than the screen)`);
       if (m.sw > m.vw) detail.push(`${p} is ${m.sw} px wide on a ${m.vw} px screen`);
       for (const [k, b] of [["GET IN", m.play], ["the logo", m.logo]]) if (b && (b[0] < 0 || b[1] > m.vw)) detail.push(`${p}: ${k} spans ${b[0]}..${b[1]} px on a ${m.vw} px screen`);
-      if (p === "/" && (!m.play || !m.logo)) detail.push("/: no PLAY button or logo to measure");
+      if (p === "/" && (!m.play || !m.logo)) detail.push("/: no GET IN link or logo to measure");
     }
     await send("Emulation.clearDeviceMetricsOverride");
     detail.length ? bad("phone", detail.join("; ")) : ok("phone", `no horizontal scroll at 390 px: ${got.join(", ")} (content/viewport px); the logo and GET IN on screen`);
@@ -519,7 +520,7 @@ try {
       const lum = (c) => { const [r, g, b] = c.map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
       const bgOf = (e) => { for (let x = e; x; x = x.parentElement) { const b = rgb(getComputedStyle(x).backgroundColor); if (b.a > 0) return b.c; } return rgb(getComputedStyle(document.documentElement).backgroundColor).c; };
       const out = [];
-      for (const sel of [".tagline", ".pitch p", ".pitch a", ".carousel .caption", ".play button", ".play .badge", ".play .how", "h2", ".music p", ".early", ".made p", "footer p", "footer a", "h1.name", ".lost p", ".lost a"]) {
+      for (const sel of [".tagline", ".pitch p", ".pitch a", ".carousel .caption", ".play a", ".play .how", "h2", ".music p", ".early", ".made p", "footer p", "footer a", "h1.name", ".lost p", ".lost a"]) {
         const e = document.querySelector(sel); if (!e) continue;
         const cs = getComputedStyle(e), px = parseFloat(cs.fontSize), bold = Number(cs.fontWeight) >= 700;
         const fg = rgb(cs.color).c, bg = bgOf(e), L1 = lum(fg), L2 = lum(bg);

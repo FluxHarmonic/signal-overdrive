@@ -92,8 +92,8 @@ h1.logo img {
 .pitch { margin-top: 2.5rem; }
 .pitch p, .music p { margin: 0 0 1em; }
 
-/* GET IN: not out yet, so a disabled button, not a link. When the game
-   ships it becomes <a href="/drive/"> with the .play a rules below. No
+/* GET IN: a link to the game at /drive/ (the .play a rules below; the
+   disabled button's rules are for a time the game is not playable). No
    version number goes in the page's copy. */
 .play { text-align: center; margin: 2.5rem 0 3rem; }
 .play a, .play button {
