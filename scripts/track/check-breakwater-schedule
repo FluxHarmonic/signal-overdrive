@@ -1,0 +1,14 @@
+#!/bin/sh
+# Phantom-only source generation checkpoint, not complete cup acceptance.
+set -eu
+cd "$(dirname "$0")/../.."
+track_run="$1"
+mkdir -p "$track_run"
+trap 'track_code=$?; printf "RESULT: Breakwater schedule generation exit %s; full cup acceptance remains separate\n" "$track_code" > "$track_run/RESULT"' EXIT
+printf 'authoring schema, schedule and D37 rule sabotages\n' > "$track_run/STAGE"
+node --test scripts/track/schedule.test.mjs scripts/track/combined-ice.test.mjs > "$track_run/tests.log" 2>&1
+printf 'strict Breakwater data and texture generation\n' > "$track_run/STAGE"
+node scripts/art/gen-track.mjs --track breakwater > "$track_run/generate.log" 2>&1
+printf 'shared game D37 placement of every Breakwater layout\n' > "$track_run/STAGE"
+node scripts/track/placement-report.mjs "$track_run/placement.json" tracks/breakwater.json > "$track_run/placement.log" 2>&1
+printf 'finished\n' > "$track_run/STAGE"

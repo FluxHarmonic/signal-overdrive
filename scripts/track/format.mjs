@@ -22,9 +22,9 @@ export function worldSize(source) {
 }
 
 export function scheduleLayer(source, layer) {
-  const zone = source.musicZones.find(zone => zone.kind === "firewall"
-    && (zone.id === layer.id || zone.id === `${layer.id}-firewall`));
-  const kind = layer.kind ?? (zone ? "firewall" : "seeded-static");
+  const zone = source.musicZones.find(zone => ["firewall", "drone"].includes(zone.kind)
+    && (zone.id === layer.id || zone.id === `${layer.id}-${zone.kind}`));
+  const kind = layer.kind ?? zone?.kind ?? "seeded-static";
   return { ...layer, kind,
     fromLap: layer.fromLap ?? (zone ? (zone.sections.includes("lap2") ? 2 : 3) : 1),
     phraseBars: layer.phraseBars ?? (kind === "seeded-static" ? 0 : 1),
@@ -129,7 +129,7 @@ export function validateTrack(t) {
     interval([section.from, section.to, -1, 1]);
   }
   for (const zone of t.musicZones) {
-    if (!zone.id || !["drop", "searchlights", "firewall"].includes(zone.kind)
+    if (!zone.id || !["drop", "searchlights", "firewall", "drone"].includes(zone.kind)
       || !Array.isArray(zone.sections)) fail("invalid music zone");
     if (!zone.sections.length || zone.sections.some(mark => !expected.some(e => e.mark === mark))) fail("unknown music zone section");
     interval([zone.from, zone.to, -1, 1]);

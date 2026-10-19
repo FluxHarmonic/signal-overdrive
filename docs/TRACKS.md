@@ -48,7 +48,7 @@ the line. Lateral coordinates are half-width units: −1 left, +1 right.
 | `zones.ice` | `[[from, to, left, right], ...]`; static ICE |
 | `iceLayers` | `[{id, layouts: [{id, zones: [...]}, ...]}, ...]` |
 | `sections` | `[{id, from, to, label}, ...]`; map annotations |
-| `musicZones` | `[{id, kind, from, to, sections: [mark,...]}, ...]`; `drop`, `searchlights`, `firewall` |
+| `musicZones` | `[{id, kind, from, to, sections: [mark,...]}, ...]`; `drop`, `searchlights`, `firewall`, `drone` |
 | `decoration` | `{puddles: 70}`; deterministic paint seed remains 7 |
 
 Intervals have `0 <= from < to <= 1`. Split intervals that cross the line.
@@ -209,8 +209,24 @@ observed crossings; no future lap/finish oracle is needed. An unknown future
 owner cannot establish a free tracer reservation, so the planner yields.
 The gate uses complete actual crossing history from the AI/replay report.
 Runtime placement results include stretch ID, reservation end, strip centre
-and telegraph tick. Visuals, hits and rival avoidance remain integration work;
-the existing playable oval has no automatic live hazards.
+and telegraph tick. `(signal ice runtime)` advances the same scheduler in the
+race, publishes warnings before strikes, and retains life-plus-bar reservations.
+`(signal ice placement)` supplies the shared local-curvature, checksum and
+1900-texel visibility admission. Future crests/terrain need an occlusion test.
+The combined CLI executes these actual Sigil modules; disagreement with its
+independent JavaScript diagnostic oracle is a failure. It also checks all three
+shared tier contracts, including tracer bars shifted by tier telegraph/cadence.
+
+`(signal tiers)` owns LEARNER/COURIER/ELITE pace and ICE density as data.
+`race-new` takes `tier:`, `mode:` (`run` or `time-trial`) and `seed:` keywords;
+flow passes these selections and must not scale rival pace itself. Time trial
+removes rivals and ICE. Finale rivals Null and Void alternate eight-bar turns.
+Null announces lane changes a beat ahead. Void's reserved, telegraphed wake
+counts in the corridor guard, clears at handoff, and mutes music only on contact
+while playback time advances. Rival bodies are excluded from the ICE gate.
+Curved active/warning meshes and dedicated pair sprites are wired into the
+scene; source/native/audio/draw tests remain separate from track acceptance.
+The handling oval has no authored automatic live hazards.
 
 The generated/probe data roundtrip includes the full schedule; cross-language
 parity checks exercise the actual runtime adapters over seeds, cadence/phrase

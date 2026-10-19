@@ -5,6 +5,14 @@ import { ICE_RULES, liveContract, contractList, sigilData, mergeArcs,
   buildStretches, barTick, layerLive, layoutAt } from "./schedule.mjs";
 
 const source = () => structuredClone(loadTrack("tracks/oval.json"));
+test("music annotations preserve an authored drone schedule binding",()=>{
+  const track=source();
+  track.musicZones.push({id:"swarm-drone",kind:"drone",from:.2,to:.3,sections:["traced"]});
+  track.iceLayers=[{id:"swarm",fromLap:3,phraseBars:4,upBars:1,downBars:1,phaseBars:1,
+    layouts:[{id:"left",zones:[[.2,.3,-1,-.2]]}]}];
+  validateTrack(track);
+  assert.equal(liveContract(track).layers.find(layer=>layer.id==="swarm").kind,"drone");
+});
 test("author schedule fields use drone and reject unknown/malformed cadence", () => {
   const track = source();
   track.iceLayers = [{ id:"swarm", kind:"drone", fromLap:2, phraseBars:4,

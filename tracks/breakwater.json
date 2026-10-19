@@ -405,6 +405,12 @@
   "iceLayers": [
     {
       "id": "lighthouse",
+      "kind": "firewall",
+      "fromLap": 3,
+      "phraseBars": 4,
+      "upBars": 1,
+      "downBars": 1,
+      "phaseBars": 0,
       "layouts": [
         {
           "id": "left",
@@ -432,6 +438,12 @@
     },
     {
       "id": "seawall",
+      "kind": "drone",
+      "fromLap": 3,
+      "phraseBars": 4,
+      "upBars": 1,
+      "downBars": 1,
+      "phaseBars": 1,
       "layouts": [
         {
           "id": "left",
@@ -440,7 +452,7 @@
               0.75,
               0.78,
               -1,
-              0.2
+              -0.2
             ]
           ]
         },
@@ -450,8 +462,8 @@
             [
               0.75,
               0.78,
-              -0.6,
-              0.6
+              -0.4,
+              0.4
             ]
           ]
         },
@@ -461,7 +473,7 @@
             [
               0.75,
               0.78,
-              -0.2,
+              0.2,
               1
             ]
           ]
@@ -568,8 +580,8 @@
       ]
     },
     {
-      "id": "seawall-firewall",
-      "kind": "firewall",
+      "id": "seawall-drone",
+      "kind": "drone",
       "from": 0.75,
       "to": 0.78,
       "sections": [
