@@ -30,6 +30,10 @@
   ;; public from 0.1: robots.txt allows everything, no X-Robots-Tag on the
   ;; site, and only the 404 page asks not to be indexed
   indexing: index
+  ;; stage-web rewrites the wasm URL before this hook generates the final
+  ;; precache inventory. No shared infrastructure needs a game-specific rule.
+  stage-hook: (argv: ("node" "scripts/prepare-pwa.mjs" "{dir}/drive")
+               outputs: ("drive/sw.js" "drive/pwa-build.json"))
   ;; site/'s tracked files, whole
   site: (source: "site"
          copy: tracked

@@ -38,6 +38,8 @@
                        (string-replace (string-replace page "__VERSION__" stamp)
                                        "__TITLE__" "Signal Overdrive"))
     (write-file-string (path-join out "build.txt") (string-append stamp "\n"))
+    (unless (= 0 (process-run "node" "scripts/prepare-pwa.mjs" out))
+      (error "PWA preparation failed"))
     (display "  web stamp ") (display stamp) (newline)
     ctx))
 

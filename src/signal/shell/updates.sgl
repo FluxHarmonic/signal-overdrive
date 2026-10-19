@@ -1,0 +1,36 @@
+;;; (signal shell updates) - The menu/page bridge, with Crash's protocol.
+;;; The flow owns menu presentation and calls update-menu! each frame.
+;;; Choosing INSTALL UPDATE calls update-choose!; the page consumes it once.
+;;; A pause menu or results screen never grants permission to replace play.
+(define-library (signal shell updates)
+  (export update-waiting? update-menu! update-menu? update-choose!
+          update-notify! update-take-choice! update-blocked?)
+  (begin
+    (define *waiting* #f)
+    (define *menu* #f)
+    (define *chosen* #f)
+    (define *blocked* #f)
+
+    (define (update-waiting?) *waiting*)
+    (define (update-menu?) *menu*)
+    (define (update-blocked?) *blocked*)
+
+    (define (update-menu! visible?)
+      (set! *menu* visible?)
+      (unless visible? (set! *chosen* #f)))
+
+    (define (update-notify! state)
+      (cond ((string=? state "waiting")
+             (set! *waiting* #t))
+            ((string=? state "blocked")
+             (set! *blocked* #t))))
+
+    (define (update-choose!)
+      (when (and *waiting* *menu*)
+        (set! *chosen* #t)
+        (set! *blocked* #f)))
+
+    (define (update-take-choice!)
+      (let ((chosen (and *menu* *chosen*)))
+        (set! *chosen* #f)
+        chosen))))

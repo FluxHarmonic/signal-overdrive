@@ -1,0 +1,108 @@
+#!/bin/sh
+# Package an already verified release on Phantom; no compile, tag or publish.
+# After a successful clean build there, record its commit explicitly:
+#   git rev-parse HEAD > build/release/BUILD-SHA
+#   scripts/package-linux build/release build/native-dist
+# The resulting archive launches with ./FOLDER/bin/signal-overdrive on Guix
+# and, after relocation validation, on ordinary Linux distributions.
+set -eu
+repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$repo_root"
+die() { printf 'package-linux: REFUSED: %s\n' "$*" >&2; exit 1; }
+release_arg=${1:-build/release}
+dist_arg=${2:-build/native-dist}
+[ "$#" -le 2 ] || die "usage: package-linux [RELEASE-DIR [OUTPUT-DIR]]"
+[ -d "$release_arg" ] || die "no release directory $release_arg"
+release_dir=$(CDPATH= cd -- "$release_arg" && pwd)
+[ -x "$release_dir/bin/signal-overdrive" ] || die "release executable missing"
+[ -d "$release_dir/assets" ] || die "release assets missing"
+[ -f "$release_dir/BUILD-SHA" ] || die "no BUILD-SHA receipt from the clean successful build"
+build_sha=$(cat "$release_dir/BUILD-SHA")
+head_sha=$(git rev-parse HEAD)
+[ "$build_sha" = "$head_sha" ] || die "release receipt does not match HEAD"
+[ -z "$(git status --porcelain --untracked-files=all)" ] || die "checkout has changes; package only the recorded source commit"
+[ -z "${SIGIL_REDIRECTS:-}" ] || die "SIGIL_REDIRECTS is set"
+[ ! -e dev-redirects.sgl ] || die "dependency redirects exist"
+for program in guix tar sha256sum readelf; do
+  command -v "$program" >/dev/null 2>&1 || die "$program is required on the packaging host"
+done
+mkdir -p "$dist_arg"
+dist_dir=$(CDPATH= cd -- "$dist_arg" && pwd)
+short_sha=$(printf '%s' "$build_sha" | cut -c1-12)
+pack_name=signal-overdrive-linux-$short_sha
+archive=$dist_dir/$pack_name.tar.gz
+[ ! -e "$archive" ] || die "$archive exists; preserve existing review artifacts"
+task_work=$(mktemp -d "${TMPDIR:-/tmp}/signal-native-pack.XXXXXX")
+archive_part=
+trap 'rm -rf "$task_work"; if [ -n "$archive_part" ]; then rm -f "$archive_part"; fi' EXIT HUP INT TERM
+payload=$task_work/payload
+mkdir -p "$payload/bin"
+cp "$release_dir/bin/signal-overdrive" "$payload/bin/"
+# Dereference link-assets' build-tree symlinks: the pack must contain the
+# actual art, audio and license bytes, not paths back into a checkout.
+cp -RL "$release_dir/assets" "$payload/assets"
+cp LICENSE NOTICE "$payload/"
+printf '%s\n' "$build_sha" > "$payload/BUILD-SHA"
+sha256sum "$payload/bin/signal-overdrive" | cut -d' ' -f1 > "$payload/BINARY-SHA256"
+sha256sum sigil.lock | cut -d' ' -f1 > "$payload/LOCK-SHA256"
+readelf -hW "$payload/bin/signal-overdrive" > "$payload/ELF.txt"
+readelf -lW "$payload/bin/signal-overdrive" >> "$payload/ELF.txt"
+readelf -dW "$payload/bin/signal-overdrive" >> "$payload/ELF.txt"
+readelf -VW "$payload/bin/signal-overdrive" >> "$payload/ELF.txt"
+interpreter=$(readelf -lW "$payload/bin/signal-overdrive" | sed -n 's/.*Requesting program interpreter: \(.*\)]/\1/p')
+case "$interpreter" in
+  /gnu/store/*/lib/ld-linux-x86-64.so.2) ;;
+  *) die "expected the original Guix x86-64 ELF interpreter, got $interpreter" ;;
+esac
+[ -x "$interpreter" ] || die "the build's ELF interpreter is missing"
+"$interpreter" --list "$payload/bin/signal-overdrive" > "$payload/ELF-LIBRARIES.txt"
+if grep -q 'not found' "$payload/ELF-LIBRARIES.txt"; then
+  die "the build's loader could not resolve its dependencies"
+fi
+elf_roots=$({ printf '%s\n' "$interpreter"; cat "$payload/ELF-LIBRARIES.txt"; } |
+  sed -n 's#.*\(/gnu/store/[^/ ]*\)/.*#\1#p' | sort -u)
+[ -n "$elf_roots" ] || die "no exact ELF runtime closure discovered"
+guix describe -f channels > "$payload/channels.scm"
+SIGNAL_NATIVE_PAYLOAD=$payload SIGNAL_NATIVE_STAMP=$short_sha SIGNAL_NATIVE_ELF_ROOTS=$elf_roots \
+  guix pack -RR -S /bin=bin -m packaging/linux-pack.scm \
+  -r "$task_work/pack-root"
+pack_file=$(readlink -f "$task_work/pack-root")
+[ -f "$pack_file" ] || die "Guix wrote no pack"
+delivery=$task_work/$pack_name
+mkdir -p "$delivery"
+tar -xf "$pack_file" -C "$delivery"
+[ -x "$delivery/bin/signal-overdrive" ] || die "relocatable launcher missing from pack"
+cp LICENSE NOTICE "$delivery/"
+cp "$payload/BUILD-SHA" "$payload/BINARY-SHA256" "$payload/LOCK-SHA256" \
+   "$payload/ELF.txt" "$payload/ELF-LIBRARIES.txt" "$payload/channels.scm" "$delivery/"
+cat > "$delivery/README.txt" <<TXT
+Signal Overdrive - Linux review build $short_sha
+
+From any directory, run the launcher's path:
+  ./$pack_name/bin/signal-overdrive
+
+This archive carries the runtime libraries and changes into the game's asset
+directory for you. No Guix installation, dependency download or build is needed
+when launching it. Keep bin/ and gnu/ together. Saves are stored outside the
+archive in XDG_DATA_HOME/signal-overdrive or ~/.local/share/signal-overdrive.
+
+Requires a Linux x86-64 desktop with an X11 or Wayland session, an OpenGL driver,
+and a PulseAudio-compatible sound server (PulseAudio or PipeWire). Relocation
+uses a user namespace when allowed and PRoot as a fallback. This packaging step
+does not certify graphics/audio on another distro: run the release acceptance
+before calling the artifact verified. ELF.txt and channels.scm record its build
+runtime. LICENSE, NOTICE and assets' license files apply to their respective
+contents. Source: the exact commit recorded in BUILD-SHA.
+TXT
+archive_part=$(mktemp "$dist_dir/.signal-native-archive.XXXXXX")
+tar --sort=name --owner=0 --group=0 --numeric-owner -czf "$archive_part" \
+    -C "$task_work" "$pack_name"
+# Publish the local artifact atomically without replacing an existing one.
+# This is a filesystem write in build/, not a website/release publication.
+ln "$archive_part" "$archive" || die "$archive already exists or could not be created"
+rm -f "$archive_part"
+archive_part=
+(cd "$dist_dir" && sha256sum "$pack_name.tar.gz" > "$pack_name.tar.gz.sha256")
+printf 'ARCHIVE=%s\n' "$archive"
+printf 'RUN=./%s/bin/signal-overdrive\n' "$pack_name"
+printf 'package-linux: packaged; runtime smoke and laptop copy still required\n' >&2
