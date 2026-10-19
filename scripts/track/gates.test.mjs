@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadTrack, validateTrack } from "./format.mjs";
 import { sampleDefinition, trackDefinition } from "./geometry.mjs";
-import { geometryGates, freeLane, tileGate, readability, projectGround } from "./gates.mjs";
+import { geometryGates, parGate, freeLane, tileGate, readability, projectGround } from "./gates.mjs";
 import { Canvas, C } from "../art/lib.mjs";
 import { timeline } from "./preview.mjs";
 
@@ -10,8 +10,8 @@ const source = loadTrack("test/fixtures/tracks/retired-loop.json");
 const geometry = sampleDefinition(trackDefinition(source));
 const gates = geometryGates(source, geometry);
 
-test("legacy radius, clearance, world bounds, lap length and lane gates pass", () => {
-  for (const name of ["radius", "separation", "world", "lapLength", "freeLane"]) {
+test("legacy radius, clearance, world bounds and static lane gates pass", () => {
+  for (const name of ["radius", "separation", "world", "freeLane"]) {
     assert.equal(gates[name].pass, true, name);
   }
 });
@@ -79,11 +79,19 @@ test("sabotage: road outside world fails bounds", () => {
   assert.equal(geometryGates(source, bad).world.pass, false);
 });
 
-test("sabotage: overlong race fails lap length; oval exemption is explicit", () => {
-  const bad = { ...geometry, LENGTH: geometry.LENGTH * 2 };
-  assert.equal(geometryGates(source, bad).lapLength.pass, false);
+test("par timing: 20s and 40s laps fail, 25..35s pass; top speed cannot reject a valid par", () => {
+  for (const seconds of [20, 25, 30, 35, 40]) {
+    const driven = { id: source.id, threeLapsAllRacers: true,
+      lapTicks: [seconds * 60 + 60, seconds * 60, seconds * 60 + 30] };
+    assert.equal(parGate(source, driven).pass, seconds >= 25 && seconds <= 35);
+    assert.equal(parGate(source, driven).seconds, seconds);
+  }
+  // Length/top is informational: realistic corner speeds can make a shorter
+  // track meet par. Geometry has no separate minimum-length rejection.
+  assert.equal(Object.hasOwn(gates, "lapLength"), false);
+  assert.equal(parGate(source, null).pass, false);
   const oval = loadTrack("tracks/oval.json");
-  const result = geometryGates(oval, sampleDefinition(trackDefinition(oval))).lapLength;
+  const result = parGate(oval, { id: oval.id, threeLapsAllRacers: true, lapTicks: [960, 900, 915] });
   assert.equal(result.pass, true);
   assert.equal(result.exempt, true);
   assert.ok(result.seconds < 25);

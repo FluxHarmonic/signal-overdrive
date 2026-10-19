@@ -8,7 +8,9 @@ if (!output || !files.length) throw new Error("usage: report.mjs output.json tra
 const results = files.map(file => {
   const source = loadTrack(file);
   const g = sampleDefinition(trackDefinition(source));
-  return { file, id: source.id, length: g.LENGTH, gates: geometryGates(source, g, DEFAULTS) };
+  return { file, id: source.id, length: g.LENGTH, topSpeedSeconds: g.LENGTH / DEFAULTS.top,
+    par: { complete: false, method: "Run runtime.mjs and ai.sgl for measured par; length/top is informational only" },
+    gates: geometryGates(source, g, DEFAULTS) };
 });
 fs.writeFileSync(output, JSON.stringify(results, null, 2) + "\n");
 for (const result of results) {

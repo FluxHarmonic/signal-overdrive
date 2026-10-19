@@ -1,0 +1,140 @@
+{
+  "id": "quayside",
+  "crossings": [
+    {
+      "lap": 1,
+      "tick": 462
+    },
+    {
+      "lap": 2,
+      "tick": 2412
+    },
+    {
+      "lap": 3,
+      "tick": 4305
+    },
+    {
+      "lap": 4,
+      "tick": 6198
+    }
+  ],
+  "pass": false,
+  "required": 27,
+  "narrowest": 0,
+  "checkedStates": 837,
+  "transitions": 38,
+  "witness": {
+    "tick": 4320,
+    "bar": 42,
+    "lap": 3,
+    "s": 0.625,
+    "layouts": [
+      "firewall:harbour-wall/left->left",
+      "firewall:back-basin/left->right"
+    ],
+    "tracerCenter": null,
+    "tracerLive": false,
+    "active": [
+      [
+        -1,
+        0.2
+      ],
+      [
+        -0.2,
+        1
+      ]
+    ],
+    "activeOwners": [
+      "firewall:back-basin/left->right",
+      "firewall:back-basin/left->right"
+    ],
+    "transition": true
+  },
+  "firstFailure": {
+    "tick": 4320,
+    "bar": 42,
+    "lap": 3,
+    "s": 0.625,
+    "layouts": [
+      "firewall:harbour-wall/left->left",
+      "firewall:back-basin/left->right"
+    ],
+    "tracerCenter": null,
+    "tracerLive": false,
+    "active": [
+      [
+        -1,
+        0.2
+      ],
+      [
+        -0.2,
+        1
+      ]
+    ],
+    "activeOwners": [
+      "firewall:back-basin/left->right",
+      "firewall:back-basin/left->right"
+    ],
+    "transition": true,
+    "width": 0
+  },
+  "firstTracerFirewallFailure": {
+    "tick": 4423,
+    "bar": 43,
+    "lap": 3,
+    "s": 0.4,
+    "layouts": [
+      "firewall:harbour-wall/left->left",
+      "firewall:back-basin/left->left"
+    ],
+    "tracerCenter": 0.6136363636363636,
+    "tracerLive": true,
+    "active": [
+      [
+        -1,
+        0.2
+      ],
+      [
+        -1,
+        0.2
+      ],
+      [
+        0.2272727272727273,
+        1
+      ]
+    ],
+    "activeOwners": [
+      "firewall:harbour-wall/left->left",
+      "firewall:harbour-wall/left->left"
+    ],
+    "transition": false,
+    "beforeTracer": 70.4,
+    "width": 2.400000000000001
+  },
+  "laps": [
+    {
+      "lap": 1,
+      "fromTick": 462,
+      "toTick": 2412,
+      "narrowest": 96.80000000000001,
+      "pass": true
+    },
+    {
+      "lap": 2,
+      "fromTick": 2412,
+      "toTick": 4305,
+      "narrowest": 96.80000000000001,
+      "pass": true
+    },
+    {
+      "lap": 3,
+      "fromTick": 4305,
+      "toTick": 6198,
+      "narrowest": 0,
+      "pass": false
+    }
+  ],
+  "timing": "actual simulation lap crossings; exact conductor bar ticks",
+  "policySource": "conservative unbound live-ICE contract (all bar phases)",
+  "runtimeParity": "automatic live ICE scheduling is not implemented in the current game; runtime integration must use this policy or export an equivalent exhaustive trace"
+}

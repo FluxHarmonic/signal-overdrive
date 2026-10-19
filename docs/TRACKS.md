@@ -77,7 +77,11 @@ node scripts/track/runtime.mjs tracks/oval.json build/track/oval.sgv 0
   -- build/track/oval.sgv > build/track/oval-ai.json
 node scripts/track/preview.mjs tracks/oval.json build/track/song-contract.json \
   build/track build/track/oval-ai.json
-node --test scripts/track/gates.test.mjs
+node scripts/track/combined-ice.mjs tracks/oval.json build/track/oval-ai.json \
+  build/track/oval-combined.json
+node scripts/track/preview.mjs tracks/oval.json build/track/song-contract.json \
+  build/track build/track/oval-ai.json build/track/oval-combined.json
+node --test scripts/track/gates.test.mjs scripts/track/combined-ice.test.mjs
 ```
 
 Every command that finds a failing gate exits nonzero. Reports retain
@@ -91,12 +95,23 @@ JSON discovery by the authoring tools does not register gameplay menus.
 
 ## Acceptance gates
 
-Race length/top and the AI's par lap must both be 25–35 seconds. The oval's
+Race duration must be **25–35 seconds at par**, inclusive. Length divided
+by top speed is informational and never rejects a track. The oval's
 `test` role exempts only timing, as specified by design §6.1. The actual
 game AI must complete three laps for all six racers within 180 simulated
 seconds. Radius is checked both historically (smoothed) and locally on
 dense unsmoothed spline samples: at least 1.6 half-widths. World margin,
 non-neighbour road clearance, tile budget and palette checks remain active.
+
+The par benchmark is the best of three completed player-autopilot laps
+(`min(lapTicks)/60`) from `runtime.mjs` and `ai.sgl`, using seed 0, default
+tuning and actual game physics with all six racers. The racing-line AI
+looks ahead `70 + .32*speed` texels, reduces throttle to .4 above heading
+error .45 radians, brakes .6 above .7 radians at speeds over 260, and
+drifts above .32 radians. Manual boost is off; authored pads and ICE remain
+active. Actual corner speeds determine par; 522 texels/s is a planning
+estimate, not a gate constant. Geometry-only reports and previews explicitly
+leave par pending. Supply the AI report to the preview to show measured par.
 
 Readability is frozen: each same-sign bend starts at |curvature| ≥1/5000;
 an S splits at its direction change. From 1900 texels before that entrance,
@@ -107,10 +122,59 @@ must add line-of-sight occlusion before they can be accepted. Do not tune
 the curvature threshold to make a layout pass.
 
 Each gate has a sabotage check: folded wall, local sharp corner hidden by
-smoothing, crossing roads, out-of-world road, overlong lap, hairpin hidden
+smoothing, crossing roads, out-of-world road, 20s/40s par laps, hairpin hidden
 beyond a previous corner, complementary seeded ICE blocking the road,
 over-budget atlas, non-palette pixels, mismatched song binding,
 a stalled AI (`ai.sgl -- file.sgv stall`), and the
 handling oval declared as a race (all racers finish, but par is too short). A passing
 test suite proves those refusals work; track acceptance also needs the
 track's own generated/AI reports to pass.
+The preview's acceptance fields cover geometry, measured par and combined
+ICE. Actual atlas and palette acceptance additionally requires the strict
+painter's report; `verify.mjs` checks all stages together.
+
+## Combined live ICE and layout changes
+
+Static/seeded lane reports alone do not establish gameplay fairness. Run
+the time-aware gate with the AI report's actual lap-crossing ticks:
+
+```sh
+node scripts/track/combined-ice.mjs tracks/oval.json build/track/oval-ai.json \
+  build/track/oval-combined.json
+```
+
+An optional fourth argument supplies a policy JSON file. `layers` maps an
+existing layer ID to `{kind, fromLap, phraseBars, upBars, downBars, phaseBars}`;
+`kind` is `firewall`, `drone`, `tracer` or `seeded-static`. `extraLayers`
+adds finite drone/tracer layout sets with the same schedule fields.
+The adaptive `tracer` policy has `enabled`, `fromLap`, `halfWidth`,
+`halfLength`, `periodBars`, `liveTicks`, and allowed longitudinal `centers`.
+The gate covers every legal lateral tracer target analytically, combined
+with every seeded layout of every other kind, at actual lap/bar boundaries.
+
+Without a bound live-runtime policy, race tracks use a conservative model:
+tracers from lap 3, a full bar of telegraph, 34-texel half-width and
+460-texel half-length; firewall layouts may change on any bar with no rest.
+This deliberately includes unknown phrase phases. Firewall activation is
+inferred from its music zone's lap2/traced binding. It is an authoring
+counterexample search, not a claim that live scheduling exists in runtime.
+The present game's tracer path is a developer-triggered visual effect;
+automatic gameplay firewalls and drones remain separate integration work.
+That integration must share this policy or export equivalent exhaustive
+timed footprints; a one-seed replay is insufficient.
+
+At a layout/cadence boundary, the union includes ending and starting
+hazards. Opposite free lanes cannot silently exchange sides without a
+common corridor. A full down bar allows a reset, but the combined state
+must still include other live hazards. Reports retain the first closure's
+tick, bar, lap, location, active intervals and all participating layouts.
+
+The e5213c0 Quayside and Basin snapshots retain RED measured evidence in
+`test/fixtures/tracks/evidence/`. Both pass par (31.550s and31.383s), but
+fail a zero-rest layout change and a separate tracer/firewall overlap.
+These files are counterexamples for integration, not approved track assets.
+`sh scripts/track/check-par /tmp/par-check` measures loop and both snapshots
+and proves real approximately20s/40s duration refusals. `check-followup`
+reuses an explicitly named prior atlas output plus fresh timing to verify
+that unsafe combined reports cannot satisfy final acceptance; it does not
+change a RED fixture to PASS. Native build and smoke use `check-final`.

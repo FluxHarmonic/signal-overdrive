@@ -23,9 +23,10 @@
 <text x="670" y="207">PASS trueRadius</text>
 <text x="670" y="233">PASS separation</text>
 <text x="670" y="259">PASS world</text>
-<text x="670" y="285">EXEMPT lapLength</text>
-<text x="670" y="311">PASS readability</text>
-<text x="670" y="337">PASS freeLane</text>
+<text x="670" y="285">PASS readability</text>
+<text x="670" y="311">PASS freeLane</text>
+<text x="670" y="337">EXEMPT par lap (15.250 s)</text>
+<text x="670" y="363">PASS combined live ICE</text>
 <text x="32" y="758">Song targets across three laps — ideal top-speed prediction</text>
 <text x="32" y="805">Lap 1</text>
 <rect x="125" y="785" width="1000" height="35" fill="#333144"/>

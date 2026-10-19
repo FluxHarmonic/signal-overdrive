@@ -7,7 +7,7 @@ mkdir -p "$track_run"
 trap 'track_code=$?; printf "RESULT: pipeline exit %s; inspect STAGE and per-track JSON/status files\n" "$track_code" > "$track_run/RESULT"' EXIT
 track_sigil="$HOME/.sigil/versions/0.22.11/sigil"
 printf 'gate and sabotage tests\n' > "$track_run/STAGE"
-node --test scripts/track/gates.test.mjs > "$track_run/tests.log" 2>&1
+node --test scripts/track/gates.test.mjs scripts/track/combined-ice.test.mjs > "$track_run/tests.log" 2>&1
 printf 'geometry reports\n' > "$track_run/STAGE"
 track_code=0
 node scripts/track/report.mjs "$track_run/current-gates.json" tracks/oval.json \
@@ -27,6 +27,11 @@ for track_file in tracks/oval.json test/fixtures/tracks/reshaped/quayside.json t
   timeout 180 "$track_sigil" -L src eval -f scripts/track/ai.sgl -- "$track_run/$track_id.sgv" \
     > "$track_run/$track_id-ai.json" 2> "$track_run/$track_id-ai.log" || track_code="$?"
   printf '%s\n' "$track_code" > "$track_run/$track_id-ai-status"
+  printf 'combined timed ICE gate: %s\n' "$track_id" > "$track_run/STAGE"
+  track_code=0
+  node scripts/track/combined-ice.mjs "$track_file" "$track_run/$track_id-ai.json" "$track_run/$track_id-combined.json" \
+    > "$track_run/$track_id-combined.log" 2>&1 || track_code="$?"
+  printf '%s\n' "$track_code" > "$track_run/$track_id-combined-status"
   printf 'strict paint/atlas gate: %s\n' "$track_id" > "$track_run/STAGE"
   track_code=0
   node scripts/art/gen-track.mjs --file "$track_file" --output "$track_run/art" --preview --seed 0 \
@@ -37,7 +42,7 @@ printf 'paint/probe runtime roundtrip\n' > "$track_run/STAGE"
 "$track_sigil" -L "$track_run/art/src" -L src eval -f scripts/track/roundtrip.sgl \
   -- "$track_run/oval.sgv" "$track_run/quayside.sgv" "$track_run/basin.sgv" \
   > "$track_run/roundtrip.log" 2>&1
-node scripts/track/preview.mjs tracks/oval.json "$track_run/song-contract.json" "$track_run/preview" "$track_run/oval-ai.json" \
+node scripts/track/preview.mjs tracks/oval.json "$track_run/song-contract.json" "$track_run/preview" "$track_run/oval-ai.json" "$track_run/oval-combined.json" \
   > "$track_run/oval-driven-preview.log" 2>&1
 printf 'stalled AI sabotage\n' > "$track_run/STAGE"
 track_code=0

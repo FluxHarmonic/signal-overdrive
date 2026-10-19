@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadTrack } from "./format.mjs";
 import { sampleDefinition, trackDefinition } from "./geometry.mjs";
-import { DEFAULTS, geometryGates, pointAt } from "./gates.mjs";
+import { DEFAULTS, geometryGates, parGate, pointAt } from "./gates.mjs";
 
 const escape = text => String(text).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[c]);
 const colors = ["#3be8da", "#ffa04b", "#d691ff", "#a6d46b", "#ff74aa", "#a6bbff"];
@@ -33,7 +33,7 @@ export function timeline(source, g, contract) {
     lapSeconds, gridSeconds, barSeconds, entries };
 }
 
-export function previewSvg(source, g, song, gates, driven = null) {
+export function previewSvg(source, g, song, gates, driven = null, combined = null) {
   const height = driven ? 1400 : 1100;
   const parts = [`<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="${height}" viewBox="0 0 1200 ${height}">`,
     '<style>text{font:16px monospace;fill:#e3e3ec}.small{font-size:13px}.title{font-size:28px}</style>',
@@ -79,6 +79,10 @@ export function previewSvg(source, g, song, gates, driven = null) {
     parts.push(`<text x="670" y="${y}">${gate.exempt ? "EXEMPT" : gate.pass ? "PASS" : "FAIL"} ${escape(name)}</text>`);
     y += 26;
   }
+  const par = parGate(source, driven);
+  parts.push(`<text x="670" y="${y}">${!par.complete ? "PENDING" : par.exempt ? "EXEMPT" : par.pass ? "PASS" : "FAIL"} par lap${par.seconds == null ? "" : ` (${par.seconds.toFixed(3)} s)`}</text>`);
+  y += 26;
+  parts.push(`<text x="670" y="${y}">${combined ? combined.pass ? "PASS" : "FAIL" : "PENDING"} combined live ICE</text>`);
   parts.push('<text x="32" y="758">Song targets across three laps — ideal top-speed prediction</text>');
   for (let lap = 1; lap <= 3; lap++) {
     const row = 785 + (lap - 1) * 70;
@@ -116,18 +120,26 @@ export function previewSvg(source, g, song, gates, driven = null) {
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {
-  const [trackPath, contractPath, output = "build/track", drivenPath] = process.argv.slice(2);
-  if (!trackPath || !contractPath) throw new Error("usage: node scripts/track/preview.mjs tracks/<id>.json <song-contract.json> [output-directory] [ai-report.json]");
+  const [trackPath, contractPath, output = "build/track", drivenPath, combinedPath] = process.argv.slice(2);
+  if (!trackPath || !contractPath) throw new Error("usage: node scripts/track/preview.mjs tracks/<id>.json <song-contract.json> [output-directory] [ai-report.json] [combined-ice.json]");
   const source = loadTrack(trackPath);
   const contract = JSON.parse(fs.readFileSync(contractPath, "utf8"));
   const driven = drivenPath ? JSON.parse(fs.readFileSync(drivenPath, "utf8")) : null;
+  const combined = combinedPath ? JSON.parse(fs.readFileSync(combinedPath, "utf8")) : null;
   if (driven && (driven.id !== source.id || driven.activeSong !== contract.id)) throw new Error("AI report belongs to a different track or song");
+  if (combined && (!driven || combined.id !== source.id
+    || JSON.stringify(combined.crossings) !== JSON.stringify(driven.crossings))) throw new Error("combined ICE report does not match the actual track/lap timing");
   const g = sampleDefinition(trackDefinition(source));
   const gates = geometryGates(source, g, { ...DEFAULTS, ...contract.camera });
   const song = timeline(source, g, contract);
   fs.mkdirSync(output, { recursive: true });
-  fs.writeFileSync(path.join(output, `${source.id}-preview.svg`), previewSvg(source, g, song, gates, driven));
-  fs.writeFileSync(path.join(output, `${source.id}-report.json`), JSON.stringify({ id: source.id, gates, song, actual: driven }, null, 2) + "\n");
+  fs.writeFileSync(path.join(output, `${source.id}-preview.svg`), previewSvg(source, g, song, gates, driven, combined));
+  fs.writeFileSync(path.join(output, `${source.id}-report.json`), JSON.stringify({ id: source.id, gates, song,
+    par: parGate(source, driven), actual: driven, combinedICE: combined,
+    acceptanceScope: "geometry, measured par and combined ICE; actual atlas/palette gates are checked separately by the strict painter and pipeline verifier",
+    acceptance: { complete: Boolean(parGate(source, driven).complete && combined),
+      pass: Boolean(parGate(source, driven).pass && driven?.pass && combined?.pass && Object.values(gates).every(gate => gate.pass)) } }, null, 2) + "\n");
   console.log(JSON.stringify({ id: source.id, gates }));
-  if (Object.values(gates).some(gate => !gate.pass)) process.exitCode = 1;
+  if (Object.values(gates).some(gate => !gate.pass) || (driven && !parGate(source, driven).pass)
+    || (combined && !combined.pass)) process.exitCode = 1;
 }

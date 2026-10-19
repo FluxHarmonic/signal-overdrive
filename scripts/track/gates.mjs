@@ -112,7 +112,8 @@ export function freeLane(source, c = DEFAULTS) {
     }
   }
   return { pass: narrowest >= 1.5 * c.machineWidth, combinations: combinations.length,
-    required: 1.5 * c.machineWidth, narrowest, witness };
+    required: 1.5 * c.machineWidth, narrowest, witness,
+    scope: "static and authored seed layers only; complete acceptance also requires the time-aware combined ICE gate" };
 }
 
 export function geometryGates(source, g, c = DEFAULTS) {
@@ -125,7 +126,6 @@ export function geometryGates(source, g, c = DEFAULTS) {
     separation = Math.min(separation, Math.hypot(g.P[i][0] - g.P[j][0], g.P[i][1] - g.P[j][1]));
   }
   const margin = Math.min(...g.P.flatMap(([x, y]) => [x, y, WORLD - x, WORLD - y]));
-  const seconds = g.LENGTH / c.top;
   return {
     radius: { pass: minRadius >= g.HW * 1.6, minimum: minRadius, required: g.HW * 1.6 },
     trueRadius: { pass: g.TRUE_MIN_RADIUS >= g.HW * 1.6, minimum: g.TRUE_MIN_RADIUS,
@@ -133,11 +133,23 @@ export function geometryGates(source, g, c = DEFAULTS) {
       method: "unsmoothed circumradius of consecutive dense spline samples (200 samples/control interval)" },
     separation: { pass: separation >= clearance, minimum: separation, required: clearance },
     world: { pass: margin >= g.HW + 200, margin, required: g.HW + 200 },
-    lapLength: { pass: source.role === "test" || (seconds >= 25 && seconds <= 35),
-      seconds, exempt: source.role === "test", reason: source.role === "test" ? "design section 6.1: handling fixture" : null },
     readability: readability(g, c),
     freeLane: freeLane(source, c),
   };
+}
+
+// Leader15:55: lap duration is measured AT PAR, never length/top speed.
+// The real 60 Hz race/handling probe supplies three completed lap durations.
+export function parGate(source, driven) {
+  const valid = driven?.id === source.id && driven.threeLapsAllRacers === true
+    && Array.isArray(driven.lapTicks) && driven.lapTicks.length === 3
+    && driven.lapTicks.every(tick => Number.isInteger(tick) && tick > 0);
+  const seconds = valid ? Math.min(...driven.lapTicks) / 60 : null;
+  const exempt = source.role === "test";
+  return { pass: Boolean(valid && (exempt || (seconds >= 25 && seconds <= 35))),
+    complete: Boolean(valid), seconds, minimum: 25, maximum: 35, exempt,
+    reason: exempt ? "design section 6.1: handling fixture" : null,
+    method: "Best of three completed 60 Hz player-autopilot laps using actual race/handling, default tuning, racing-line AI and all six racers; seed 0. No manual boost." };
 }
 
 export function tileGate(count) {
