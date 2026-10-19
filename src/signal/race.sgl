@@ -25,7 +25,8 @@
           (signal track)
           (signal handling)
           (signal music conductor)
-          (signal music progress))
+          (signal music progress)
+          (only (signal music song) song-select-for-track!))
 
   (export race race? race-new race-step race-start race-track
           race-phase race-tick race-player race-rivals race-clock race-countdown race-events race-start-tick race-song
@@ -101,9 +102,12 @@
       (let ((i (exact (round (race-tuning-ref tuning 'track)))))
         (track-named (list-ref TRACKS (max 0 (min (- (length TRACKS) 1) i))))))
 
+    ;; A race plays the song its track binds: selected here, before the
+    ;; conductor below reads the song's sections.
     (define (race-new tuning)
       (let* ((t (tuning-track tuning))
-             (n (max 0 (min 5 (exact (round (race-tuning-ref tuning 'rivals))))))
+             (_ (song-select-for-track! (track-name t)))
+             (n(max 0 (min 5 (exact (round (race-tuning-ref tuning 'rivals))))))
              (pace (race-tuning-ref tuning 'rival-pace))
              (slots '((0 . 0) (0 . 1) (1 . 0) (2 . 0) (2 . 1)))
              (rivals (let loop ((i 0) (acc '()))

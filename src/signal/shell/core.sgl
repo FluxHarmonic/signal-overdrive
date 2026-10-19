@@ -40,7 +40,7 @@
           (signal shell theme)
           (signal music conductor)
           (signal music clock)
-          (only (signal music song) SONG-BPM)
+          (only (signal music song) SONG-BPM song-id song-override!)
           (only (signal sfx) HIT-IMPACT))
 
   (export core-boot! core-frame! core-keys core-sticks core-pad core-param! core-touch!
@@ -392,6 +392,8 @@
       (set-store-app! GAME-NAME)
       (set-store-prefix! "signal-overdrive:")
       (set! *race* (race-new *tuning*))
+      ;; the race song its track binds, parsed now, not at the first gesture
+      (music-prepare!)
       (set! *intro* (intro-new *tuning* (eq? platform 'web)))
       ;; a boot is a new session, its title too: a start or a skip from an
       ;; earlier boot in the same process does not carry over
@@ -451,6 +453,12 @@
             ;; worklet-sab; a worklet only: worklet-msg; else scriptprocessor)
             ((and (> (string-length kv) 11) (string=? (substring kv 0 11) "audio-mode="))
              (set! *audio-mode* (substring kv 11 (string-length kv))))
+            ;; ?song=ID: every track plays that race song (checks, auditions)
+            ((and (> (string-length kv) 5) (string=? (substring kv 0 5) "song="))
+             (song-override! (string->symbol (substring kv 5 (string-length kv))))
+             (set! *race* (race-new *tuning*))
+             (music-prepare!)
+             (say "song " (symbol->string (song-id))))
             ;; ?track=oval|loop as well as ?track=0|1
             ((and (> (string-length kv) 6) (string=? (substring kv 0 6) "track=")
                   (memq (string->symbol (substring kv 6 (string-length kv))) TRACKS))
@@ -459,7 +467,7 @@
              (let ((t (tuning-parse! *tuning* kv)))
                (when t
                  (set! *tuning* t)
-                 (unless (fx-param? kv) (set! *race* (race-new *tuning*)))
+                 (unless (fx-param? kv) (set! *race* (race-new *tuning*)) (music-prepare!))
                  (say "tuning " kv))))))
 
     ;; "steer,throttle,brake,boost,drift" from the page (0/1 for the last two).
@@ -663,7 +671,8 @@
       (say "tuning " (symbol->string key) "=" (tuning-format-value (tuning-ref *tuning* key))
            " query ?" (tuning-query *tuning*))
       (when (memq key '(track laps rivals rival-pace))
-        (set! *race* (race-new *tuning*))))
+        (set! *race* (race-new *tuning*))
+        (music-prepare!)))
 
     ;; --- a frame ----------------------------------------------------------------------------
 
@@ -805,7 +814,8 @@
             (set! *music-trace-first* first)
             (set! *music-trace-log* '())
             (say "conductor reset wall " (number->string *frame-wall*)
-                 " mark " (symbol->string (conductor-section c))))
+                 " mark " (symbol->string (conductor-section c))
+                 " song " (symbol->string (song-id))))
           (for-each
             (lambda (entry)
               (unless (memq entry *music-trace-log*)

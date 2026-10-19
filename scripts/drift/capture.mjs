@@ -103,6 +103,8 @@ try {
   // --damage=0: the gate measures timing; its reference is the clean song,
   // and an ICE strike's dropout would read as a device dropout
   game = launch(path.join(ROOT, "scripts/dev"), [BIN, "--start", "--autopilot", "--track=loop", "--musiclog", "--damage=0",
+    // CONDUCTOR_SONG=ID: the race plays that song, whatever the track binds
+    ...(process.env.CONDUCTOR_SONG ? [`--song=${process.env.CONDUCTOR_SONG}`] : []),
     ...(HEADLESS ? ["--music-headless"] : []),
     ...(MUSIC_ONLY ? ["--sfx=0"] : []),
     `--music-sabotage=${ARM === "normal" ? "none" : ARM}`, "--quit-after", "400"],
@@ -187,7 +189,10 @@ try {
   fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
   const frames = Math.ceil((trace.clocks.at(-1).song + 2) * referenceRate);
   const renderLog = fs.openSync(path.join(RUN, "reference.log"), "w");
-  reference = launch(path.join(ROOT, "scripts/dev"), [BIN, "--music-reference", path.join(RUN, "intended.sgv"), path.join(RUN, "reference.pcm"), String(frames), String(referenceRate)],
+  // the reference renders the song the game says it played
+  meta.song = trace.song;
+  fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+  reference = launch(path.join(ROOT, "scripts/dev"), [BIN, ...(trace.song ? [`--song=${trace.song}`] : []), "--music-reference", path.join(RUN, "intended.sgv"), path.join(RUN, "reference.pcm"), String(frames), String(referenceRate)],
     { env: { ...env, SIGIL_AUDIO_BACKEND: "null",
       ...(GC_PROFILE ? { SIGIL_GC_STATS_FILE: path.join(RUN, "reference-gc.jsonl") } : {}) },
       stdio: ["ignore", renderLog, renderLog] });

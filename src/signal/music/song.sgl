@@ -1,15 +1,24 @@
-;;; The placeholder/Carrier interface, lowered from tune and cue-sheet data.
+;;; The race song's interface, lowered from tune and cue-sheet data.
 ;;; Order positions may contain several bars; score rows are unambiguous.
+;;;
+;;; The game carries several race songs ((signal music scores)), all on one
+;;; clock (the score compiler checks it: 140 BPM, speed 3, meter 8/4). One
+;;; is current: a race selects its track's (song-select-for-track!) before
+;;; its conductor is made, and everything here reads the current one.
 (define-library (signal music song)
   (import (sigil struct)
           (sigil math)
-          (signal music score))
+          (signal music score)
+          (signal music scores))
   (export SONG-BPM SONG-ROWS-PER-BAR SONG-ROWS-PER-BEAT SONG-TICKS-PER-ROW
           song-section song-section-mark song-section-from song-section-bars
           song-section-loop-from song-section-loop-to song-section-next
-          SONG-SECTIONS song-section-ref song-order-row score-row->position
-          song-position song-onset-mask)
+          song-sections song-section-ref song-order-row score-row->position
+          song-position song-onset-mask
+          song-id song-tune-text song-ids song-select! song-for-track
+          song-select-for-track! song-override!)
   (begin
+    ;; the shared clock (every score has Carrier's)
     (define SONG-BPM SCORE-BPM)
     (define SONG-ROWS-PER-BAR (* (car SCORE-METER) (cdr SCORE-METER)))
     (define SONG-ROWS-PER-BEAT (car SCORE-METER))
@@ -24,7 +33,7 @@
       (loop-to default: #f)
       (next default: #f))
 
-    (define SONG-SECTIONS
+    (define (lower-sections entries)
       (map (lambda (entry)
              (song-section mark: (vector-ref entry 0)
                            from: (vector-ref entry 1)
@@ -32,9 +41,44 @@
                            loop-from: (vector-ref entry 3)
                            loop-to: (vector-ref entry 4)
                            next: (vector-ref entry 5)))
-           SCORE-SECTIONS))
+           entries))
 
-    (define (song-order-row pos) (vector-ref SCORE-ORDER-OFFSETS pos))
+    ;; SCORES entries: #(id order-offsets tune-text sections onsets onset-masks)
+    (define (score-of id)
+      (let find ((ss SCORES))
+        (cond ((null? ss) (error "no such race song" id))
+              ((eq? (vector-ref (car ss) 0) id) (car ss))
+              (else (find (cdr ss))))))
+
+    (define *score* (car SCORES))
+    (define *sections* (lower-sections (vector-ref *score* 3)))
+
+    (define (song-ids) (map (lambda (s) (vector-ref s 0)) SCORES))
+    (define (song-id) (vector-ref *score* 0))
+    (define (song-tune-text) (vector-ref *score* 2))
+    (define (song-sections) *sections*)
+
+    (define (song-select! id)
+      (unless (eq? id (song-id))
+        (set! *score* (score-of id))
+        (set! *sections* (lower-sections (vector-ref *score* 3)))))
+
+    ;; A development override (?song=ID): every track plays it.
+    (define *override* #f)
+    (define (song-override! id)
+      (when id (score-of id))
+      (set! *override* id))
+
+    ;; The song a track binds (its JSON's song.id, through the score
+    ;; build), Carrier when it binds none.
+    (define (song-for-track track-name)
+      (or *override*
+          (let ((b (assq track-name TRACK-SONGS))) (and b (cdr b)))
+          (vector-ref (car SCORES) 0)))
+    (define (song-select-for-track! track-name)
+      (song-select! (song-for-track track-name)))
+
+    (define (song-order-row pos) (vector-ref (vector-ref *score* 1) pos))
 
     (define (score-row->position offsets row)
       (unless (and (exact-integer? row) (<= 0 row)
@@ -48,13 +92,13 @@
             (else (cons mid (- row (vector-ref offsets mid))))))))
 
     (define (song-position score-row)
-      (score-row->position SCORE-ORDER-OFFSETS score-row))
+      (score-row->position (vector-ref *score* 1) score-row))
 
     (define (song-onset-mask pos row)
-      (vector-ref (vector-ref SCORE-ONSET-MASKS pos) row))
+      (vector-ref (vector-ref (vector-ref *score* 5) pos) row))
 
     (define (song-section-ref mark)
-      (let find ((sections SONG-SECTIONS))
+      (let find ((sections *sections*))
         (cond
           ((null? sections) (error "unknown song section" mark))
           ((eq? mark (song-section-mark (car sections))) (car sections))
