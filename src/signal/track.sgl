@@ -2,7 +2,7 @@
 ;;; from the centreline, and whether it is on a boost pad or the repair strip.
 ;;;
 ;;; A track is its centreline sampled at even arc lengths (the generator's
-;;; samples, (signal track oval-data) and (signal track loop-data); TRACKS
+;;; samples, (signal track <id>-data), from tracks/<id>.json; TRACKS
 ;;; names them, track-named builds one): per sample x y, the unit tangent,
 ;;; the half-width and the racing line. A probe finds the nearest sample
 ;;; (near a hint when one is given, so a probe per machine per tick costs a
@@ -21,7 +21,10 @@
   (import (sigil struct)
           (sigil math)
           (signal track oval-data)
-          (signal track loop-data))
+          (signal track loop-data)
+          (signal track quayside-data)
+          (signal track basin-data)
+          (signal track breakwater-data))
 
   (export track track? track-n track-length track-step track-samples track-cumulative
           track-boost track-repair track-ice track-world-width track-world-height
@@ -79,11 +82,11 @@
                n: n length: (vector-ref cum n) step: step samples: samples cumulative: cum
                boost: boost repair: repair)))
 
-    ;; The authoring pipeline retains the oval as a handling test. The
-    ;; prototype loop fails the 0.2 gates and is retired from selection;
-    ;; its data remains available through loop-track for probe regressions.
-    ;; Approved district tracks can be added here after their gates pass.
-    (define TRACKS '(oval))
+    ;; Docklands' cup in its order (Breakwater, Quayside, Turning Basin),
+    ;; then the oval, kept as a handling test. Each passes the 0.2 gates.
+    ;; The prototype loop fails them and is retired from selection; its
+    ;; data remains available through loop-track for probe regressions.
+    (define TRACKS '(breakwater quayside basin oval))
     (define *built* '())
     (define (track-index-of name)
       (let loop ((ts TRACKS) (i 0)) (cond ((null? ts) 0) ((eq? (car ts) name) i) (else (loop (cdr ts) (+ i 1))))))
@@ -91,7 +94,7 @@
       (let ((e (assq name *built*)))
         (if e
             (cdr e)
-            (let* ((d (case name ((loop) (loop-track-data)) (else (oval-track-data))))
+            (let* ((d (case name ((loop) (loop-track-data)) ((quayside) (quayside-track-data)) ((basin) (basin-track-data)) ((breakwater) (breakwater-track-data)) (else (oval-track-data))))
                    (t (make-track (list-ref d 1) (list-ref d 2)
                                   (list-ref d 3) (list-ref d 4)
                                   (car d) (list-ref d 5)

@@ -43,7 +43,7 @@
         (palette      look     0.0    1.0    1.0   0.0     "PALETTE")))
 
     (define RACE-KNOBS
-      '((track        race     0.0    0.0    1.0   0.0     "TRACK (OVAL TEST)")
+      '((track        race     0.0    3.0    1.0   0.0     "TRACK (BREAKWATER QUAYSIDE BASIN OVAL)")
         (laps         race     1.0    9.0    1.0   3.0     "LAPS")
         (rivals       race     0.0    5.0    1.0   5.0     "RIVALS")
         (rival-pace   race     0.7    1.2    0.01  0.97    "RIVAL PACE")
