@@ -77,7 +77,8 @@ void main() {
     ;; the left rail's blocks, 17-32 the right rail's (block index mod 16),
     ;; 33-48 a pad's chevrons (position along their period, 16 steps), 49 a
     ;; pad's rim. The sky: 1 the tower's bands, 2-9 a window group, 10-41 a
-    ;; sign, 42 a far lit floor.
+    ;; sign, 42 a far lit floor, 43 the rest of the tower (bands and body loom
+    ;; in front of the mid layer).
     (define GROUND-FRAGMENT
       "uniform vec4 cam;
 uniform vec4 proj;
@@ -121,6 +122,9 @@ vec3 skybase(float px, float py) {
   if (life) c = mix(c, c * 1.6 + vec3(0.03, 0.0, 0.05), fx[2].w * 0.5 * clamp(1.0 - (horizon - py) / 60.0, 0.0, 1.0));
   int w = textureSize(sky, 0).x;
   float fw = float(w);
+  // Gibson's tower (far layer, codes 1 and 43) looms: it is drawn again
+  // after the mid layer, so only the near layer hides it
+  vec3 tower = vec3(-1.0);
   for (int k = 0; k < 3; k++) {
     float rate = k == 0 ? skyp.y : (k == 1 ? skyp.z : skyp.w);
     float ly = lh - (horizon - py);
@@ -147,8 +151,10 @@ vec3 skybase(float px, float py) {
           }
         } else if (cd == 42) col = mix(col, vec3(0.451, 0.502, 0.651), fx[2].w);
       }
+      if (k == 0 && (cd == 1 || cd == 43)) tower = col;
       c = col;
     }
+    if (k == 1 && tower.r >= 0.0) c = tower;
   }
   return c;
 }
