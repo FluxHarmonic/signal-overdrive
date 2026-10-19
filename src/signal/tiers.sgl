@@ -1,5 +1,6 @@
 ;;; Shared difficulty data for flow, racing and the live-ICE scheduler.
-;;; Density removes eligible live bars; it never broadens a hazard footprint.
+;;; Density counts authored UP opportunities per layer, including its phase.
+;;; It removes eligible bars without adding down-bar activity or wider footprints.
 ;;; Pace follows design section6. Other numbers are authoring parameters.
 (define-library (signal tiers)
   (export TIERS tier-parameters tier-label tier-value)

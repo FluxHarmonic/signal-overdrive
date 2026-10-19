@@ -218,6 +218,11 @@ independent JavaScript diagnostic oracle is a failure. It also checks all three
 shared tier contracts, including tracer bars shifted by tier telegraph/cadence.
 
 `(signal tiers)` owns LEARNER/COURIER/ELITE pace and ICE density as data.
+Their rival pace is 0.92/0.97/1.02. Live-layer density retains every third,
+second or first authored UP opportunity, counted separately for each layer
+with its phase. Counting absolute song bars would erase odd-phase layers at
+COURIER; the phase sabotage requires both firewall and swarm to survive every
+tier. Density never activates an authored down bar or changes a footprint.
 `race-new` takes `tier:`, `mode:` (`run` or `time-trial`) and `seed:` keywords;
 flow passes these selections and must not scale rival pace itself. Time trial
 removes rivals and ICE. Finale rivals Null and Void alternate eight-bar turns.

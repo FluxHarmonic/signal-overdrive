@@ -24,17 +24,20 @@
            (>= tick (car crossings))
            (or (not (list-ref crossings 3)) (< tick (list-ref crossings 3)))
            (or (string=? (cadr layer) "seeded-static")
-               (let ((bar (ice-tick->bar c tick))
-                     (crossing (list-ref crossings (- (list-ref layer 2) 1))))
+               (let* ((bar (ice-tick->bar c tick))
+                      (crossing (list-ref crossings (- (list-ref layer 2) 1)))
+                      (up (list-ref layer 4))
+                      (period (+ up (list-ref layer 5)))
+                      (position (+ bar (list-ref layer 6)))
+                      (slot (modulo position period))
+                      (ordinal (+ (* (exact (floor (/ position period))) up) slot)))
                  (and crossing
                       (>= bar (+ (first-bar c crossing)
                                  (rule c 7)))
-                      ;; Tier density removes bars from the authored schedule.
-                      ;; It never turns a down bar into an up bar.
-                      (= (modulo bar (if (> (length c) 8) (list-ref c 8) 1)) 0)
-                      (< (modulo (+ bar (list-ref layer 6))
-                                 (+ (list-ref layer 4) (list-ref layer 5)))
-                         (list-ref layer 4)))))))
+                      ;; Count authored UP bars, rather than absolute bars:
+                      ;; an even mask must not erase every odd-phase layer.
+                      (< slot up)
+                      (= (modulo ordinal (if (> (length c) 8) (list-ref c 8) 1)) 0))))))
 
     (define (ice-zones-at c crossings seed tick)
       (let loop ((layers (list-ref c 6)) (remaining seed))
