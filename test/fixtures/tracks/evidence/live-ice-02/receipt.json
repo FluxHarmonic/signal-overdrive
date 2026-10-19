@@ -1,0 +1,1885 @@
+{
+  "sourceCommit": "f8c3bdb0eae00f518e3d6675129ac73662c46de9",
+  "scope": "Current geometry and nine actual cup/tier histories; native/web build evidence is separate",
+  "provenance": {
+    "geometry": "/tmp/signal-track-tooling-cp56/run/geometry.json",
+    "driving": "/tmp/signal-track-tooling-cp48/run/driving",
+    "combined": "/tmp/signal-track-tooling-cp49/run"
+  },
+  "sourceSHA256": {
+    "tracks/breakwater.json": "1e3bfeaeb8810374cdf1513911d2ef26af10d97aab4074c4174808467fb6328e",
+    "tracks/quayside.json": "1c57f8e1537ff43c96fd41964d93111b8502e099650dad2bfc0f508e8edc214c",
+    "tracks/basin.json": "dcd64434c067d83272ab0d85e154c0ce13bd7069a88844a12fe9cf32d3e4ad0e",
+    "tracks/oval.json": "032040c180347d5c6b361f715caf35551b59a6db3c5a3c22c069b26f526a1bcf",
+    "src/signal/tiers.sgl": "7cb8b967b71c631861f7c9a07713128968a776e71c948e376415485fa375e230",
+    "src/signal/race.sgl": "8aa3bf3a2b368f7a8d1f5244ab83901ce97284c7d95e6b8304dbaeaa12d94120",
+    "src/signal/ice/schedule.sgl": "c6c7b2b9451a6d9de2473f915384f1fcf8c5856ca238e9548258b86bf3680187",
+    "src/signal/ice/runtime.sgl": "c11ffc958613db6c0697f07a4516996869d8eb2b54d3233f4141828cda93d91d",
+    "src/signal/ice/placement.sgl": "3418bcee856159541b9a4efb29b40caf05932b2838a42a3c4b4ba7cf559264c6",
+    "src/signal/ice/tier.sgl": "91ea429e66287649f2c2829bedaeb50d3b2b17de56dc284744b7bedc523b46ce",
+    "src/signal/rivals/turns.sgl": "2fc8bcefa3afc31f145a043b0232c8d4686f0ff4710de674b62ddc08a286482d",
+    "src/signal/rivals/tactics.sgl": "269e1d9b50d4c81baf3b0e671e5670191963a03cd2e65acedd0cd36830ed196e",
+    "src/signal/rivals/wake.sgl": "b66b5aad3a02bdbf0a64e3576a12101c4088058a7f0ed605e59bfb2330911cf9"
+  },
+  "sourceVerification": {
+    "archivedSource": "/tmp/signal-track-tooling-cp56/source-commit",
+    "exactSourceSHA256": {
+      "tracks/breakwater.json": "1e3bfeaeb8810374cdf1513911d2ef26af10d97aab4074c4174808467fb6328e",
+      "tracks/quayside.json": "9860364854740efd38aa1924b548cfe627e1055ba5f1694e0245dabd283eb8fb",
+      "tracks/basin.json": "aa8fc861335c3fc05f8a6a2ab711f2c27096f7019c4ae8fd86cfab2a9e556018",
+      "tracks/oval.json": "032040c180347d5c6b361f715caf35551b59a6db3c5a3c22c069b26f526a1bcf",
+      "src/signal/tiers.sgl": "7cb8b967b71c631861f7c9a07713128968a776e71c948e376415485fa375e230",
+      "src/signal/race.sgl": "8aa3bf3a2b368f7a8d1f5244ab83901ce97284c7d95e6b8304dbaeaa12d94120",
+      "src/signal/ice/schedule.sgl": "c6c7b2b9451a6d9de2473f915384f1fcf8c5856ca238e9548258b86bf3680187",
+      "src/signal/ice/runtime.sgl": "c11ffc958613db6c0697f07a4516996869d8eb2b54d3233f4141828cda93d91d",
+      "src/signal/ice/placement.sgl": "3418bcee856159541b9a4efb29b40caf05932b2838a42a3c4b4ba7cf559264c6",
+      "src/signal/ice/tier.sgl": "91ea429e66287649f2c2829bedaeb50d3b2b17de56dc284744b7bedc523b46ce",
+      "src/signal/rivals/turns.sgl": "2fc8bcefa3afc31f145a043b0232c8d4686f0ff4710de674b62ddc08a286482d",
+      "src/signal/rivals/tactics.sgl": "269e1d9b50d4c81baf3b0e671e5670191963a03cd2e65acedd0cd36830ed196e",
+      "src/signal/rivals/wake.sgl": "b66b5aad3a02bdbf0a64e3576a12101c4088058a7f0ed605e59bfb2330911cf9"
+    },
+    "jsonFormattingOnly": [
+      "tracks/quayside.json",
+      "tracks/basin.json"
+    ],
+    "method": "Executable source bytes match; differing JSON formatting requires exact recursive value identity"
+  },
+  "geometry": [
+    {
+      "file": "tracks/breakwater.json",
+      "id": "breakwater",
+      "length": 14857.340721001283,
+      "topSpeedSeconds": 26.530965573216577,
+      "par": {
+        "complete": false,
+        "method": "Run runtime.mjs and ai.sgl for measured par; length/top is informational only"
+      },
+      "gates": {
+        "radius": {
+          "pass": true,
+          "minimum": 1529.7153801482002,
+          "required": 140.8
+        },
+        "trueRadius": {
+          "pass": true,
+          "minimum": 1093.8942342805901,
+          "required": 140.8,
+          "witness": {
+            "segment": 38,
+            "t": 0.075,
+            "point": [
+              2367.07499044133,
+              4531.3529606723105
+            ]
+          },
+          "method": "unsmoothed circumradius of consecutive dense spline samples (200 samples/control interval)"
+        },
+        "separation": {
+          "pass": true,
+          "minimum": 487.4665294463718,
+          "required": 244
+        },
+        "world": {
+          "pass": true,
+          "width": 5472,
+          "height": 5472,
+          "margin": 288.88096272819945,
+          "required": 288
+        },
+        "readability": {
+          "pass": true,
+          "ahead": 1900,
+          "continuation": 96,
+          "curvatureThreshold": 0.0002,
+          "bends": 3,
+          "events": [
+            {
+              "sample": 153,
+              "s": 2447.9999064834965,
+              "fraction": 0.16476703014713645,
+              "direction": "right",
+              "observer": {
+                "x": 3326.4853170979304,
+                "y": 1130.4853170979304,
+                "tx": 0.7071067811865422,
+                "ty": 0.7071067811865529
+              },
+              "entrance": {
+                "x": 4670.808146716582,
+                "y": 2473.163541782733,
+                "tx": 0.7034533942612217,
+                "ty": 0.7107413890455277
+              },
+              "continuation": {
+                "x": 4737.621458621491,
+                "y": 2542.0948499122683,
+                "tx": 0.6876850611466281,
+                "ty": 0.7260091298845754
+              },
+              "entry": {
+                "x": 239.8206716168203,
+                "y": 86.24806133310287,
+                "depth": 1984.7729132798704,
+                "along": 2003.9966665533752,
+                "visible": true
+              },
+              "cue": {
+                "x": 240.04926661753547,
+                "y": 85.96335031411252,
+                "depth": 2079.53285338721,
+                "along": 2099.982607889322,
+                "visible": true
+              },
+              "pass": true
+            },
+            {
+              "sample": 508,
+              "s": 8127.976324698953,
+              "fraction": 0.5470680438262967,
+              "direction": "left",
+              "observer": {
+                "x": 3591.3350322532215,
+                "y": 5181.654416672847,
+                "tx": -0.9996527220410449,
+                "ty": -0.026352140632770128
+              },
+              "entrance": {
+                "x": 2130.267248143352,
+                "y": 4133.4469183290585,
+                "tx": -0.512611168395997,
+                "ty": -0.8586208651294767
+              },
+              "continuation": {
+                "x": 2080.2579073153684,
+                "y": 4051.503210355557,
+                "tx": -0.5323657166664016,
+                "ty": -0.8465144675185822
+              },
+              "entry": {
+                "x": 435.74197754311786,
+                "y": 87.85757990691627,
+                "depth": 1578.2191261635837,
+                "along": 1592.1828988805885,
+                "visible": true
+              },
+              "cue": {
+                "x": 444.6946409466439,
+                "y": 87.60934502404922,
+                "depth": 1629.7043773492728,
+                "along": 1644.334264683249,
+                "visible": true
+              },
+              "pass": true
+            },
+            {
+              "sample": 595,
+              "s": 9519.973776867886,
+              "fraction": 0.6407589322772362,
+              "direction": "right",
+              "observer": {
+                "x": 2393.7055858252334,
+                "y": 4567.384866223633,
+                "tx": -0.6078390021948533,
+                "ty": -0.7940602920501472
+              },
+              "entrance": {
+                "x": 1113.3238378332571,
+                "y": 3213.116482797212,
+                "tx": -0.8647267587530598,
+                "ty": -0.5022426034262998
+              },
+              "continuation": {
+                "x": 1031.1331508421058,
+                "y": 3163.5193594934312,
+                "tx": -0.8493640696264557,
+                "ty": -0.5278074243770976
+              },
+              "entry": {
+                "x": 209.45309138314207,
+                "y": 86.39553907570365,
+                "depth": 1939.0051014721607,
+                "along": 1957.6367121858098,
+                "visible": true
+              },
+              "cue": {
+                "x": 205.4801809350554,
+                "y": 86.11727879135378,
+                "depth": 2027.2057752184792,
+                "along": 2046.978523571668,
+                "visible": true
+              },
+              "pass": true
+            }
+          ],
+          "failed": 0,
+          "firstFailure": null,
+          "occlusion": "flat ground only; future terrain/crests require line-of-sight occlusion"
+        },
+        "freeLane": {
+          "pass": true,
+          "combinations": 1,
+          "required": 27,
+          "narrowest": 96.80000000000001,
+          "witness": {
+            "layouts": [],
+            "at": 0.4,
+            "active": [
+              [
+                -0.9,
+                -0.1
+              ]
+            ]
+          },
+          "scope": "permanent road ICE and seeded-static layers only; live hazards require the combined schedule gate"
+        }
+      }
+    },
+    {
+      "file": "tracks/quayside.json",
+      "id": "quayside",
+      "length": 16891.11715349829,
+      "topSpeedSeconds": 30.16270920267552,
+      "par": {
+        "complete": false,
+        "method": "Run runtime.mjs and ai.sgl for measured par; length/top is informational only"
+      },
+      "gates": {
+        "radius": {
+          "pass": true,
+          "minimum": 342.56365922652253,
+          "required": 140.8
+        },
+        "trueRadius": {
+          "pass": true,
+          "minimum": 153.46567453412493,
+          "required": 140.8,
+          "witness": {
+            "segment": 6,
+            "t": 0.995,
+            "point": [
+              3579.398454558345,
+              3520.5982233474638
+            ]
+          },
+          "method": "unsmoothed circumradius of consecutive dense spline samples (200 samples/control interval)"
+        },
+        "separation": {
+          "pass": true,
+          "minimum": 270.0510609104333,
+          "required": 244
+        },
+        "world": {
+          "pass": true,
+          "width": 5120,
+          "height": 5120,
+          "margin": 445.31930926163915,
+          "required": 288
+        },
+        "readability": {
+          "pass": true,
+          "ahead": 1900,
+          "continuation": 96,
+          "curvatureThreshold": 0.0002,
+          "bends": 5,
+          "events": [
+            {
+              "sample": 123,
+              "s": 1967.9997258446026,
+              "fraction": 0.11651092748693734,
+              "direction": "left",
+              "observer": {
+                "x": 1229.999725844602,
+                "y": 3589.9999999999995,
+                "tx": 1,
+                "ty": 0
+              },
+              "entrance": {
+                "x": 3129.954891825929,
+                "y": 3592.6462057020503,
+                "tx": 0.9989727277273269,
+                "ty": 0.0453154417061544
+              },
+              "continuation": {
+                "x": 3225.85092337434,
+                "y": 3597.10694720261,
+                "tx": 0.9992336523202986,
+                "ty": 0.039142152095106506
+              },
+              "entry": {
+                "x": 240.4080703192954,
+                "y": 86.24819031081145,
+                "depth": 1984.7319427828686,
+                "along": 2003.955165981327,
+                "visible": true
+              },
+              "cue": {
+                "x": 241.04606257305787,
+                "y": 85.96372236160667,
+                "depth": 2079.40312149491,
+                "along": 2099.851197529738,
+                "visible": true
+              },
+              "pass": true
+            },
+            {
+              "sample": 302,
+              "s": 4831.937702378234,
+              "fraction": 0.2860638321591121,
+              "direction": "left",
+              "observer": {
+                "x": 3652.582688373049,
+                "y": 3040.486227346241,
+                "tx": -0.04294701031926074,
+                "ty": -0.9990773515122026
+              },
+              "entrance": {
+                "x": 3652.9096422459797,
+                "y": 1140.5569237450948,
+                "tx": 0.023130350594081528,
+                "ty": -0.9997324576512432
+              },
+              "continuation": {
+                "x": 3654.559585536623,
+                "y": 1044.572102183446,
+                "tx": 0.007125502204481818,
+                "ty": -0.9999746132869243
+              },
+              "entry": {
+                "x": 252.6445793771591,
+                "y": 86.25376738020076,
+                "depth": 1982.9619716452928,
+                "along": 2002.1622950109017,
+                "visible": true
+              },
+              "cue": {
+                "x": 252.9189424231481,
+                "y": 85.96900328642599,
+                "depth": 2077.5634221302626,
+                "along": 2097.9876961905557,
+                "visible": true
+              },
+              "pass": true
+            },
+            {
+              "sample": 478,
+              "s": 7647.902533415424,
+              "fraction": 0.45277659635623807,
+              "direction": "left",
+              "observer": {
+                "x": 3230.4987324984136,
+                "y": 453.0777106594723,
+                "tx": -0.9943737077596526,
+                "ty": -0.10592888801606762
+              },
+              "entrance": {
+                "x": 1330.8445727973808,
+                "y": 447.8494410106354,
+                "tx": -0.999949822169814,
+                "ty": -0.01001764156662636
+              },
+              "continuation": {
+                "x": 1234.8461690274755,
+                "y": 447.4847700704554,
+                "tx": -0.9999855131775843,
+                "ty": 0.005382697740256082
+              },
+              "entry": {
+                "x": 209.61265721142857,
+                "y": 86.28079124530868,
+                "depth": 1974.430037571557,
+                "along": 1993.5199750331124,
+                "visible": true
+              },
+              "cue": {
+                "x": 209.54664691762676,
+                "y": 85.99455683827713,
+                "depth": 2068.7072003838125,
+                "along": 2089.016892915987,
+                "visible": true
+              },
+              "pass": true
+            },
+            {
+              "sample": 721,
+              "s": 11535.854373416338,
+              "fraction": 0.6829539022543081,
+              "direction": "right",
+              "observer": {
+                "x": 791.5308344412807,
+                "y": 1727.4906754991284,
+                "tx": 0.8669610514489438,
+                "ty": 0.49837589756181244
+              },
+              "entrance": {
+                "x": 2675.1950484084,
+                "y": 1817.1533849392924,
+                "tx": 0.9998885159038535,
+                "ty": -0.01493170330501779
+              },
+              "continuation": {
+                "x": 2771.1904217234987,
+                "y": 1816.3061623989472,
+                "tx": 0.9999999587234675,
+                "ty": 0.0002873204890019948
+              },
+              "entry": {
+                "x": 90.71998900416449,
+                "y": 87.02460317150197,
+                "depth": 1765.3641909287246,
+                "along": 1781.749240812748,
+                "visible": true
+              },
+              "cue": {
+                "x": 89.27736559601107,
+                "y": 86.71372701249823,
+                "depth": 1847.1085987512354,
+                "along": 1864.5512553022604,
+                "visible": true
+              },
+              "pass": true
+            },
+            {
+              "sample": 942,
+              "s": 15071.78588153306,
+              "fraction": 0.8922906486627245,
+              "direction": "left",
+              "observer": {
+                "x": 2995.759713031249,
+                "y": 2769.8711525788935,
+                "tx": -0.9849178859294382,
+                "ty": 0.17302242044395985
+              },
+              "entrance": {
+                "x": 1096.4641785263432,
+                "y": 2777.17215628814,
+                "tx": -0.9997459798604204,
+                "ty": -0.022538317437821167
+              },
+              "continuation": {
+                "x": 1000.4789347678137,
+                "y": 2775.539723466514,
+                "tx": -0.9999715805613627,
+                "ty": -0.007539102705897289
+              },
+              "entry": {
+                "x": 290.26872651764467,
+                "y": 86.33657469077167,
+                "depth": 1957.0483265216137,
+                "along": 1975.9133799332383,
+                "visible": true
+              },
+              "cue": {
+                "x": 290.70652346180856,
+                "y": 86.04896615091974,
+                "depth": 2050.099568265625,
+                "along": 2070.168515818301,
+                "visible": true
+              },
+              "pass": true
+            }
+          ],
+          "failed": 0,
+          "firstFailure": null,
+          "occlusion": "flat ground only; future terrain/crests require line-of-sight occlusion"
+        },
+        "freeLane": {
+          "pass": true,
+          "combinations": 1,
+          "required": 27,
+          "narrowest": 96.80000000000001,
+          "witness": {
+            "layouts": [],
+            "at": 0.2652281669708404,
+            "active": [
+              [
+                0.1,
+                0.9
+              ]
+            ]
+          },
+          "scope": "permanent road ICE and seeded-static layers only; live hazards require the combined schedule gate"
+        }
+      }
+    },
+    {
+      "file": "tracks/basin.json",
+      "id": "basin",
+      "length": 16410.16031837112,
+      "topSpeedSeconds": 29.303857711377,
+      "par": {
+        "complete": false,
+        "method": "Run runtime.mjs and ai.sgl for measured par; length/top is informational only"
+      },
+      "gates": {
+        "radius": {
+          "pass": true,
+          "minimum": 228.9902081781172,
+          "required": 134.4
+        },
+        "trueRadius": {
+          "pass": true,
+          "minimum": 142.10062873973442,
+          "required": 134.4,
+          "witness": {
+            "segment": 38,
+            "t": 0.995,
+            "point": [
+              3585.4486379457494,
+              2713.451651096373
+            ]
+          },
+          "method": "unsmoothed circumradius of consecutive dense spline samples (200 samples/control interval)"
+        },
+        "separation": {
+          "pass": true,
+          "minimum": 250.0641570330555,
+          "required": 236
+        },
+        "world": {
+          "pass": true,
+          "width": 5120,
+          "height": 5120,
+          "margin": 375.4254622891946,
+          "required": 284
+        },
+        "readability": {
+          "pass": true,
+          "ahead": 1900,
+          "continuation": 96,
+          "curvatureThreshold": 0.0002,
+          "bends": 5,
+          "events": [
+            {
+              "sample": 116,
+              "s": 1855.9999635094205,
+              "fraction": 0.11310066004849659,
+              "direction": "right",
+              "observer": {
+                "x": 919.0041632552362,
+                "y": 379.4590191701514,
+                "tx": 0.9997541786209982,
+                "ty": 0.022171656001597657
+              },
+              "entrance": {
+                "x": 2818.9776331773405,
+                "y": 377.24131318841347,
+                "tx": 0.999857828310694,
+                "ty": -0.01686188500206395
+              },
+              "continuation": {
+                "x": 2914.971577761236,
+                "y": 376.2669198928887,
+                "tx": 0.9999999941166229,
+                "ty": 0.00010847467116327015
+              },
+              "entry": {
+                "x": 233.160233085865,
+                "y": 86.24973818981626,
+                "depth": 1984.2403822068738,
+                "along": 2003.4572456095216,
+                "visible": true
+              },
+              "cue": {
+                "x": 233.01512203519232,
+                "y": 85.96498317623337,
+                "depth": 2078.9635994052514,
+                "along": 2099.405988916625,
+                "visible": true
+              },
+              "pass": true
+            },
+            {
+              "sample": 340,
+              "s": 5439.941213765604,
+              "fraction": 0.33149835883538614,
+              "direction": "left",
+              "observer": {
+                "x": 3322.5253167942883,
+                "y": 1423.3691729426341,
+                "tx": -0.8624212013565468,
+                "ty": 0.506191338774905
+              },
+              "entrance": {
+                "x": 1436.1483507087748,
+                "y": 1498.2007759084547,
+                "tx": -0.9998792867335472,
+                "ty": -0.015537437408174752
+              },
+              "continuation": {
+                "x": 1340.1542880338152,
+                "y": 1497.2037268296515,
+                "tx": -0.9999988350699187,
+                "ty": -0.0015263875017845288
+              },
+              "entry": {
+                "x": 395.4905354786479,
+                "y": 87.07611935455462,
+                "depth": 1752.51183213464,
+                "along": 1768.7305985907271,
+                "visible": true
+              },
+              "cue": {
+                "x": 396.8563359025535,
+                "y": 86.76265958197203,
+                "depth": 1833.7434768286405,
+                "along": 1851.013215837938,
+                "visible": true
+              },
+              "pass": true
+            },
+            {
+              "sample": 586,
+              "s": 9375.884036303156,
+              "fraction": 0.5713462790370722,
+              "direction": "right",
+              "observer": {
+                "x": 1243.7572467485506,
+                "y": 2651.0411235074744,
+                "tx": 0.9988390468845574,
+                "ty": 0.0481721747355153
+              },
+              "entrance": {
+                "x": 3143.6828313516403,
+                "y": 2648.0086461697697,
+                "tx": 0.9991439465529554,
+                "ty": -0.04136875713125872
+              },
+              "continuation": {
+                "x": 3239.5830481057988,
+                "y": 2643.6356354343775,
+                "tx": 0.9991483290910825,
+                "ty": -0.041262773470741615
+              },
+              "entry": {
+                "x": 225.40180433393127,
+                "y": 86.255600243176,
+                "depth": 1982.380972630352,
+                "along": 2001.5737790483422,
+                "visible": true
+              },
+              "cue": {
+                "x": 224.7404999940364,
+                "y": 85.97137457379259,
+                "depth": 2076.738402725544,
+                "along": 2097.1520027098227,
+                "visible": true
+              },
+              "pass": true
+            },
+            {
+              "sample": 802,
+              "s": 12831.736466790167,
+              "fraction": 0.7819385196636429,
+              "direction": "right",
+              "observer": {
+                "x": 2848.4232919465508,
+                "y": 3090,
+                "tx": -1,
+                "ty": 0
+              },
+              "entrance": {
+                "x": 948.4522250466658,
+                "y": 3092.4595087211683,
+                "tx": -0.9995501974443601,
+                "ty": 0.029990044830587474
+              },
+              "continuation": {
+                "x": 852.4892950975562,
+                "y": 3095.1133425004964,
+                "tx": -0.9997898990461375,
+                "ty": 0.020497750250073388
+              },
+              "entry": {
+                "x": 239.6207231470089,
+                "y": 86.2481408924528,
+                "depth": 1984.7476406035,
+                "along": 2003.971066899885,
+                "visible": true
+              },
+              "cue": {
+                "x": 239.247403167155,
+                "y": 85.96348793571921,
+                "depth": 2079.4848632419253,
+                "along": 2099.9339968489944,
+                "visible": true
+              },
+              "pass": true
+            },
+            {
+              "sample": 963,
+              "s": 15407.682347986678,
+              "fraction": 0.9389111409678204,
+              "direction": "right",
+              "observer": {
+                "x": 404.2911421838434,
+                "y": 2840.4115243905044,
+                "tx": -0.1517479012670077,
+                "ty": -0.9884192301149642
+              },
+              "entrance": {
+                "x": 397.02955463961626,
+                "y": 941.053983283078,
+                "tx": -0.029242611349660143,
+                "ty": -0.9995723433956407
+              },
+              "continuation": {
+                "x": 394.51215808475297,
+                "y": 845.0873955812242,
+                "tx": -0.01931695572569452,
+                "ty": -0.9998134102028696
+              },
+              "entry": {
+                "x": 283.8083154277224,
+                "y": 86.31570656558262,
+                "depth": 1963.514733574376,
+                "along": 1982.463449164157,
+                "visible": true
+              },
+              "cue": {
+                "x": 283.6025747945565,
+                "y": 86.02710511628175,
+                "depth": 2057.5355257955657,
+                "along": 2077.7006795410407,
+                "visible": true
+              },
+              "pass": true
+            }
+          ],
+          "failed": 0,
+          "firstFailure": null,
+          "occlusion": "flat ground only; future terrain/crests require line-of-sight occlusion"
+        },
+        "freeLane": {
+          "pass": true,
+          "combinations": 1,
+          "required": 27,
+          "narrowest": 92.4,
+          "witness": {
+            "layouts": [],
+            "at": 0.09360054990323068,
+            "active": [
+              [
+                -0.9,
+                -0.1
+              ]
+            ]
+          },
+          "scope": "permanent road ICE and seeded-static layers only; live hazards require the combined schedule gate"
+        }
+      }
+    },
+    {
+      "file": "tracks/oval.json",
+      "id": "oval",
+      "length": 8448.26757097202,
+      "topSpeedSeconds": 15.086192091021465,
+      "par": {
+        "complete": false,
+        "method": "Run runtime.mjs and ai.sgl for measured par; length/top is informational only"
+      },
+      "gates": {
+        "radius": {
+          "pass": true,
+          "minimum": 732.891004741139,
+          "required": 147.20000000000002
+        },
+        "trueRadius": {
+          "pass": true,
+          "minimum": 483.1539541554686,
+          "required": 147.20000000000002,
+          "witness": {
+            "segment": 39,
+            "t": 0.005,
+            "point": [
+              890.6183866132479,
+              2758.3465936615085
+            ]
+          },
+          "method": "unsmoothed circumradius of consecutive dense spline samples (200 samples/control interval)"
+        },
+        "separation": {
+          "pass": true,
+          "minimum": 501.26080349312,
+          "required": 252
+        },
+        "world": {
+          "pass": true,
+          "width": 5120,
+          "height": 5120,
+          "margin": 358.14078069115635,
+          "required": 292
+        },
+        "readability": {
+          "pass": true,
+          "ahead": 1900,
+          "continuation": 96,
+          "curvatureThreshold": 0.0002,
+          "bends": 2,
+          "events": [
+            {
+              "sample": 108,
+              "s": 1727.9988963159471,
+              "fraction": 0.20453884560348165,
+              "direction": "left",
+              "observer": {
+                "x": 927.371321505454,
+                "y": 2767.5590317985284,
+                "tx": 0.9773134207654404,
+                "ty": 0.21179820016174256
+              },
+              "entrance": {
+                "x": 2825.9260531235605,
+                "y": 2788.4022193720816,
+                "tx": 0.9998304236700475,
+                "ty": 0.01841531709673629
+              },
+              "continuation": {
+                "x": 2921.9073878345694,
+                "y": 2790.231058123051,
+                "tx": 0.9999915438434219,
+                "ty": 0.004112449592338825
+              },
+              "entry": {
+                "x": 179.93520889344543,
+                "y": 86.3752170528063,
+                "depth": 1945.1859900197635,
+                "along": 1963.8975688818164,
+                "visible": true
+              },
+              "cue": {
+                "x": 179.8912804448296,
+                "y": 86.08435897134731,
+                "depth": 2038.1741039365143,
+                "along": 2058.088760193706,
+                "visible": true
+              },
+              "pass": true
+            },
+            {
+              "sample": 372,
+              "s": 5951.953434954233,
+              "fraction": 0.7045176286088471,
+              "direction": "left",
+              "observer": {
+                "x": 3168.804347425865,
+                "y": 1328.4767066777554,
+                "tx": -0.9772540006196248,
+                "ty": -0.21207220061323145
+              },
+              "entrance": {
+                "x": 1270.2531695666037,
+                "y": 1307.6011279226168,
+                "tx": -0.9998314658544335,
+                "ty": -0.01835864612042459
+              },
+              "continuation": {
+                "x": 1174.2718646753065,
+                "y": 1305.769775303396,
+                "tx": -0.9999910927302623,
+                "ty": -0.004220717964536384
+              },
+              "entry": {
+                "x": 179.85509618978327,
+                "y": 86.37555261544192,
+                "depth": 1945.08360960242,
+                "along": 1963.793863869741,
+                "visible": true
+              },
+              "cue": {
+                "x": 179.81108789818518,
+                "y": 86.08467845998837,
+                "depth": 2038.0670853850881,
+                "along": 2057.98035703951,
+                "visible": true
+              },
+              "pass": true
+            }
+          ],
+          "failed": 0,
+          "firstFailure": null,
+          "occlusion": "flat ground only; future terrain/crests require line-of-sight occlusion"
+        },
+        "freeLane": {
+          "pass": true,
+          "combinations": 1,
+          "required": 27,
+          "narrowest": 96.60000000000001,
+          "witness": {
+            "layouts": [],
+            "at": 0.6,
+            "active": [
+              [
+                -0.95,
+                -0.05
+              ]
+            ]
+          },
+          "scope": "permanent road ICE and seeded-static layers only; live hazards require the combined schedule gate"
+        }
+      }
+    }
+  ],
+  "races": [
+    {
+      "id": "breakwater",
+      "tier": "learner",
+      "world": {
+        "width": 5472,
+        "height": 5472
+      },
+      "song": "carrier-c",
+      "parSeconds": 29.4167,
+      "lapTicks": [
+        1795,
+        1765,
+        1771
+      ],
+      "crossings": [
+        {
+          "lap": 1,
+          "tick": 459
+        },
+        {
+          "lap": 2,
+          "tick": 2254
+        },
+        {
+          "lap": 3,
+          "tick": 4019
+        },
+        {
+          "lap": 4,
+          "tick": 5790
+        }
+      ],
+      "allRacersThreeLapsAndCoda": true,
+      "hazards": {
+        "firewall": 308,
+        "drone": 206,
+        "tracer": 6,
+        "wake": 0
+      },
+      "pair": {
+        "rivals": [
+          "VEX",
+          "KESTREL",
+          "SPOOL",
+          "HALCYON",
+          "RELAY"
+        ],
+        "nullAttackTicks": 0,
+        "voidAttackTicks": 0,
+        "nullWarningTicks": 0
+      },
+      "combined": {
+        "pass": true,
+        "minimumLane": 52.8,
+        "requiredLane": 27,
+        "combinations": 6,
+        "rules": {
+          "1": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "2": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "3": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "4": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "5": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "6": {
+            "pass": true,
+            "firstFailure": null
+          }
+        },
+        "canonical": {
+          "pass": true,
+          "queries": 153243,
+          "durationMs": 152546,
+          "implementation": "src/signal/ice/schedule.sgl",
+          "placementImplementation": "src/signal/ice/placement.sgl",
+          "tracerPlacements": {
+            "admitted": 12840,
+            "yielded": 3480
+          },
+          "tiers": {
+            "ids": [
+              "learner",
+              "courier",
+              "elite"
+            ],
+            "states": 990,
+            "targets": 457728,
+            "admitted": 22620
+          },
+          "error": null
+        }
+      }
+    },
+    {
+      "id": "breakwater",
+      "tier": "courier",
+      "world": {
+        "width": 5472,
+        "height": 5472
+      },
+      "song": "carrier-c",
+      "parSeconds": 28,
+      "lapTicks": [
+        1723,
+        1680,
+        1704
+      ],
+      "crossings": [
+        {
+          "lap": 1,
+          "tick": 459
+        },
+        {
+          "lap": 2,
+          "tick": 2182
+        },
+        {
+          "lap": 3,
+          "tick": 3862
+        },
+        {
+          "lap": 4,
+          "tick": 5566
+        }
+      ],
+      "allRacersThreeLapsAndCoda": true,
+      "hazards": {
+        "firewall": 411,
+        "drone": 412,
+        "tracer": 6,
+        "wake": 0
+      },
+      "pair": {
+        "rivals": [
+          "VEX",
+          "KESTREL",
+          "SPOOL",
+          "HALCYON",
+          "RELAY"
+        ],
+        "nullAttackTicks": 0,
+        "voidAttackTicks": 0,
+        "nullWarningTicks": 0
+      },
+      "combined": {
+        "pass": true,
+        "minimumLane": 52.8,
+        "requiredLane": 27,
+        "combinations": 6,
+        "rules": {
+          "1": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "2": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "3": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "4": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "5": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "6": {
+            "pass": true,
+            "firstFailure": null
+          }
+        },
+        "canonical": {
+          "pass": true,
+          "queries": 153219,
+          "durationMs": 274035,
+          "implementation": "src/signal/ice/schedule.sgl",
+          "placementImplementation": "src/signal/ice/placement.sgl",
+          "tracerPlacements": {
+            "admitted": 12840,
+            "yielded": 3480
+          },
+          "tiers": {
+            "ids": [
+              "learner",
+              "courier",
+              "elite"
+            ],
+            "states": 954,
+            "targets": 457728,
+            "admitted": 22620
+          },
+          "error": null
+        }
+      }
+    },
+    {
+      "id": "breakwater",
+      "tier": "elite",
+      "world": {
+        "width": 5472,
+        "height": 5472
+      },
+      "song": "carrier-c",
+      "parSeconds": 26.6333,
+      "lapTicks": [
+        1670,
+        1598,
+        1651
+      ],
+      "crossings": [
+        {
+          "lap": 1,
+          "tick": 459
+        },
+        {
+          "lap": 2,
+          "tick": 2129
+        },
+        {
+          "lap": 3,
+          "tick": 3727
+        },
+        {
+          "lap": 4,
+          "tick": 5378
+        }
+      ],
+      "allRacersThreeLapsAndCoda": true,
+      "hazards": {
+        "firewall": 749,
+        "drone": 720,
+        "tracer": 6,
+        "wake": 0
+      },
+      "pair": {
+        "rivals": [
+          "VEX",
+          "KESTREL",
+          "SPOOL",
+          "HALCYON",
+          "RELAY"
+        ],
+        "nullAttackTicks": 0,
+        "voidAttackTicks": 0,
+        "nullWarningTicks": 0
+      },
+      "combined": {
+        "pass": true,
+        "minimumLane": 52.8,
+        "requiredLane": 27,
+        "combinations": 6,
+        "rules": {
+          "1": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "2": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "3": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "4": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "5": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "6": {
+            "pass": true,
+            "firstFailure": null
+          }
+        },
+        "canonical": {
+          "pass": true,
+          "queries": 142871,
+          "durationMs": 206885,
+          "implementation": "src/signal/ice/schedule.sgl",
+          "placementImplementation": "src/signal/ice/placement.sgl",
+          "tracerPlacements": {
+            "admitted": 12000,
+            "yielded": 3252
+          },
+          "tiers": {
+            "ids": [
+              "learner",
+              "courier",
+              "elite"
+            ],
+            "states": 918,
+            "targets": 426756,
+            "admitted": 21480
+          },
+          "error": null
+        }
+      }
+    },
+    {
+      "id": "quayside",
+      "tier": "learner",
+      "world": {
+        "width": 5120,
+        "height": 5120
+      },
+      "song": "carrier-a",
+      "parSeconds": 32.9333,
+      "lapTicks": [
+        2021,
+        1976,
+        1986
+      ],
+      "crossings": [
+        {
+          "lap": 1,
+          "tick": 462
+        },
+        {
+          "lap": 2,
+          "tick": 2483
+        },
+        {
+          "lap": 3,
+          "tick": 4459
+        },
+        {
+          "lap": 4,
+          "tick": 6445
+        }
+      ],
+      "allRacersThreeLapsAndCoda": true,
+      "hazards": {
+        "firewall": 617,
+        "drone": 0,
+        "tracer": 0,
+        "wake": 0
+      },
+      "pair": {
+        "rivals": [
+          "VEX",
+          "KESTREL",
+          "SPOOL",
+          "HALCYON",
+          "RELAY"
+        ],
+        "nullAttackTicks": 0,
+        "voidAttackTicks": 0,
+        "nullWarningTicks": 0
+      },
+      "combined": {
+        "pass": true,
+        "minimumLane": 54,
+        "requiredLane": 27,
+        "combinations": 6,
+        "rules": {
+          "1": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "2": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "3": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "4": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "5": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "6": {
+            "pass": true,
+            "firstFailure": null
+          }
+        },
+        "canonical": {
+          "pass": true,
+          "queries": 167598,
+          "durationMs": 366177,
+          "implementation": "src/signal/ice/schedule.sgl",
+          "placementImplementation": "src/signal/ice/placement.sgl",
+          "tracerPlacements": {
+            "admitted": 0,
+            "yielded": 33696
+          },
+          "tiers": {
+            "ids": [
+              "learner",
+              "courier",
+              "elite"
+            ],
+            "states": 1098,
+            "targets": 500580,
+            "admitted": 0
+          },
+          "error": null
+        }
+      }
+    },
+    {
+      "id": "quayside",
+      "tier": "courier",
+      "world": {
+        "width": 5120,
+        "height": 5120
+      },
+      "song": "carrier-a",
+      "parSeconds": 31.55,
+      "lapTicks": [
+        1950,
+        1893,
+        1897
+      ],
+      "crossings": [
+        {
+          "lap": 1,
+          "tick": 462
+        },
+        {
+          "lap": 2,
+          "tick": 2412
+        },
+        {
+          "lap": 3,
+          "tick": 4305
+        },
+        {
+          "lap": 4,
+          "tick": 6202
+        }
+      ],
+      "allRacersThreeLapsAndCoda": true,
+      "hazards": {
+        "firewall": 750,
+        "drone": 0,
+        "tracer": 0,
+        "wake": 0
+      },
+      "pair": {
+        "rivals": [
+          "VEX",
+          "KESTREL",
+          "SPOOL",
+          "HALCYON",
+          "RELAY"
+        ],
+        "nullAttackTicks": 0,
+        "voidAttackTicks": 0,
+        "nullWarningTicks": 0
+      },
+      "combined": {
+        "pass": true,
+        "minimumLane": 54,
+        "requiredLane": 27,
+        "combinations": 6,
+        "rules": {
+          "1": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "2": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "3": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "4": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "5": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "6": {
+            "pass": true,
+            "firstFailure": null
+          }
+        },
+        "canonical": {
+          "pass": true,
+          "queries": 167574,
+          "durationMs": 381090,
+          "implementation": "src/signal/ice/schedule.sgl",
+          "placementImplementation": "src/signal/ice/placement.sgl",
+          "tracerPlacements": {
+            "admitted": 0,
+            "yielded": 33696
+          },
+          "tiers": {
+            "ids": [
+              "learner",
+              "courier",
+              "elite"
+            ],
+            "states": 1062,
+            "targets": 500580,
+            "admitted": 0
+          },
+          "error": null
+        }
+      }
+    },
+    {
+      "id": "quayside",
+      "tier": "elite",
+      "world": {
+        "width": 5120,
+        "height": 5120
+      },
+      "song": "carrier-a",
+      "parSeconds": 30.9,
+      "lapTicks": [
+        1918,
+        1854,
+        1869
+      ],
+      "crossings": [
+        {
+          "lap": 1,
+          "tick": 462
+        },
+        {
+          "lap": 2,
+          "tick": 2380
+        },
+        {
+          "lap": 3,
+          "tick": 4234
+        },
+        {
+          "lap": 4,
+          "tick": 6103
+        }
+      ],
+      "allRacersThreeLapsAndCoda": true,
+      "hazards": {
+        "firewall": 1269,
+        "drone": 0,
+        "tracer": 0,
+        "wake": 0
+      },
+      "pair": {
+        "rivals": [
+          "VEX",
+          "KESTREL",
+          "SPOOL",
+          "HALCYON",
+          "RELAY"
+        ],
+        "nullAttackTicks": 0,
+        "voidAttackTicks": 0,
+        "nullWarningTicks": 0
+      },
+      "combined": {
+        "pass": true,
+        "minimumLane": 54,
+        "requiredLane": 27,
+        "combinations": 6,
+        "rules": {
+          "1": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "2": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "3": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "4": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "5": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "6": {
+            "pass": true,
+            "firstFailure": null
+          }
+        },
+        "canonical": {
+          "pass": true,
+          "queries": 157518,
+          "durationMs": 302154,
+          "implementation": "src/signal/ice/schedule.sgl",
+          "placementImplementation": "src/signal/ice/placement.sgl",
+          "tracerPlacements": {
+            "admitted": 0,
+            "yielded": 31752
+          },
+          "tiers": {
+            "ids": [
+              "learner",
+              "courier",
+              "elite"
+            ],
+            "states": 1044,
+            "targets": 470448,
+            "admitted": 0
+          },
+          "error": null
+        }
+      }
+    },
+    {
+      "id": "basin",
+      "tier": "learner",
+      "world": {
+        "width": 5120,
+        "height": 5120
+      },
+      "song": "carrier-b",
+      "parSeconds": 33.0333,
+      "lapTicks": [
+        2012,
+        1988,
+        1982
+      ],
+      "crossings": [
+        {
+          "lap": 1,
+          "tick": 459
+        },
+        {
+          "lap": 2,
+          "tick": 2471
+        },
+        {
+          "lap": 3,
+          "tick": 4459
+        },
+        {
+          "lap": 4,
+          "tick": 6441
+        }
+      ],
+      "allRacersThreeLapsAndCoda": true,
+      "hazards": {
+        "firewall": 1234,
+        "drone": 0,
+        "tracer": 0,
+        "wake": 63
+      },
+      "pair": {
+        "rivals": [
+          "NULL",
+          "VOID",
+          "VEX",
+          "KESTREL",
+          "SPOOL"
+        ],
+        "nullAttackTicks": 2879,
+        "voidAttackTicks": 3150,
+        "nullWarningTicks": 410
+      },
+      "combined": {
+        "pass": true,
+        "minimumLane": 33.6,
+        "requiredLane": 27,
+        "combinations": 6,
+        "rules": {
+          "1": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "2": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "3": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "4": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "5": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "6": {
+            "pass": true,
+            "firstFailure": null
+          }
+        },
+        "canonical": {
+          "pass": true,
+          "queries": 162487,
+          "durationMs": 348273,
+          "implementation": "src/signal/ice/schedule.sgl",
+          "placementImplementation": "src/signal/ice/placement.sgl",
+          "tracerPlacements": {
+            "admitted": 114,
+            "yielded": 27912
+          },
+          "tiers": {
+            "ids": [
+              "learner",
+              "courier",
+              "elite"
+            ],
+            "states": 1098,
+            "targets": 485244,
+            "admitted": 3126
+          },
+          "error": null
+        }
+      }
+    },
+    {
+      "id": "basin",
+      "tier": "courier",
+      "world": {
+        "width": 5120,
+        "height": 5120
+      },
+      "song": "carrier-b",
+      "parSeconds": 30.9167,
+      "lapTicks": [
+        1945,
+        1870,
+        1855
+      ],
+      "crossings": [
+        {
+          "lap": 1,
+          "tick": 459
+        },
+        {
+          "lap": 2,
+          "tick": 2404
+        },
+        {
+          "lap": 3,
+          "tick": 4274
+        },
+        {
+          "lap": 4,
+          "tick": 6129
+        }
+      ],
+      "allRacersThreeLapsAndCoda": true,
+      "hazards": {
+        "firewall": 1705,
+        "drone": 0,
+        "tracer": 0,
+        "wake": 102
+      },
+      "pair": {
+        "rivals": [
+          "NULL",
+          "VOID",
+          "VEX",
+          "KESTREL",
+          "SPOOL"
+        ],
+        "nullAttackTicks": 2879,
+        "voidAttackTicks": 2838,
+        "nullWarningTicks": 306
+      },
+      "combined": {
+        "pass": true,
+        "minimumLane": 33.6,
+        "requiredLane": 27,
+        "combinations": 6,
+        "rules": {
+          "1": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "2": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "3": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "4": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "5": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "6": {
+            "pass": true,
+            "firstFailure": null
+          }
+        },
+        "canonical": {
+          "pass": true,
+          "queries": 153379,
+          "durationMs": 223750,
+          "implementation": "src/signal/ice/schedule.sgl",
+          "placementImplementation": "src/signal/ice/placement.sgl",
+          "tracerPlacements": {
+            "admitted": 0,
+            "yielded": 26082
+          },
+          "tiers": {
+            "ids": [
+              "learner",
+              "courier",
+              "elite"
+            ],
+            "states": 1044,
+            "targets": 458028,
+            "admitted": 2478
+          },
+          "error": null
+        }
+      }
+    },
+    {
+      "id": "basin",
+      "tier": "elite",
+      "world": {
+        "width": 5120,
+        "height": 5120
+      },
+      "song": "carrier-b",
+      "parSeconds": 31.3,
+      "lapTicks": [
+        1917,
+        1889,
+        1878
+      ],
+      "crossings": [
+        {
+          "lap": 1,
+          "tick": 459
+        },
+        {
+          "lap": 2,
+          "tick": 2376
+        },
+        {
+          "lap": 3,
+          "tick": 4265
+        },
+        {
+          "lap": 4,
+          "tick": 6143
+        }
+      ],
+      "allRacersThreeLapsAndCoda": true,
+      "hazards": {
+        "firewall": 3571,
+        "drone": 0,
+        "tracer": 0,
+        "wake": 0
+      },
+      "pair": {
+        "rivals": [
+          "NULL",
+          "VOID",
+          "VEX",
+          "KESTREL",
+          "SPOOL"
+        ],
+        "nullAttackTicks": 2879,
+        "voidAttackTicks": 2852,
+        "nullWarningTicks": 128
+      },
+      "combined": {
+        "pass": true,
+        "minimumLane": 33.6,
+        "requiredLane": 27,
+        "combinations": 6,
+        "rules": {
+          "1": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "2": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "3": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "4": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "5": {
+            "pass": true,
+            "firstFailure": null
+          },
+          "6": {
+            "pass": true,
+            "firstFailure": null
+          }
+        },
+        "canonical": {
+          "pass": true,
+          "queries": 153379,
+          "durationMs": 305075,
+          "implementation": "src/signal/ice/schedule.sgl",
+          "placementImplementation": "src/signal/ice/placement.sgl",
+          "tracerPlacements": {
+            "admitted": 0,
+            "yielded": 26082
+          },
+          "tiers": {
+            "ids": [
+              "learner",
+              "courier",
+              "elite"
+            ],
+            "states": 1044,
+            "targets": 458028,
+            "admitted": 2478
+          },
+          "error": null
+        }
+      }
+    }
+  ],
+  "limitations": [
+    "Flat ground only: future crests/terrain require line-of-sight occlusion",
+    "Actual Quayside/Basin seed0 AI paths admit no tracer; reservation yields are intentional",
+    "Actual Basin ELITE seed0 admits no Void wake; LEARNER and COURIER do",
+    "Complete-scene swarm state may be offscreen; visible curved geometry is proven separately",
+    "Fast fixed-tick scene capture is not a frame-time or audio-pacing measurement"
+  ]
+}
