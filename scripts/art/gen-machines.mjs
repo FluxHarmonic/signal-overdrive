@@ -3,7 +3,7 @@
 //
 //   node scripts/art/gen-machines.mjs [--zoom]
 //
-// Writes assets/signal/machines.png, 2048x640, in rows 80 px tall (scene.sgl's
+// Writes assets/signal/machines.png, 2048x1440, in rows 80 px tall (scene.sgl's
 // CELL-H) with the ground point 48 px down (ANCHOR-Y), centred across:
 //   row 0    80 px cells (PLAYER-CELL-W): the player (the falcon) from
 //            behind, in four runs of five leans (hard left, left, centre,
@@ -15,6 +15,8 @@
 //            turned right of the line of sight (0: its back to you)
 //   rows 4-6 the same, the thrusters' second flicker frame
 //   row 7    the shadow in an 80 px cell, then four 32x32 spark frames
+//   rows 8-13 Null, idle/attacking/warning, two flicker frames per state
+//   rows 14-17 Void, idle/attacking, two flicker frames per state
 // and with --zoom docs/machines-zoom.png, the sheet at 4x for review.
 //
 // How: each part of the model is a hexahedron (eight corners, so a box that
@@ -158,9 +160,27 @@ function delta(len) {
   return parts;
 }
 
-const MODELS = { falcon, needle, brick, delta };
-function model(kind, boost, flick) {
-  const len = (boost ? 0.42 : 0.10) * (flick ? 1.35 : 1);
+// Void: two long separated runners and a low rear bridge. The open fork
+// reads apart from Null's solid triangular delta even in a dark livery.
+function voidCourier(len) {
+  const parts = [];
+  for (const s of [-1, 1]) {
+    const [a, b] = sym(s, 0.24, 0.50);
+    parts.push(hexa([[a, -0.76, 0.05], [b, -0.76, 0.05], [b, -0.76, 0.20], [a, -0.76, 0.20]],
+                    [[a + 0.07 * s, 0.96, 0.05], [b - 0.05 * s, 0.96, 0.05],
+                     [b - 0.05 * s, 0.96, 0.10], [a + 0.07 * s, 0.96, 0.10]], "body"));
+    parts.push(box(a, b, -0.48, -0.38, 0.20, 0.24, "stripe"));
+    exhausts(parts, [s * 0.37], -0.76, 0.08, 0.18, 0.06, len);
+  }
+  parts.push(box(-0.32, 0.32, -0.62, -0.08, 0.06, 0.16, "pod"));
+  parts.push(hexa([[-0.12, -0.40, 0.16], [0.12, -0.40, 0.16], [0.08, -0.40, 0.28], [-0.08, -0.40, 0.28]],
+                  [[-0.06, 0.18, 0.10], [0.06, 0.18, 0.10], [0.04, 0.18, 0.15], [-0.04, 0.18, 0.15]], "glass"));
+  return parts;
+}
+
+const MODELS = { falcon, needle, brick, delta, void: voidCourier };
+function model(kind, boost, flick, flame) {
+  const len = (flame ?? (boost ? 0.42 : 0.10)) * (flick ? 1.35 : 1);
   return MODELS[kind](len);
 }
 
@@ -168,7 +188,7 @@ function model(kind, boost, flick) {
 const FACES = [[0, 1, 2, 3], [5, 4, 7, 6], [4, 0, 3, 7], [1, 5, 6, 2], [3, 2, 6, 7], [4, 5, 1, 0]];
 const LIGHT = (() => { const l = [-0.45, 0.35, 0.82]; const n = Math.hypot(...l); return l.map((v) => v / n); })();
 
-function render(canvas, ox, oy, colours, { kind, yaw, roll, elev, boost, flick, cw, scale }) {
+function render(canvas, ox, oy, colours, { kind, yaw, roll, elev, boost, flick, cw, scale, flame }) {
   CW = cw; AX = cw / 2; SCALE = scale;
   const zbuf = new Float32Array(CW * CH).fill(Infinity);
   const cy = Math.cos(yaw), sy = Math.sin(yaw), cr = Math.cos(roll), sr = Math.sin(roll);
@@ -181,11 +201,12 @@ function render(canvas, ox, oy, colours, { kind, yaw, roll, elev, boost, flick, 
     return [x2, y2, z1 + hover];
   };
   const toScreen = ([x, y, z]) => [AX + x * SCALE, AY - (z * ce + y * se) * SCALE, y * ce - z * se];
-  for (const part of model(kind, boost, flick)) {
+  for (const part of model(kind, boost, flick, flame)) {
     const wv = part.v.map(xf);
     const centre = wv.reduce((a, v) => [a[0] + v[0] / 8, a[1] + v[1] / 8, a[2] + v[2] / 8], [0, 0, 0]);
     const ramp5 = part.mat === "body" ? colours.body : part.mat === "pod" ? colours.pod
-      : part.mat === "stripe" ? colours.stripe : RAMPS[part.mat];
+      : part.mat === "stripe" ? colours.stripe
+      : part.mat === "glow" && colours.glow ? colours.glow : RAMPS[part.mat];
     for (const f of FACES) {
       const q = f.map((i) => wv[i]);
       // the face normal, outward
@@ -239,7 +260,9 @@ function fill([a, b, c], plot) {
 }
 
 // ---- the sheet --------------------------------------------------------------------------
-const sheet = new Canvas(RW * 16, CH * 8);
+// Rows0..7 retain their existing pixels. Pair rows8..17 add their silhouettes
+// and dark/attacking/Null-warning lights without multiplying runner assets.
+const sheet = new Canvas(RW * 16, CH * 18);
 const PLAYER = { kind: "falcon", body: RAMPS.player, pod: RAMPS.trim, stripe: RAMPS.player };
 const RIVALS = [
   { kind: "needle", body: RAMPS.orange, pod: RAMPS.trim, stripe: RAMPS.magenta },
@@ -257,6 +280,23 @@ for (let flick = 0; flick < 2; flick++) RIVALS.forEach((col, row) => {
   for (let k = 0; k < 16; k++) render(sheet, k * RW, (row + 1 + flick * 3) * CH, col,
     { kind: col.kind, yaw: k * 22.5 * DEG, roll: 0, elev: ELEV_RIVAL, boost: false, flick: !!flick, cw: RW, scale: RIVAL_SCALE });
 });
+const DARK_LIGHTS = [C.BG, C.BAR_A, C.BAR_B, C.INDIGO, C.VIOLET];
+const PAIR = [
+  { row: 8, kind: "delta", body: RAMPS.violet, lit: false },
+  { row: 10, kind: "delta", body: RAMPS.violet, lit: true },
+  { row: 12, kind: "delta", body: RAMPS.violet, lit: true, warning: true },
+  { row: 14, kind: "void", body: [C.BG, C.BAR_A, C.BAR_B, C.INDIGO, C.PLUM], lit: false },
+  { row: 16, kind: "void", body: [C.BG, C.BAR_A, C.BAR_B, C.INDIGO, C.PLUM], lit: true },
+];
+for (const variant of PAIR) for (let flick = 0; flick < 2; flick++) {
+  const colours = { body: variant.body, pod: RAMPS.trim,
+    stripe: variant.lit ? RAMPS.violet : DARK_LIGHTS,
+    glow: variant.lit ? RAMPS.violet : DARK_LIGHTS };
+  for (let k = 0; k < 16; k++) render(sheet, k * RW, (variant.row + flick) * CH, colours,
+    { kind: variant.kind, yaw: k * 22.5 * DEG, roll: 0, elev: ELEV_RIVAL,
+      boost: !!variant.warning, flame: variant.warning ? 0.24 : undefined,
+      flick: !!flick, cw: RW, scale: RIVAL_SCALE });
+}
 // row 7: the shadow, a dithered ellipse under the anchor
 for (let y = 0; y < CH; y++) for (let x = 0; x < PW; x++) {
   const e = ((x + 0.5 - PW / 2) / 34) ** 2 + ((y + 0.5 - AY - 2) / 9) ** 2;

@@ -1105,6 +1105,8 @@
                       clock-fraction: (clock-acc *clock*)
                       frame-jiffy: *frame-jiffy*
                       integrity: (if *damage-on* (machine-integrity m) 100.0)
+                      dead-air: (and *damage-on* (eq? (race-phase *race*) 'race)
+                                     (racer-dead-air (race-player *race*)))
                       boost: (and *damage-on* (> (machine-boost m) 0.0)))
         ;; a repair's snap, as it reaches the ear: the lock
         (when (music-lock-due!) (audio-lock!))

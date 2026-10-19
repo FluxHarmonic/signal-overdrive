@@ -1,0 +1,35 @@
+;;; Real native stream/ring, drained without opening an audio device.
+;;; Queued song audio mutes immediately on contact; its clock keeps advancing.
+(import (sigil test)
+        (sigil math)
+        (sigil audio)
+        (signal music conductor)
+        (signal shell music))
+
+(define RATE 44100)
+(define FRAMES 4410)
+(define out (make-bytevector (* 8 FRAMES) 0))
+(define (advance c ticks)
+  (if (= ticks 0) c (advance (conductor-step c) (- ticks 1))))
+(define (drain-peak)
+  (%audio-stream-drain-for-test out FRAMES 2)
+  (let loop ((i 0) (peak 0.0))
+    (if (= i (* 2 FRAMES)) peak
+        (loop (+ i 1)
+              (max peak (abs (bytevector-ieee-single-ref out (* 4 i) 'little)))))))
+
+(test-group "live ICE: immediate song mute"
+  (test "mute already-queued music, advance through silence, restore on exit"
+    (assert-false (audio-initialized?))
+    (let ((c (conductor-new 'lap1)))
+      (music-start! 'offline-test-context c)
+      (music-frame! c #f dead-air: #f)
+      (assert-true (> (drain-peak) 0.001))
+      (let ((before (music-audible-seconds)))
+        (music-frame! (advance c 6) #f dead-air: #t)
+        (assert-equal 0.0 (drain-peak))
+        (assert-true (< (abs (- (- (music-audible-seconds) before) 0.1)) (/ 1.0 RATE))))
+      (music-frame! (advance c 12) #f dead-air: #f)
+      (assert-true (> (drain-peak) 0.001))
+      (music-close!))
+    (assert-false (audio-initialized?))))
