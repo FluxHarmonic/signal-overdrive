@@ -13,7 +13,7 @@ function mapSize(file, world) {
   assert.equal(png.readUInt32BE(20), world.height / 32, "map height must match world");
 }
 for (const id of ["oval", "quayside", "basin"]) {
-  const source = loadTrack(id === "oval" ? "tracks/oval.json" : `test/fixtures/tracks/reshaped/${id}.json`);
+  const source = loadTrack(id === "oval" ? "tracks/oval.json" : `test/fixtures/tracks/scheduled/${id}.json`);
   const world = worldSize(source);
   assert.deepEqual(world, {width:5120, height:5120});
   const artifact = json(`pipeline/art/build/track/${id}-generated.json`);
@@ -28,8 +28,8 @@ for (const id of ["oval", "quayside", "basin"]) {
   const combined = json(`pipeline/${id}-combined.json`);
   assert.deepEqual(combined.world, world);
   assert.deepEqual(combined.crossings, ai.crossings);
-  assert.equal(combined.pass, id === "oval", "unsafe authored drafts must remain RED");
-  assert.equal(status(`pipeline/${id}-combined-status`), id === "oval" ? 0 : 1);
+  assert.equal(combined.pass, true, "approved scheduled candidates must pass");
+  assert.equal(status(`pipeline/${id}-combined-status`), 0);
   mapSize(`pipeline/art/assets/signal/${id}-map.png`, world);
 }
 const loop = json("retired/build/track/loop-generated.json");
@@ -55,4 +55,4 @@ assert.equal(status("pipeline/too-short-ai-status"), 1);
 assert.equal(json("pipeline/too-short-ai.json").threeLapsAllRacers, true);
 assert.equal(json("pipeline/too-short-ai.json").parGate, false);
 assert.deepEqual(json("pipeline/preview/oval-report.json").acceptance, {complete:true, pass:true});
-console.log("PASS:5120 regeneration, every current gate/verdict, rectangular and8192 maps, metadata roundtrips, bounded memory; known RED radius/readability/combined hazards retained");
+console.log("PASS:5120 regeneration, approved schedules, rectangular and8192 maps, metadata roundtrips, bounded memory; retired loop radius/readability remain RED");

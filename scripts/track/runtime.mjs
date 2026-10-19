@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import { loadTrack } from "./format.mjs";
 import { sampleDefinition, trackDefinition, STEP } from "./geometry.mjs";
+import { liveContract, contractList, sigilData } from "./schedule.mjs";
 
 export const numberText = value => {
   const rounded = Math.round(value * 1000) / 1000;
@@ -27,7 +28,8 @@ export function runtimeData(source, seed = 0) {
   }
   return `(${source.id} ${source.role} ${numberText(STEP)}\n` +
     [zones.boost, zones.repair, zones.ice].map(zs => `(${zs.map(list).join(" ")})`).join("\n") +
-    `\n(${chunks.join("\n")}) ${def.world.width} ${def.world.height})\n`;
+    `\n(${chunks.join("\n")}) ${def.world.width} ${def.world.height}\n` +
+    `${sigilData(contractList(liveContract(source, g)))})\n`;
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {

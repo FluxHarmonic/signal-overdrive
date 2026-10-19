@@ -19,8 +19,7 @@ cp "$track_run/retired/docs/loop-preview.png" docs/
 printf 'all active/draft5120 gates: pipeline\n' > "$track_run/STAGE"
 track_code=0
 sh scripts/track/check-pipeline "$track_run/pipeline" > "$track_run/pipeline.log" 2>&1 || track_code="$?"
-test "$track_code" -eq 1
-rg -q 'quayside combined live ICE process' "$track_run/pipeline/verify.log"
+test "$track_code" -eq 0
 cp "$track_run/pipeline/art/src/signal/track/oval-data.sgl" src/signal/track/
 cp "$track_run/pipeline/art/assets/signal/oval-atlas.png" "$track_run/pipeline/art/assets/signal/oval-map.png" \
   "$track_run/pipeline/art/assets/signal/oval-avg.png" assets/signal/
@@ -68,4 +67,4 @@ env SIGIL_AUDIO_BACKEND=null SIGIL_APP_PLATFORM=x11 DISPLAY= WAYLAND_DISPLAY= \
 rg -q 'headless race complete; audio uninitialized' "$track_run/headless.log"
 printf 'private-display native graphical shader smoke\n' > "$track_run/STAGE"
 node scripts/track/native-world.mjs "$track_run/native"
-printf 'finished; oval accepted, retired loop and unsafe live-ICE drafts remain RED\n' > "$track_run/STAGE"
+printf 'finished; approved scheduled candidates accepted, retired loop geometry remains RED\n' > "$track_run/STAGE"

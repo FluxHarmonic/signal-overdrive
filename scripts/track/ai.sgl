@@ -32,7 +32,7 @@
 (define track-value
   (make-track samples (list-ref data 2) (list-ref data 3)
               (list-ref data 4) (car data) (list-ref data 5)
-              (list-ref data 7) (list-ref data 8)))
+              (list-ref data 7) (list-ref data 8) (list-ref data 9)))
 (define tuning (tuning-defaults))
 (define sabotage? (and (> (length arguments) 1) (string=? (cadr arguments) "stall")))
 

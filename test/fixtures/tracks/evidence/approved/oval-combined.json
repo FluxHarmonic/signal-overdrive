@@ -1,0 +1,120 @@
+{
+  "id": "oval",
+  "world": {
+    "width": 5120,
+    "height": 5120
+  },
+  "crossings": [
+    {
+      "lap": 1,
+      "tick": 466
+    },
+    {
+      "lap": 2,
+      "tick": 1439
+    },
+    {
+      "lap": 3,
+      "tick": 2354
+    },
+    {
+      "lap": 4,
+      "tick": 3271
+    }
+  ],
+  "pass": true,
+  "required": 27,
+  "narrowest": 96.60000000000001,
+  "combinations": 1,
+  "checkedStates": 30,
+  "ownershipProofs": 0,
+  "rules": {
+    "1": {
+      "pass": true,
+      "firstFailure": null
+    },
+    "2": {
+      "pass": true,
+      "firstFailure": null
+    },
+    "3": {
+      "pass": true,
+      "firstFailure": null
+    },
+    "4": {
+      "pass": true,
+      "firstFailure": null
+    },
+    "5": {
+      "pass": true,
+      "firstFailure": null
+    },
+    "6": {
+      "pass": true,
+      "firstFailure": null
+    }
+  },
+  "tracer": {
+    "attempts": 0,
+    "legalTargets": 0,
+    "yieldedReservations": 0,
+    "yieldedNeighbours": 0,
+    "waitBars": 0
+  },
+  "narrowestScope": "finite layout/critical tracer witnesses; every admitted tracer target also passes the exact continuous corridor guard",
+  "stretches": [
+    {
+      "id": 0,
+      "from": 4115.954,
+      "to": 6251.953,
+      "owners": [
+        "$road"
+      ]
+    },
+    {
+      "id": 1,
+      "from": 191.999,
+      "to": 1727.999,
+      "owners": []
+    },
+    {
+      "id": 2,
+      "from": 1727.999,
+      "to": 4115.954,
+      "owners": []
+    },
+    {
+      "id": 3,
+      "from": 6251.953,
+      "to": 8640.267,
+      "owners": []
+    }
+  ],
+  "firstFailure": null,
+  "laps": [
+    {
+      "lap": 1,
+      "fromTick": 466,
+      "toTick": 1439,
+      "narrowest": 96.60000000000001,
+      "pass": true
+    },
+    {
+      "lap": 2,
+      "fromTick": 1439,
+      "toTick": 2354,
+      "narrowest": 96.60000000000001,
+      "pass": true
+    },
+    {
+      "lap": 3,
+      "fromTick": 2354,
+      "toTick": 3271,
+      "narrowest": 96.60000000000001,
+      "pass": true
+    }
+  ],
+  "timing": "actual lap crossings and exact conductor bar ticks",
+  "policySource": "approved Neon Row bible section3, track-authored cadence",
+  "runtimeParity": "same compiled schedule data; pure runtime queries verified separately; visual/collision activation remains integration work"
+}

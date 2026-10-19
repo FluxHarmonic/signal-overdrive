@@ -1,5 +1,5 @@
 // Shared offline geometry: the exact 0.1 interpolation and sampling arithmetic.
-import { worldSize } from "./format.mjs";
+import { worldSize, scheduleLayer } from "./format.mjs";
 export const STEP = 16, BARRIER = 14;
 
 // Circumradius of three consecutive local spline points. Unlike the racing
@@ -116,7 +116,8 @@ export function trackDefinition(source, seed = 0) {
   for (const layer of source.iceLayers) {
     const layout = layer.layouts[remaining % layer.layouts.length];
     remaining = Math.floor(remaining / layer.layouts.length);
-    ice.push(...layout.zones);
+    // Live hazards belong to the temporal contract, never permanent road ICE.
+    if (scheduleLayer(source, layer).kind === "seeded-static") ice.push(...layout.zones);
     selectedLayouts.push(`${layer.id}/${layout.id}`);
   }
   return { hw: g.halfWidth, world: worldSize(source),

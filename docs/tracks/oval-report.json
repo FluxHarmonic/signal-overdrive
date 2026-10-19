@@ -137,7 +137,7 @@
           ]
         ]
       },
-      "scope": "static and authored seed layers only; complete acceptance also requires the time-aware combined ICE gate"
+      "scope": "permanent road ICE and seeded-static layers only; live hazards require the combined schedule gate"
     }
   },
   "song": {
@@ -383,29 +383,72 @@
     "pass": true,
     "required": 27,
     "narrowest": 96.60000000000001,
-    "checkedStates": 38,
-    "transitions": 0,
-    "witness": {
-      "tick": 466,
-      "bar": 4,
-      "lap": 1,
-      "s": 0.6,
-      "layouts": [],
-      "tracerCenter": null,
-      "tracerLive": false,
-      "active": [
-        [
-          -0.95,
-          -0.05
-        ]
-      ],
-      "activeOwners": [
-        "static/0"
-      ],
-      "transition": false
+    "combinations": 1,
+    "checkedStates": 30,
+    "ownershipProofs": 0,
+    "rules": {
+      "1": {
+        "pass": true,
+        "firstFailure": null
+      },
+      "2": {
+        "pass": true,
+        "firstFailure": null
+      },
+      "3": {
+        "pass": true,
+        "firstFailure": null
+      },
+      "4": {
+        "pass": true,
+        "firstFailure": null
+      },
+      "5": {
+        "pass": true,
+        "firstFailure": null
+      },
+      "6": {
+        "pass": true,
+        "firstFailure": null
+      }
     },
+    "tracer": {
+      "attempts": 0,
+      "legalTargets": 0,
+      "yieldedReservations": 0,
+      "yieldedNeighbours": 0,
+      "waitBars": 0
+    },
+    "narrowestScope": "finite layout/critical tracer witnesses; every admitted tracer target also passes the exact continuous corridor guard",
+    "stretches": [
+      {
+        "id": 0,
+        "from": 4115.954,
+        "to": 6251.953,
+        "owners": [
+          "$road"
+        ]
+      },
+      {
+        "id": 1,
+        "from": 191.999,
+        "to": 1727.999,
+        "owners": []
+      },
+      {
+        "id": 2,
+        "from": 1727.999,
+        "to": 4115.954,
+        "owners": []
+      },
+      {
+        "id": 3,
+        "from": 6251.953,
+        "to": 8640.267,
+        "owners": []
+      }
+    ],
     "firstFailure": null,
-    "firstTracerFirewallFailure": null,
     "laps": [
       {
         "lap": 1,
@@ -429,9 +472,9 @@
         "pass": true
       }
     ],
-    "timing": "actual simulation lap crossings; exact conductor bar ticks",
-    "policySource": "conservative unbound live-ICE contract (all bar phases)",
-    "runtimeParity": "automatic live ICE scheduling is not implemented in the current game; runtime integration must use this policy or export an equivalent exhaustive trace"
+    "timing": "actual lap crossings and exact conductor bar ticks",
+    "policySource": "approved Neon Row bible section3, track-authored cadence",
+    "runtimeParity": "same compiled schedule data; pure runtime queries verified separately; visual/collision activation remains integration work"
   },
   "acceptanceScope": "geometry, measured par and combined ICE; actual atlas/palette gates are checked separately by the strict painter and pipeline verifier",
   "acceptance": {

@@ -48,7 +48,7 @@ test("authored Docklands drafts validate and enumerate every seeded layout", () 
   for (const id of ["quayside", "basin"]) {
     const fixture = loadTrack(`test/fixtures/tracks/${id}.json`);
     const result = geometryGates(fixture, sampleDefinition(trackDefinition(fixture)));
-    assert.equal(result.freeLane.combinations, 6);
+    assert.equal(result.freeLane.combinations, 1);
     assert.equal(result.freeLane.pass, true);
     // Draft gate results are reported, not presumed green.
     assert.ok(Number.isFinite(result.trueRadius.minimum));
@@ -62,7 +62,7 @@ test("mixed-radix seeds select every authored layout product deterministically",
     const a = trackDefinition(fixture, seed);
     assert.deepEqual(a, trackDefinition(fixture, seed));
     selections.add(a.selectedLayouts.join(","));
-    assert.ok(a.ice.length > fixture.zones.ice.length);
+    assert.deepEqual(a.ice, fixture.zones.ice, "live layouts must not become permanent collision zones");
   }
   assert.equal(selections.size, 6);
   assert.throws(() => trackDefinition(fixture, -1));

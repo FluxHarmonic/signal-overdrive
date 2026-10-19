@@ -1,0 +1,25 @@
+#!/bin/sh
+# Phantom-only approved-policy checkpoint. No painting or native build yet.
+set -eu
+cd "$(dirname "$0")/../.."
+track_run="$1"
+mkdir -p "$track_run"
+trap 'track_code=$?; printf "RESULT: approved schedule verification exit %s; inspect STAGE and reports\n" "$track_code" > "$track_run/RESULT"' EXIT
+track_sigil="$HOME/.sigil/versions/0.22.11/sigil"
+printf 'approved scheduling sabotages\n' > "$track_run/STAGE"
+node --test scripts/track/gates.test.mjs scripts/track/combined-ice.test.mjs scripts/track/schedule.test.mjs \
+  > "$track_run/tests.log" 2>&1
+printf 'cross-language runtime schedule parity\n' > "$track_run/STAGE"
+node scripts/track/schedule-parity.mjs "$track_run/parity.sgv" > "$track_run/parity-generation.log"
+timeout 240 "$track_sigil" -L src eval -f scripts/track/schedule-parity.sgl -- "$track_run/parity.sgv" \
+  > "$track_run/parity.log" 2>&1
+for track_id in quayside basin; do
+  printf 'actual AI timing with authored schedule: %s\n' "$track_id" > "$track_run/STAGE"
+  node scripts/track/runtime.mjs "test/fixtures/tracks/scheduled/$track_id.json" "$track_run/$track_id.sgv"
+  timeout 180 "$track_sigil" -L src eval -f scripts/track/ai.sgl -- "$track_run/$track_id.sgv" \
+    > "$track_run/$track_id-ai.json" 2> "$track_run/$track_id-ai.log"
+  printf 'approved combined ICE audit: %s\n' "$track_id" > "$track_run/STAGE"
+  node scripts/track/combined-ice.mjs "test/fixtures/tracks/scheduled/$track_id.json" "$track_run/$track_id-ai.json" \
+    "$track_run/$track_id-combined.json" > "$track_run/$track_id-combined.log" 2>&1
+done
+printf 'finished\n' > "$track_run/STAGE"

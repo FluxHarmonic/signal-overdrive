@@ -37,6 +37,7 @@ import { Canvas, C, ramp, bayerOn, BAYER4, rng } from "./lib.mjs";
 import { sampleDefinition, trackDefinition } from "../track/geometry.mjs";
 import { loadTrack } from "../track/format.mjs";
 import { geometryGates, tileGate } from "../track/gates.mjs";
+import { liveContract, contractList, sigilData } from "../track/schedule.mjs";
 
 const SOURCE_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const option = name => {
@@ -74,13 +75,14 @@ function build(name, def) {
   const sampled = sampleDefinition(def);
   const { P, N, S, LENGTH, TAN, CURV_S, LINE, HW } = sampled;
   const gates = geometryGates(def.source, sampled);
+  const schedule = liveContract(def.source, sampled);
   const reportDir = path.join(ROOT, "build/track");
   fs.mkdirSync(reportDir, { recursive: true });
   const writeReport = () => fs.writeFileSync(path.join(reportDir, `${name}-generated.json`),
     JSON.stringify({ id: name, seed: def.seed, world: def.world,
       canvasBytes: WIDTH * HEIGHT * 4, mapTiles: { width: MAP_W, height: MAP_H },
       memory: { maxRSSKiB: process.resourceUsage().maxRSS, externalBytes: process.memoryUsage().external },
-      selectedLayouts: def.selectedLayouts,
+      selectedLayouts: def.selectedLayouts, liveICE: schedule,
       draft: DRAFT, gates }, null, 2) + "\n");
   writeReport();
   const failed = Object.entries(gates).filter(([, gate]) => !gate.pass).map(([key]) => key);
@@ -328,12 +330,13 @@ ${body}        ))
                     (vector-set! v (+ k i) (vector-ref c i))
                     (copy (+ i 1))))
                 (loop (cdr cs) (+ k (vector-length c))))))))
-    ;; (name samples step boost repair ice world-width world-height)
+    ;; (name samples step boost repair ice world-width world-height schedule)
     (define (${name}-track-data)
       (list '${name} (join CHUNKS) ${f(STEP)}
             '(${ZONES.boost.map(zone).join(" ")})
             '(${ZONES.repair.map(zone).join(" ")})
-            '(${ZONES.ice.map(zone).join(" ")}) ${WIDTH} ${HEIGHT}))))
+            '(${ZONES.ice.map(zone).join(" ")}) ${WIDTH} ${HEIGHT}
+            '${sigilData(contractList(schedule))}))))
 `;
   fs.mkdirSync(path.join(ROOT, "src/signal/track"), { recursive: true });
   fs.writeFileSync(path.join(ROOT, `src/signal/track/${name}-data.sgl`), src);

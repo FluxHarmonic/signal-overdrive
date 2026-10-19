@@ -1,5 +1,5 @@
 #!/bin/sh
-# Phantom-only: reuse unchanged, successful cp8 atlas/native evidence explicitly.
+# Phantom-only legacy refusal audit. Requires fresh current-pipeline artifacts.
 # Never convert a RED draft report to a PASS to make the acceptance job green.
 set -eu
 cd "$(dirname "$0")/../.."
@@ -56,8 +56,8 @@ assert.deepEqual(read("cached-pipeline/preview/oval-report.json").acceptance, {c
 for (const id of ["quayside", "basin"]) {
   const report = read(`cached-pipeline/${id}-combined.json`);
   assert.equal(report.pass, false);
-  assert.ok(report.firstFailure.transition);
-  assert.ok(report.firstTracerFirewallFailure.width < report.required);
+  assert.equal(report.rules[4].pass, false);
+  assert.equal(report.rules[4].firstFailure.reason, "opposite-side-swap-without-full-rest");
 }
 JS
 printf 'finished; oval fully checked; two unsafe hazard fixtures correctly RED\n' > "$track_run/STAGE"
