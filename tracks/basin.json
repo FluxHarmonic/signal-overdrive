@@ -88,6 +88,12 @@
   "iceLayers": [
     {
       "id": "gantry",
+      "kind": "firewall",
+      "fromLap": 2,
+      "phraseBars": 4,
+      "upBars": 1,
+      "downBars": 1,
+      "phaseBars": 0,
       "layouts": [
         {
           "id": "left",
@@ -115,6 +121,12 @@
     },
     {
       "id": "west-road",
+      "kind": "firewall",
+      "fromLap": 2,
+      "phraseBars": 4,
+      "upBars": 1,
+      "downBars": 1,
+      "phaseBars": 1,
       "layouts": [
         {
           "id": "left",

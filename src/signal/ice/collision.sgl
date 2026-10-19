@@ -1,0 +1,72 @@
+;;; Live ICE is a traversable cost, never a bouncing wall. Entry locks prevent
+;;; a standing firewall or six-tick tracer from damaging on every fixed tick.
+(define-library (signal ice collision)
+  (import (sigil struct)
+          (signal handling)
+          (signal ice runtime))
+  (export ice-contact-step ice-contact-machine ice-contact-locks ice-contact-dead-air)
+  (begin
+    (define-struct ice-contact
+      (machine default: #f)
+      (locks default: '())
+      (dead-air default: #f))
+
+    ;; integrity cost, retained speed, scrambled-steering seconds.
+    (define IMPACTS
+      '(("firewall" 12.0 0.80 0.0)
+        ("drone" 8.0 0.85 0.7)
+        ("tracer" 18.0 0.72 1.4)
+        ("wake" 0.0 1.0 0.0)))
+
+    (define (impact kind)
+      (let find ((remaining IMPACTS))
+        (cond
+          ((null? remaining) (error "unknown live ICE collision kind" kind))
+          ((string=? (caar remaining) kind) (cdar remaining))
+          (else (find (cdr remaining))))))
+
+    (define (key zone)
+      (list (car zone) (cadr zone) (caddr zone)))
+
+    (define (touching? contract owned s u radius)
+      ;; Expand the point by the machine's18-texel footprint. The gate's
+      ;;27-texel free lane retains nine texels of steering margin in total.
+      (or (ice-zone-hit? contract owned s u)
+          (ice-zone-hit? contract owned s (- u radius))
+          (ice-zone-hit? contract owned s (+ u radius))
+          (ice-zone-hit? contract owned (- s 9.0) u)
+          (ice-zone-hit? contract owned (+ s 9.0) u)))
+
+    (define (ice-contact-step contract zones m old-locks half-width damage-scale dt)
+      (let* ((u (/ (machine-d m) half-width))
+             (s (machine-s m))
+             (radius (/ 9.0 half-width)))
+        (let loop ((remaining zones) (m m) (locks '()) (dead-air? #f))
+          (if (null? remaining)
+              (ice-contact machine: m locks: locks dead-air: dead-air?)
+              (let* ((owned (car remaining))
+                     (id (key owned))
+                     (hit? (touching? contract owned s u radius))
+                     (wake? (string=? (cadr owned) "wake"))
+                     (new? (and hit? (not (member id old-locks))
+                                (not (member id locks))))
+                     (cost (impact (cadr owned)))
+                     (loss (if hit?
+                               (* damage-scale (if wake? (* 10.0 dt)
+                                                   (if new? (car cost) 0.0)))
+                               0.0))
+                     (speed (if new? (cadr cost) 1.0))
+                     (m (if hit?
+                            (machine m
+                              integrity: (max 0.0 (- (machine-integrity m) loss))
+                              vx: (* speed (machine-vx m))
+                              vy: (* speed (machine-vy m))
+                              scramble: (if new? (max (machine-scramble m) (caddr cost))
+                                            (machine-scramble m))
+                              events: (if (and new? (not wake?))
+                                          (cons 'ice (machine-events m))
+                                          (machine-events m)))
+                            m)))
+                (loop (cdr remaining) m
+                      (if hit? (cons id locks) locks)
+                      (or dead-air? (and hit? wake?))))))))))

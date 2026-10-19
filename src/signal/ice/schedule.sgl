@@ -28,6 +28,9 @@
                  (and crossing
                       (>= bar (+ (first-bar c crossing)
                                  (rule c 7)))
+                      ;; Tier density removes bars from the authored schedule.
+                      ;; It never turns a down bar into an up bar.
+                      (= (modulo bar (if (> (length c) 8) (list-ref c 8) 1)) 0)
                       (< (modulo (+ bar (list-ref layer 6))
                                  (+ (list-ref layer 4) (list-ref layer 5)))
                          (list-ref layer 4)))))))

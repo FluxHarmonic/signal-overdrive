@@ -1,0 +1,100 @@
+;;; Runtime integration: real race constructors and fixed-tick collisions.
+(import (sigil test)
+        (sigil math)
+        (signal tiers)
+        (signal track)
+        (signal handling)
+        (signal tuning)
+        (signal race)
+        (signal ice runtime)
+        (signal ice collision)
+        (signal ice schedule)
+        (signal music conductor))
+
+(define OVAL-TUNING (handling-set (tuning-defaults) 'track 3.0))
+(define BASIN-TUNING (handling-set (tuning-defaults) 'track 2.0))
+
+(test-group "live race: configuration"
+  (test "tiers set pace from shared data; only finale has the named pair"
+    (for-each
+      (lambda (tier)
+        (let ((r (race-new BASIN-TUNING tier: tier)))
+          (assert-equal '("NULL" "VOID")
+                        (list (racer-name (car (race-rivals r)))
+                              (racer-name (cadr (race-rivals r)))))
+          (assert-true (< (abs (- (racer-pace (car (race-rivals r)))
+                                 (tier-value tier 'rival-pace))) 1e-9))))
+      TIERS)
+    (assert-false (member "NULL" (map racer-name (race-rivals (race-new OVAL-TUNING)))))
+    (assert-false (member "VOID" (map racer-name (race-rivals (race-new OVAL-TUNING))))))
+
+  (test "time trial removes all rivals and both permanent and live ICE"
+    (let ((r (race-new BASIN-TUNING tier: 'elite mode: 'time-trial seed: 37)))
+      (assert-equal '() (race-rivals r))
+      (assert-equal '() (track-ice (race-track r)))
+      (assert-equal '() (ice-state-contract (race-ice r)))
+      (let ((restart (race-start BASIN-TUNING r)))
+        (assert-equal 'elite (race-tier restart))
+        (assert-equal 'time-trial (race-mode restart))
+        (assert-equal 37 (race-seed restart))
+        (assert-equal '() (race-rivals restart))))))
+
+(test-group "live race: collision costs"
+  (define CONTRACT
+    '(1 12000.0 100.0 140 (27 960 300 460 34 600 6 1 1)
+        () () (#f 3 1)))
+  (define WALL '("wall" "firewall" "left" (1000.0 1100.0 -1.0 0.2)))
+  (define MACHINE (machine s: 1050.0 d: -50.0 vx: 500.0 vy: 0.0))
+
+  (test "firewall is a one-entry speed/integrity cost, never a wall bounce"
+    (let* ((first (ice-contact-step CONTRACT (list WALL) MACHINE '() 100.0 1.0 (/ 1.0 60.0)))
+           (m (ice-contact-machine first))
+           (same (ice-contact-step CONTRACT (list WALL) m (ice-contact-locks first) 100.0 1.0 (/ 1.0 60.0)))
+           (left (ice-contact-step CONTRACT '() m (ice-contact-locks first) 100.0 1.0 (/ 1.0 60.0)))
+           (again (ice-contact-step CONTRACT (list WALL) m (ice-contact-locks left) 100.0 1.0 (/ 1.0 60.0))))
+      (assert-equal 88.0 (machine-integrity m))
+      (assert-equal 400.0 (machine-vx m))
+      (assert-equal 1050.0 (machine-s m))
+      (assert-equal '(ice) (machine-events m))
+      (assert-equal 88.0 (machine-integrity (ice-contact-machine same)))
+      (assert-equal 76.0 (machine-integrity (ice-contact-machine again)))))
+
+  (test "drone and tracer have distinct impacts; learner forgiveness is data"
+    (let* ((swarm '("swarm" "drone" "left" (1000.0 1100.0 -1.0 -0.2)))
+           (trace '("$tracer" "tracer" "target" (1000.0 1100.0 -1.0 -0.2)))
+           (drone (ice-contact-machine
+                    (ice-contact-step CONTRACT (list swarm) MACHINE '() 100.0 1.0 (/ 1.0 60.0))))
+           (tracer (ice-contact-machine
+                     (ice-contact-step CONTRACT (list trace) MACHINE '() 100.0
+                       (tier-value 'learner 'damage-scale) (/ 1.0 60.0)))))
+      (assert-equal 92.0 (machine-integrity drone))
+      (assert-equal 0.7 (machine-scramble drone))
+      (assert-equal 86.5 (machine-integrity tracer))
+      (assert-equal 1.4 (machine-scramble tracer)))))
+
+(test-group "live race: actual scheduler hook"
+  (test "real race-step activates a scheduled firewall and locks its repeated hit"
+    (let* ((r (race-new OVAL-TUNING tier: 'elite))
+           (t (race-track r))
+           (length (track-length t))
+           (half (track-hw t 0))
+           (contract (list 1 length half 140
+                          '(27 960 300 460 34 600 6 1 1)
+                          (list (list 0 0.0 length '("wall")))
+                          '(("wall" "firewall" 1 0 1 0 0
+                              (("left" ((1900.0 2100.0 -1.0 0.2))))))
+                          '(#f 3 1)))
+           (point (track-point t 2000.0 -0.6))
+           (m (machine (make-machine (car point) (cadr point)
+                                     (atan (caddr point) (- (cadddr point))))
+                       s: 2000.0 d: (* -0.6 half) hint: (track-index-at t 2000.0)))
+           (ice (ice-state (ice-new contract 'elite 0) crossings: '(0 #f #f #f)))
+           (r (race r phase: 'race ice: ice rivals: '()
+                      player: (racer (race-player r) machine: m lap: 1)
+                      song: (conductor (race-song r) tick: 411)))
+           (hit (race-step OVAL-TUNING r NO-INPUT #f))
+           (next (race-step OVAL-TUNING hit NO-INPUT #f)))
+      (assert-equal 1 (length (ice-state-active (race-ice hit))))
+      (assert-equal 88.0 (machine-integrity (racer-machine (race-player hit))))
+      (assert-equal 88.0 (machine-integrity (racer-machine (race-player next))))
+      (assert-equal 1 (length (racer-ice-locks (race-player next)))))))

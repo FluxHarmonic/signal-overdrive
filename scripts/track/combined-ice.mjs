@@ -1,5 +1,6 @@
 // Approved Neon Row section3 contract. No unbound external policy overrides.
 import fs from "node:fs";
+import { verifyCanonicalSchedule } from "./scheduler-check.mjs";
 import { loadTrack, worldSize } from "./format.mjs";
 import { liveContract, splitArc, arcsOverlap, mod, barAt, barTick, firstBar,
   zonesAt, layerLive, layoutAt, tracerReservation } from "./schedule.mjs";
@@ -140,7 +141,7 @@ export function auditTracerEvents(contract, crossings, events) {
   return {pass:!failures.length,failures};
 }
 
-export function combinedIce(source, timing, policy) {
+export function combinedIce(source, timing, policy, observe = () => {}) {
   if (policy!==undefined && Object.keys(policy).length) throw new Error("live ICE schedule belongs in track data; external policy overrides are forbidden");
   validateTiming(source,timing);
   const contract=liveContract(source), crossings=timing.crossings, r=contract.rules;
@@ -175,6 +176,8 @@ export function combinedIce(source, timing, policy) {
     for (const tick of ordered) {
       const bar=barAt(contract,tick), lap=crossings.filter(e => e.tick<=tick).length;
       const zones=zonesAt(contract,crossings,seed,tick), base=corridor(contract,zones);
+      observe({op:"zones",seed,tick,zones});
+      observe({op:"corridor",zones,pass:base.pass});
       checkedStates++;
       narrowest=Math.min(narrowest,base.minimum,base.sharedMinimum);
       laps[lap-1].narrowest=Math.min(laps[lap-1].narrowest,base.minimum,base.sharedMinimum);
@@ -208,9 +211,14 @@ export function combinedIce(source, timing, policy) {
       let legal=0;
       for (const stretch of contract.stretches) for (const center of longitudinalTargets(contract,stretch,zones)) {
         const reserve=tracerReservation(contract,crossings,seed,tick,center);
-        if (!reserve.pass) { tracer.yieldedReservations++; continue; }
+        if (!reserve.pass) {
+          observe({op:"tracer",seed,tick,targetS:mod(center-r.tracerAhead,contract.length),u:0,pass:false});
+          tracer.yieldedReservations++;
+          continue;
+        }
         for (const u of lateralTargets(contract,zones)) {
           const slot=tracerAllowed(contract,crossings,seed,tick,mod(center-r.tracerAhead,contract.length),u);
+          observe({op:"tracer",seed,tick,targetS:mod(center-r.tracerAhead,contract.length),u,pass:slot.pass});
           if (!slot.pass) { tracer.yieldedNeighbours++; continue; }
           legal++; tracer.legalTargets++;
           narrowest=Math.min(narrowest,slot.corridor.minimum,slot.corridor.sharedMinimum);
@@ -234,7 +242,14 @@ export function combinedIce(source, timing, policy) {
 if (process.argv[1]===new URL(import.meta.url).pathname) {
   const [trackFile,timingFile,output,policyFile]=process.argv.slice(2);
   if (!trackFile||!timingFile||!output||policyFile) throw new Error("usage: combined-ice.mjs track.json ai.json output.json (schedule is track data)");
-  const result=combinedIce(loadTrack(trackFile),JSON.parse(fs.readFileSync(timingFile)));
+  const source=loadTrack(trackFile), timing=JSON.parse(fs.readFileSync(timingFile));
+  const queries=[];
+  const result=combinedIce(source,timing,undefined,query=>queries.push(query));
+  // Acceptance MUST execute the game's implementation. JS is an independent
+  // diagnostic oracle only; unavailable runtime or any disagreement is RED.
+  result.canonical=verifyCanonicalSchedule(liveContract(source),timing.crossings,queries);
+  result.pass=result.pass && result.canonical.pass;
+  result.runtimeParity="acceptance executes (signal ice schedule), the game's implementation; diagnostic disagreement fails closed";
   fs.writeFileSync(output,JSON.stringify(result,null,2)+"\n");
   console.log(JSON.stringify(result));
   if (!result.pass) process.exitCode=1;

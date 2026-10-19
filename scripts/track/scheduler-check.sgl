@@ -1,0 +1,41 @@
+;;; Acceptance executes the game's scheduler. Expected diagnostics cannot
+;;; make a disagreement green. Input is data only, never evaluated code.
+(import (sigil io)
+        (signal ice schedule))
+
+(define arguments
+  (let find ((remaining (cdr (command-line))))
+    (cond
+      ((null? remaining) '())
+      ((string=? (car remaining) "--") (cdr remaining))
+      (else (find (cdr remaining))))))
+(define input (call-with-input-file (car arguments) read))
+(define contract (car input))
+(define crossings (cadr input))
+(define queries (caddr input))
+
+(for-each
+  (lambda (query)
+    (let* ((operation (car query))
+           (zones? (string=? operation "zones"))
+           (corridor? (string=? operation "corridor"))
+           (actual
+             (cond
+               (zones?
+                (ice-zones-at contract crossings (cadr query) (caddr query)))
+               (corridor?
+                (ice-corridor? contract (cadr query)))
+               ((string=? operation "tracer")
+                (and (ice-tracer-slot contract crossings
+                       (cadr query) (caddr query)
+                       (list-ref query 3) (list-ref query 4))
+                     #t))
+               (else (error "unknown canonical schedule operation" operation))))
+           (expected (list-ref query (cond (zones? 3) (corridor? 2) (else 5)))))
+      (unless (equal? actual expected)
+        (error "canonical scheduler disagrees with diagnostic oracle" query actual expected))))
+  queries)
+(display "PASS canonical scheduler: ")
+(display (length queries))
+(display " queries")
+(newline)

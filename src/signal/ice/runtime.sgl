@@ -1,0 +1,145 @@
+;;; Automatic, deterministic live hazards. The gate executes this scheduler's
+;;; (signal ice schedule) queries too. No audio-device or wall-clock input.
+;;; Simulation-song ticks and observed lap crossings share a single epoch.
+(define-library (signal ice runtime)
+  (import (sigil struct)
+          (sigil math)
+          (signal ice schedule)
+          (signal ice tier))
+  (export ice-state ice-state? ice-new ice-step
+          ice-state-contract ice-state-tick ice-state-crossings
+          ice-state-active ice-state-telegraphs ice-state-tracer
+          ice-state-reservations ice-state-events
+          tracer tracer? tracer-strike tracer-until tracer-reserved-until
+          tracer-stretch tracer-target-s tracer-u tracer-center tracer-announced
+          ice-tracer-zone ice-zone-hit?)
+  (begin
+    (define-struct tracer
+      (strike default: 0)
+      (until default: 0)
+      (reserved-until default: 0)
+      (stretch default: 0)
+      (target-s default: 0.0)
+      (u default: 0.0)
+      (center default: 0.0)
+      (announced default: 0))
+
+    (define-struct ice-state
+      (contract default: '())
+      (tick default: -1)
+      (crossings default: '(#f #f #f #f))
+      (active default: '())
+      (telegraphs default: '())
+      (tracer default: #f)
+      (seed default: 0)
+      (reservations default: '())
+      (events default: '()))
+
+    (define (ice-new contract tier seed)
+      (ice-state contract: (if (null? contract)
+                              '()
+                              (ice-tier-contract contract tier))
+                 seed: seed))
+
+    (define (live-only zones)
+      (let loop ((zones zones))
+        (cond
+          ((null? zones) '())
+          ((string=? (cadar zones) "seeded-static") (loop (cdr zones)))
+          (else (cons (car zones) (loop (cdr zones)))))))
+
+    (define (ice-tracer-zone contract trace)
+      (let* ((rules (list-ref contract 4))
+             (half-length (list-ref rules 3))
+             (half-width (/ (list-ref rules 4) (list-ref contract 2)))
+             (center (tracer-center trace))
+             (u (tracer-u trace)))
+        (list "$tracer" "tracer" "target"
+              (list (- center half-length) (+ center half-length)
+                    (max -1.0 (- u half-width))
+                    (min 1.0 (+ u half-width))))))
+
+    (define (ice-zone-hit? contract owned s u)
+      (let* ((zone (list-ref owned 3))
+             (length (list-ref contract 1))
+             (distance (- s (car zone)))
+             (wrapped (- distance (* (floor (/ distance length)) length))))
+        (and (<= wrapped (- (cadr zone) (car zone)))
+             (<= (caddr zone) u)
+             (<= u (cadddr zone)))))
+
+    (define (current-reservations reservations tick)
+      (let loop ((remaining reservations))
+        (cond
+          ((null? remaining) '())
+          ((<= (cadar remaining) tick) (loop (cdr remaining)))
+          (else (cons (car remaining) (loop (cdr remaining)))))))
+
+    ;; Capture the target's lane at announcement; braking cannot move it.
+    (define (announce state tick crossings target-s u reservations)
+      (let* ((contract (ice-state-contract state))
+             (bar (ice-tick->bar contract tick))
+             (rules (list-ref contract 4))
+             (strike (ice-bar->tick contract (+ bar (list-ref rules 7))))
+             (slot (ice-tracer-slot contract crossings (ice-state-seed state)
+                                   strike target-s u reservations)))
+        (and slot
+             (tracer strike: strike
+                     until: (+ strike (list-ref rules 6))
+                     reserved-until: (cadr slot)
+                     stretch: (car slot)
+                     target-s: target-s
+                     u: u
+                     center: (caddr slot)
+                     announced: tick))))
+
+    ;; Called once per fixed tick. Static road ICE stays with handling;
+    ;; active/telegraphs here contain only automatic live hazards.
+    (define (ice-step state tick crossings target-s u)
+      (let ((contract (ice-state-contract state)))
+        (if (or (null? contract) (not (car crossings)) (list-ref crossings 3))
+            (ice-state state tick: tick crossings: crossings
+                       active: '() telegraphs: '() tracer: #f
+                       reservations: '() events: '())
+            (let* ((bar (ice-tick->bar contract tick))
+                   (downbeat? (= tick (ice-bar->tick contract bar)))
+                   (old (ice-state-tracer state))
+                   (old (and old (< tick (tracer-until old)) old))
+                   (reservations (current-reservations
+                                   (ice-state-reservations state) tick))
+                   (new (and downbeat? (not old)
+                             (announce state tick crossings target-s u reservations)))
+                   (trace (or old new))
+                   (reservations
+                     (if new
+                         (cons (list (tracer-strike new)
+                                     (tracer-reserved-until new)
+                                     (tracer-stretch new))
+                               reservations)
+                         reservations))
+                   (zones (live-only
+                            (ice-zones-at contract crossings (ice-state-seed state) tick)))
+                   (future (ice-bar->tick contract
+                             (+ bar (list-ref (list-ref contract 4) 7))))
+                   (warnings
+                     (live-only (ice-zones-at contract crossings
+                                             (ice-state-seed state) future)))
+                   (warnings
+                     (let loop ((remaining warnings))
+                       (cond
+                         ((null? remaining) '())
+                         ((member (car remaining) zones) (loop (cdr remaining)))
+                         (else (cons (car remaining) (loop (cdr remaining)))))))
+                   (armed? (and trace (>= tick (tracer-strike trace))))
+                   (trace-zone (and trace (ice-tracer-zone contract trace))))
+              (ice-state state tick: tick crossings: crossings
+                         tracer: trace reservations: reservations
+                         active: (if armed? (cons trace-zone zones) zones)
+                         telegraphs: (if (and trace (not armed?))
+                                         (cons trace-zone warnings)
+                                         warnings)
+                         events: (cond
+                                   ((and trace (= tick (tracer-strike trace)))
+                                    '(tracer-strike))
+                                   (new '(tracer-telegraph))
+                                   (else '())))))))))

@@ -1,0 +1,20 @@
+;;; D21/P21: Null works on the player, Void on the road. One attacks at a
+;;; time, handing over every eight simulation-song bars. Never device time.
+(define-library (signal rivals turns)
+  (export pair-attacker pair-handoff? rival-attacking? PAIR-PHRASE-BARS)
+  (begin
+    (define PAIR-PHRASE-BARS 8)
+
+    (define (pair-attacker bar)
+      (if (even? (quotient bar PAIR-PHRASE-BARS)) 'null 'void))
+
+    (define (pair-handoff? old-bar new-bar)
+      (not (= (quotient old-bar PAIR-PHRASE-BARS)
+              (quotient new-bar PAIR-PHRASE-BARS))))
+
+    (define (rival-attacking? name finale? bar)
+      (and finale?
+           (case (pair-attacker bar)
+             ((null) (string=? name "NULL"))
+             ((void) (string=? name "VOID"))
+             (else #f))))))
