@@ -1,0 +1,29 @@
+#!/bin/sh
+# Phantom-only actual physics/scheduler evidence, including honest REDs.
+set -eu
+cd "$(dirname "$0")/../.."
+track_run="$1"
+mkdir -p "$track_run"
+trap 'track_code=$?; printf "RESULT: tier driving collection exit %s; inspect each report status for acceptance\n" "$track_code" > "$track_run/RESULT"' EXIT
+track_sigil="$HOME/.sigil/versions/0.22.11/sigil"
+node scripts/track/runtime.mjs tracks/breakwater.json "$track_run/breakwater.sgv" 0
+for track_tier in learner courier elite; do
+  printf 'actual Breakwater race, %s\n' "$track_tier" > "$track_run/STAGE"
+  track_code=0
+  timeout 600 "$track_sigil" -L src eval -f scripts/track/ai.sgl -- "$track_run/breakwater.sgv" "$track_tier" \
+    > "$track_run/$track_tier-ai.json" 2> "$track_run/$track_tier-ai.log" || track_code="$?"
+  test "$track_code" -le 1
+  printf '%s\n' "$track_code" > "$track_run/$track_tier-status"
+  node --input-type=module - "$track_run/$track_tier-ai.json" "$track_tier" <<'JS'
+import fs from "node:fs";
+import assert from "node:assert/strict";
+const report=JSON.parse(fs.readFileSync(process.argv[2]));
+assert.equal(report.id,"breakwater");
+assert.equal(report.tier,process.argv[3]);
+assert.match(report.scheduler,/actual input-track contract/);
+assert.equal(report.rivalNames.length,5);
+assert.ok(report.liveIceTicks>0,"actual race must exercise authored live ICE");
+assert.ok(report.warningTicks>0,"actual race must exercise telegraphs");
+JS
+done
+printf 'finished; report statuses remain separate from collection\n' > "$track_run/STAGE"
