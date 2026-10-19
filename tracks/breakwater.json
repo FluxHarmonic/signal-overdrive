@@ -502,8 +502,8 @@
     }
   ],
   "song": {
-    "id": "carrier",
-    "cues": "music/carrier/cues.sgl",
+    "id": "carrier-c",
+    "cues": "music/carrier-c/cues.sgl",
     "bpm": 140,
     "sections": [
       {
