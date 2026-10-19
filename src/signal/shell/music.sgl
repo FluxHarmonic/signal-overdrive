@@ -39,6 +39,7 @@
     (define *resync-pending* #f)
     (define *resyncs* 0)
     (define *resync-cancels* 0)
+    (define *replans* 0)          ; splices planned again for a gap that outgrew their room
     (define *last-resync-bar* -1)
     (define *subtract-depth* #t)
     (define *handoff-mode* 'planned)
@@ -395,9 +396,17 @@
            (set! *resync-pending* #f)
            (set! *resync-cancels* (+ *resync-cancels* 1))
            0)
+          ((splice-outgrown? gap (/ (- line (playback-rendered *playback*) SPLICE-FRAMES) (* 1.0 *rate*)))
+           ;; The gap outgrew the room planned at the request: plan again,
+           ;; at the bar line with room for all of it. The request stays in
+           ;; flight, so pacing does not ask a second time.
+           (plan-splice! gap)
+           (set! *replans* (+ *replans* 1))
+           0)
           ((< gap 0)
            ;; drop: A is what would play now, B what leads into the bar
-           ;; line; the frames between are rendered and dropped
+           ;; line; the frames between are rendered and dropped, never
+           ;; more than the gap measured now
            (let* ((room (- line (playback-rendered *playback*) SPLICE-FRAMES))
                   (d (max SPLICE-FRAMES (min (exact (round (* (- gap) *rate*))) room)))
                   (at *delivered*))
@@ -541,7 +550,7 @@
           (set! *last-tick* (conductor-tick c)))
         (set! *cost-ms* (/ (* 1000.0 (- (current-jiffy) t0)) (jiffies-per-second)))))
 
-    ;; (running target-ms queued-ms sounding-underruns all-underruns cost-ms missed resyncs pending? cancels)
+    ;; (running target-ms queued-ms sounding-underruns all-underruns cost-ms missed resyncs pending? cancels replans)
     (define (music-readout)
       (list (and (music-running?) #t)
             *depth-ms*
@@ -550,4 +559,4 @@
             (+ *underruns-all* (if *stream* (audio-stream-underruns *stream*) 0))
             *cost-ms*
             (if *playback* (playback-missed *playback*) 0)
-            *resyncs* *resync-pending* *resync-cancels*))))
+            *resyncs* *resync-pending* *resync-cancels* *replans*))))
