@@ -37,7 +37,7 @@
 
   (export VIEW-W VIEW-H scene-init! scene-ready? scene-frame! scene-camera
           scene-world-ms speed-kmh lap-clock hud-blink? meter-colour popup-look
-          popups-add popup-row POPUP-SLOTS)
+          popups-add popup-row POPUP-SLOTS scene-view-point)
 
   (begin
     (define VIEW-W 480)
@@ -616,7 +616,12 @@
            (centred! "COURIER ZERO. ONE PACKAGE. DON'T LET IT CORRUPT." 98 "#CCE6FF")
            (when (hud-blink? *calm* tick 30) (centred! (cdr (assq 'start-line info)) 120 "#FFCC33" 2)))
           ((countdown)
-           ;; the start card
+           ;; the start card; the flow's line above it (the delivery, or the
+           ;; time trial's track)
+           (let ((card (info-get info 'start-card)))
+             (when card
+               (rect! 70 42 340 14 "#0D0A1A")
+               (centred! card 46 "#FFCC33")))
            (rect! 70 56 340 26 "#0D0A1A")
            (centred! "DELIVER THE SIGNAL TO THE UPLINK." 60 "#4DF2D9")
            (centred! (string-append (number->string laps) " LAPS. KEEP THE CARGO CLEAN.") 71 "#CCE6FF")
@@ -624,11 +629,13 @@
              (when n (centred! (number->string n) 96 "#FFCC33" 4))))
           ((race)
            (when (< (race-clock r) 60) (centred! "GO" 90 "#4DF2D9" 4)))
-          ((finished) (finish-panel! r p (cdr (assq 'restart-line info))))
+          ;; the flow's results draw instead (flow-panel), through draw-ui
+          ((finished) (unless (info-get info 'flow-panel) (finish-panel! r p (cdr (assq 'restart-line info)))))
           ((corrupt)
-           (centred! "CARGO CORRUPT." 80 "#FF5959" 3)
-           (centred! "THE SIGNAL DIDN'T MAKE IT." 102 "#CCE6FF")
-           (centred! (cdr (assq 'restart-line info)) 116 "#FFCC33")))))
+           (unless (info-get info 'flow-panel)
+             (centred! "CARGO CORRUPT." 80 "#FF5959" 3)
+             (centred! "THE SIGNAL DIDN'T MAKE IT." 102 "#CCE6FF")
+             (centred! (cdr (assq 'restart-line info)) 116 "#FFCC33"))))))
 
     ;; The finish: every machine by place, its race time (or still running)
     ;; and its best lap; the player's row lit.
@@ -767,6 +774,13 @@
     ;; machines, before the palette pass) and draw-2d (called with centred!
     ;; after the HUD).
     (define (info-get info key) (let ((e (assq key info))) (and e (cdr e))))
+    ;; A point given as fractions of the window (a tap), in view pixels, by
+    ;; the last frame's fit; #f before the first frame.
+    (define *win* #f)
+    (define (scene-view-point fx fy)
+      (and *fit* *win*
+           (cons (/ (- (* fx (car *win*)) (fit-x *fit*)) (fit-scale *fit*))
+                 (/ (- (* fy (cdr *win*)) (fit-y *fit*)) (fit-scale *fit*)))))
     ;; the heading of the camera in use (scene-frame!'s own cam-heading
     ;; argument is the race camera's, and hides the accessor there)
     (define (camera-heading c) (cam-heading c))
@@ -783,6 +797,7 @@
              (dither? (> (tuning-ref tuning 'dither) 0.5))
              (f (view-fit win-w win-h VIEW-W VIEW-H integer-only: integer-only)))
         (set! *fit* f)
+        (set! *win* (cons win-w win-h))
         (set! *horizon* (tuning-ref tuning 'horizon))
         (let ((st (cdr (assq 'fx info))))
           (fx-uniforms! r c st (cdr (assq 'fx-knob info)) (> (tuning-ref tuning 'fx-hold) 0.5))
@@ -823,6 +838,8 @@
         (set-blend-mode 'normal)
         (when (cdr (assq 'hud info)) (hud! tuning r info))
         (let ((d (info-get info 'draw-2d))) (when d (d centred!)))
+        ;; the flow's screens: the kit is the HUD's text and rects
+        (let ((d (info-get info 'draw-ui))) (when d (d (list centred! text! rect! text-w))))
         (let ((paused (assq 'paused info)))
           (when (and paused (cdr paused))
             (text! "PAUSED" 216 122 "#4DF2D9")))

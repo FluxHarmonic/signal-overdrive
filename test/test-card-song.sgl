@@ -33,10 +33,14 @@
 (define (f32 bv i) (bytevector-ieee-single-ref bv (* 4 i) 'little))
 
 ;; n frames of the shell from a fresh boot, the music's context bound as
-;; the audio start binds it; (tap-at . frame) taps a start on that frame.
+;; the audio start binds it; tap-at taps a start on that frame (or on each
+;; frame of a list; the time returned is the first's).
 ;; Returns a vector of the loudest sample in each 1 ms played, the time of
 ;; the tap, and per frame #(race-song-running? theme-playing? phase).
 (define (run-card n tap-at)
+  ;; the title knob is shared with every file in the suite (test-resync
+  ;; sets it to 0); every run here wants the title (1, the default)
+  (core-param! "title=1")
   (core-boot! 'desktop)
   ;; a fresh theme player each run, so every run renders the same bytes
   (theme-drop!)
@@ -52,8 +56,8 @@
         (tapped #f))
     (let loop ((k 0) (d 0))
       (when (< k n)
-        (when (and tap-at (= k tap-at))
-          (set! tapped (/ d (* 1.0 RATE)))
+        (when (if (pair? tap-at) (memv k tap-at) (and tap-at (= k tap-at)))
+          (unless tapped (set! tapped (/ d (* 1.0 RATE))))
           (core-tap!))
         (core-headless-frame! (/ 1.0 60.0))
         (vector-set! states k (vector (music-running?) (theme-playing?) (race-phase (core-race))
@@ -166,18 +170,21 @@
 
   (test "the race song starts with the race, and the theme gives way"
     (core-param! "card=0")
+    ;; through the menus: the title's prompt, RUN, LEARNER, the cup
     (let* ((n 150)
-           (r (run-card n 20))
+           (r (run-card n '(20 30 40 50)))
            (states (vector-ref r 2))
            (first (let find ((k 0))
                     (cond ((= k n) #f)
                           ((vector-ref (vector-ref states k) 0) k)
                           (else (find (+ k 1)))))))
       (core-param! "card=1")
-      ;; the title's fade-out (title-out, 0.5 s) after the tap, then the
-      ;; countdown with the race song from its first frame
+      ;; the title's fade-out (title-out, 0.5 s) after the last tap, then
+      ;; the countdown with the race song from its first frame
       (assert-true first)
-      (assert-true (> first 20))
+      ;; after the fourth tap (frame 50) and the fade: a race the first tap
+      ;; started directly would begin near frame 50
+      (assert-true (>= first 78))
       (assert-equal 'countdown (vector-ref (vector-ref states first) 2))
       (assert-false (vector-ref (vector-ref states (- first 1)) 0))
       ;; the theme is gone by then, and the race song stays on

@@ -109,7 +109,7 @@
              (core-touch! payload) 1)
             ;; the touch check's question: what is the player doing now?
             ((string=? type "probe") (say (core-probe)) 1)
-            ((string=? type "tap") (core-tap!) 1)
+            ((string=? type "tap") (core-tap! payload) 1)
             ((string=? type "gesture") 1)
             ((string=? type "pointerdown") (core-tap!) 0)
             ((pad-dispatch! (core-pad) type payload) 1)

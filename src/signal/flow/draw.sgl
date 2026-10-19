@@ -1,0 +1,263 @@
+;;; (signal flow draw) - The flow's screens, in the HUD's type and colours:
+;;; Substratic's 5x7 font through the scene's text procedures, drawn after
+;;; the palette pass (so they keep exact colours), over the title's attract
+;;; mode or the race behind it.
+;;;
+;;; Colours keep the game's roles (P16): cyan is your live signal, amber
+;;; is ICE, violet is Gibson, red is danger; yellow marks what you can act
+;;; on, the pale blue is text, the grey-blue labels.
+;;;
+;;; (flow-draw! f kit r opts): kit is (centred! text! rect! text-w), the
+;;; scene's, in view pixels; r the race; opts an alist: calm (reduced
+;;; motion), touch (the page says the pointer is coarse), web.
+
+(define-library (signal flow draw)
+  (import (sigil core)
+          (sigil list)
+          (signal scene)
+          (signal flow)
+          (signal flow cup)
+          (signal flow save)
+          (signal flow tierdata))
+
+  (export flow-draw!)
+
+  (begin
+    (define CYAN "#4DF2D9")
+    (define YELLOW "#FFCC33")
+    (define PALE "#CCE6FF")
+    (define LABEL "#7380A6")
+    (define DIM "#4A5070")
+    (define RED "#FF5959")
+    (define VIOLET "#B36BFF")
+    (define INK "#0D0A1A")
+
+    (define (opt opts k) (let ((e (assq k opts))) (and e (cdr e))))
+
+    (define (grade-colour g)
+      (case g ((clean) CYAN) ((noisy) YELLOW) ((garbled) RED) (else RED)))
+
+    (define (flow-draw! f kit r opts)
+      (let ((centred! (car kit)) (text! (cadr kit)) (rect! (caddr kit)) (text-w (cadddr kit)))
+        (define (right! s x y hex . size) (apply text! s (- x (apply text-w s size)) y hex size))
+        ;; rows: the selected one yellow between cyan marks, a locked one dim
+        (define (rows!)
+          (let loop ((rs (flow-rows f)) (k 0))
+            (unless (null? rs)
+              (let* ((row (car rs)) (label (cadr row)) (on? (caddr row))
+                     (y (flow-row-y f k)) (sel? (= k (flow-sel f)))
+                     (w (text-w label 2)))
+                (centred! label y (cond ((not on?) DIM) (sel? YELLOW) (else PALE)) 2)
+                (when sel?
+                  (text! ">" (- (round (/ (- VIEW-W w) 2)) 14) y CYAN 2)
+                  (text! "<" (+ (round (/ (+ VIEW-W w) 2)) 4) y CYAN 2))
+                ;; (the pause menu's dim row says why in its own note)
+                (when (and (not on?) (not (flow-paused? f)))
+                  (text! "LOCKED" (+ (round (/ (+ VIEW-W w) 2)) (if sel? 20 6)) (+ y 4) DIM)))
+              (loop (cdr rs) (+ k 1)))))
+        (define (below-rows) (+ (flow-row-y f (length (flow-rows f))) 6))
+        (define (hints!)
+          (text! "< BACK" 8 BACK-ROW LABEL)
+          (unless (opt opts 'touch)
+            (right! "ENTER OR A: SELECT   ESC OR B: BACK" (- VIEW-W 8) BACK-ROW LABEL)))
+        (define (panel! y h) (rect! 40 y 400 h INK))
+        (define (pair! label value y colour)
+          (text! label 130 y LABEL)
+          (text! value 236 y colour))
+        (define (selected-id)
+          (let ((rs (flow-rows f))) (and (pair? rs) (car (list-ref rs (min (flow-sel f) (- (length rs) 1)))))))
+        (let ((s (flow-save f)))
+          (case (flow-screen f)
+            ((mode)
+             (rows!)
+             (let ((y (below-rows)) (cup (flow-cup f)))
+               (case (selected-id)
+                 ((run)
+                  (when cup
+                    (centred! (string-append (cup-name cup) " CUP: "
+                                             (let join ((ts (cup-tracks cup)))
+                                               (cond ((null? ts) "")
+                                                     ((null? (cdr ts)) (track-title (car ts)))
+                                                     (else (string-append (track-title (car ts)) ", " (join (cdr ts)))))))
+                              y PALE))
+                  (centred! "PLACE AND A CLEAN BROADCAST EARN POINTS." (+ y 11) LABEL))
+                 ((trial)
+                  ;; "NO RIVALS AND NO ICE." once race-new's time-trial (the tooling
+                  ;; branch) clears the static ICE; until then the road keeps it
+                  (centred! "NO RIVALS. JUST THE ROAD AND THE CLOCK." y PALE)
+                  (centred! "YOUR BEST LAP RACES YOU AS A GHOST." (+ y 11) LABEL))))
+             (hints!))
+            ((tier)
+             (centred! "CHOOSE YOUR TIER" 108 LABEL)
+             (rows!)
+             (let* ((y (below-rows)) (t (selected-id)))
+               (if (save-tier-open? s t)
+                   (let ((ls (tier-lines t)))
+                     (centred! (car ls) y PALE)
+                     (centred! (cadr ls) (+ y 11) LABEL))
+                   (centred! (string-append "FINISH A CUP IN THE TOP THREE ON "
+                                            (tier-label (list-ref TIER-IDS (- (tier-index t) 1))) ".")
+                             y PALE)))
+             (hints!))
+            ((cup)
+             (centred! (string-append (tier-label (flow-tier f)) " TIER") 108 LABEL)
+             (rows!)
+             (let* ((cup (selected-id)) (y (below-rows)))
+               (when cup
+                 (let loop ((ts (cup-tracks cup)) (k 1) (y y))
+                   (unless (null? ts)
+                     (let ((b (save-best s 'run (flow-tier f) (car ts))))
+                       (text! (string-append (number->string k) "  " (track-title (car ts))) 150 y PALE)
+                       (right! (if (and b (car b)) (lap-clock (car b)) "-:--.--") 330 y LABEL))
+                     (loop (cdr ts) (+ k 1) (+ y 10))))
+                 (let ((best (save-cup-best s cup (flow-tier f))))
+                   (centred! (if best
+                                 (string-append "BEST FINISH " (ordinal (car best)) ", "
+                                                (number->string (cadr best)) " POINTS"
+                                                (if (save-cleared? s cup (flow-tier f)) ". CLEARED." "."))
+                                 "THREE DELIVERIES. FINISH IN THE TOP THREE TO CLEAR IT.")
+                             (+ y (* 10 (length (cup-tracks cup))) 6) LABEL))))
+             (hints!))
+            ((trial)
+             (centred! "TIME TRIAL" 108 LABEL)
+             (rows!)
+             (let* ((t (selected-id)) (y (below-rows)) (b (and t (save-best s 'trial 'trial t))))
+               (centred! (string-append "BEST LAP " (lap-clock (and b (cadr b)))
+                                        "    BEST RACE " (lap-clock (and b (car b))))
+                         y PALE))
+             (hints!))
+            ((results) (results! f r centred! text! rect! pair! panel! rows!))
+            ((standings) (standings! f centred! text! rect! right! panel! rows!))
+            ((cup-end) (cup-end! f opts centred! text! panel! rows!))
+            ((trial-results) (trial-results! f centred! text! panel! pair! rows!))
+            ;; the scene writes PAUSED at y 122 over this panel; its top
+            ;; covers the countdown's big count (y 90 to 124)
+            ((paused)
+             (rect! 90 84 300 132 INK)
+             (rows!)
+             (when (eq? (flow-mode f) 'run)
+               (let ((left (flow-retransmits-left f)))
+                 (cond ((eq? left #t) #f)
+                       ((tier-corrupt-ends-cup? (flow-tier f)) (centred! "NO RESTARTS ON ELITE." 194 LABEL))
+                       ((= left 0) (centred! "NO RETRANSMITS LEFT THIS CUP." 194 LABEL))
+                       (else (centred! "A RESTART USES A RETRANSMIT." 194 LABEL)))))
+             (unless (opt opts 'touch)
+               (centred! "ESC, BACKSPACE OR START: RESUME" 204 LABEL)))
+            ;; on the web, a button to tap or click (keys and pads have Escape
+            ;; and Start)
+            ((racing)
+             (when (opt opts 'web)
+               (let ((b (flow-pause-box)))
+                 (rect! (car b) (cadr b) (caddr b) (cadddr b) INK)
+                 (text! "II PAUSE" (+ (car b) 4) (+ (cadr b) 5) PALE))))
+            (else #f)))))
+
+    (define (results! f r centred! text! rect! pair! panel! rows!)
+      (let* ((res (flow-result f))
+             (get (lambda (k) (cdr (assq k res))))
+             (corrupt? (get 'corrupt?)))
+        (if (not (flow-results-shown? f))
+            ;; the line: the headline alone, the broadcast going out
+            (begin (rect! 140 76 200 22 INK)
+                   (centred! (if corrupt? "SIGNAL CORRUPT." "DELIVERED.") 80 (if corrupt? RED CYAN) 2))
+            (begin
+              (panel! 44 (+ 180 (* 18 (max 0 (- (length (flow-rows f)) 1)))))
+              (centred! (string-append "DELIVERY " (number->string (+ 1 (flow-round f))) " OF "
+                                       (number->string (cup-length (flow-cup f))) ": "
+                                       (track-title (get 'track)) "   " (tier-label (flow-tier f)))
+                        50 LABEL)
+              (centred! (if corrupt? "SIGNAL CORRUPT." "DELIVERED.") 62 (if corrupt? RED CYAN) 2)
+              (if corrupt?
+                  (begin
+                    (centred! "THE SIGNAL DIDN'T MAKE IT." 90 PALE)
+                    (centred! (if (tier-corrupt-ends-cup? (flow-tier f))
+                                  "ON ELITE, A CORRUPT DELIVERY ENDS THE CUP."
+                                  "RETRANSMIT TO RUN IT AGAIN, OR TAKE 0 POINTS.")
+                              104 LABEL)
+                    (let ((left (flow-retransmits-left f)))
+                      (when (and (not (eq? left #t)) (= left 0) (not (tier-corrupt-ends-cup? (flow-tier f))))
+                        (centred! "NO RETRANSMITS LEFT THIS CUP." 118 LABEL))))
+                  (let ((y 84))
+                    (pair! "PLACE" (ordinal (get 'place)) y YELLOW)
+                    (pair! "TIME" (string-append (lap-clock (get 'time)) (if (get 'new-race?) "   NEW BEST" "")) (+ y 12) PALE)
+                    (pair! "INTEGRITY" (number->string (exact (round (get 'integrity)))) (+ y 24) PALE)
+                    (pair! "BROADCAST" (grade-label (get 'grade)) (+ y 36) (grade-colour (get 'grade)))
+                    (pair! "BEST LAP" (string-append (lap-clock (get 'best-lap)) (if (get 'new-lap?) "   NEW BEST" "")) (+ y 48) PALE)
+                    (pair! "POINTS" (string-append (number->string (get 'place-points)) " PLACE + "
+                                                   (number->string (get 'grade-points)) " BROADCAST = "
+                                                   (number->string (get 'points)))
+                           (+ y 66) YELLOW)))
+              (rows!)))))
+
+    (define (standings! f centred! text! rect! right! panel! rows!)
+      (let* ((st (standings-sorted (flow-standings f)))
+             (aw (flow-awards f)))
+        (panel! 44 194)
+        (centred! (string-append (cup-name (flow-cup f)) " CUP") 50 LABEL)
+        (centred! (string-append "STANDINGS AFTER " (number->string (flow-round f)) " OF "
+                                 (number->string (cup-length (flow-cup f))))
+                  62 CYAN 2)
+        (text! "THIS RACE" 262 86 LABEL)
+        (right! "TOTAL" 352 86 LABEL)
+        (let loop ((xs st) (k 1) (y 98))
+          (unless (null? xs)
+            (let* ((name (caar xs)) (me? (equal? name PLAYER-NAME))
+                   (col (if me? YELLOW PALE))
+                   (got (let ((e (assoc name aw))) (if e (cdr e) 0))))
+              (text! (ordinal k) 128 y col)
+              (text! name 160 y col)
+              (text! (string-append "+" (number->string got)) 262 y col)
+              (right! (number->string (cdr (car xs))) 352 y col))
+            (loop (cdr xs) (+ k 1) (+ y 12))))
+        (rows!)))
+
+    ;; The uplink: the cup's result, Gibson's line typed out (whole at once
+    ;; with reduced motion), and what it opened.
+    (define (cup-end! f opts centred! text! panel! rows!)
+      (let* ((cr (flow-cup-result f))
+             (place (car cr)) (points (cadr cr)) (cleared? (caddr cr)) (failed? (cadddr cr))
+             (n (cup-length (flow-cup f))))
+        (panel! 44 194)
+        (centred! (string-append (cup-name (flow-cup f)) " CUP   " (tier-label (flow-tier f))) 50 LABEL)
+        (centred! (cond (failed? "CUP LOST.") (cleared? "UPLINK REACHED.") (else "OFF THE AIR."))
+                  64 (if cleared? CYAN RED) 3)
+        (centred! (if failed?
+                      "A CORRUPT DELIVERY ON ELITE ENDS THE CUP."
+                      (string-append (ordinal place) " OVERALL. " (number->string points) " POINTS."))
+                  94 PALE)
+        (unless failed?
+          (centred! (string-append (number->string (min n (flow-clean f))) " OF " (number->string n)
+                                   " DELIVERIES BROADCAST CLEAN.")
+                    106 LABEL))
+        (unless (or failed? cleared?)
+          (centred! "FINISH IN THE TOP THREE TO CLEAR THE CUP." 118 LABEL))
+        (let* ((line (flow-gibson-line f))
+               (shown (if (opt opts 'calm) (string-length line) (min (string-length line) (quotient (flow-tick f) 3)))))
+          (centred! (substring line 0 shown) 140 VIOLET 2))
+        (let loop ((us (flow-unlocks f)) (y 166))
+          (unless (null? us)
+            (centred! (car us) y YELLOW)
+            (loop (cdr us) (+ y 11))))
+        (rows!)))
+
+    (define (trial-results! f centred! text! panel! pair! rows!)
+      (let* ((res (flow-result f))
+             (get (lambda (k) (cdr (assq k res))))
+             (corrupt? (get 'corrupt?)))
+        (panel! 44 196)
+        (centred! (string-append "TIME TRIAL: " (track-title (get 'track))) 50 LABEL)
+        (if corrupt?
+            (begin
+              (centred! "SIGNAL CORRUPT." 66 RED 3)
+              (centred! "A CORRUPT RUN DOESN'T COUNT." 96 PALE)
+              (pair! "BEST LAP" (string-append (lap-clock (get 'best-lap)) (if (get 'new-lap?) "   NEW BEST" "")) 120 PALE))
+            (begin
+              (centred! (lap-clock (get 'time)) 64 (if (get 'new-race?) YELLOW CYAN) 3)
+              (centred! (if (get 'new-race?) "NEW BEST TIME." "DELIVERED.") 90 (if (get 'new-race?) YELLOW PALE))
+              (pair! "BEST LAP" (string-append (lap-clock (get 'best-lap)) (if (get 'new-lap?) "   NEW BEST" "")) 112 PALE)
+              (pair! "INTEGRITY" (number->string (exact (round (get 'integrity)))) 124 PALE)
+              (pair! "BROADCAST" (grade-label (get 'grade)) 136 (grade-colour (get 'grade)))
+              (let ((b (save-best (flow-save f) 'trial 'trial (get 'track))))
+                (pair! "RECORDS" (string-append (lap-clock (and b (car b))) " RACE   " (lap-clock (and b (cadr b))) " LAP")
+                       154 LABEL))))
+        (rows!)))))

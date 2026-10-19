@@ -1,0 +1,514 @@
+;;; (signal flow) - The game's flow from the title to the end of a cup: the
+;;; menus, the results after each delivery, the cup's standings and its
+;;; end, and TIME TRIAL. Everything happens inside the one running app, on
+;;; native and web alike; nothing reads or writes a URL.
+;;;
+;;; Screens:
+;;;   title          the attract mode's prompt ((signal title) draws it)
+;;;   mode           RUN or TIME TRIAL
+;;;   tier           LEARNER, COURIER, ELITE (locked ones say how to open them)
+;;;   cup            the district's deliveries, and the best finish on this tier
+;;;   trial          TIME TRIAL's track, with its best lap and race
+;;;   launch         the title fading out into the first countdown
+;;;   fade           between deliveries: out, then the next countdown
+;;;   racing         a race; the flow waits for its end
+;;;   paused         a race on hold: RESUME, RESTART RACE, QUIT CUP (QUIT TO
+;;;                  MENU in TIME TRIAL); the shell freezes the clock
+;;;   results        a delivery's place, time, integrity, grade and points
+;;;   standings      the cup's points after a delivery
+;;;   cup-end        the uplink: the cup's result, Gibson's line, unlocks
+;;;   trial-results  a time trial's time and best lap
+;;;   off            no flow: the race runs as before (the start parameter,
+;;;                  the title knob at 0), for checks and the old shortcuts
+;;;
+;;; Pure, on the race's fixed tick: (flow-step f nav race) is the next flow.
+;;; nav is one frame's menu input (flow-nav); race is the shell's current
+;;; race, read to see a race end and to score it. A step leaves commands for
+;;; the shell in flow-commands:
+;;;   preview   build the race on (flow-track f), in its title phase, for the
+;;;             attract camera to fly
+;;;   launch    build it, then let the title fade out into its countdown
+;;;   begin     start the next countdown now (the frame is faded out)
+;;;   to-title  a new title and a race in its title phase, behind the menus
+;;;   store     write (flow-save f)
+;;; and the race's configuration is (flow-track f), (flow-mode f), (flow-tier f).
+
+(define-library (signal flow)
+  (import (sigil core)
+          (sigil struct)
+          (sigil list)
+          (signal track)
+          (signal handling)
+          (signal race)
+          (signal flow tierdata)
+          (signal flow cup)
+          (signal flow save))
+
+  (export flow flow? flow-new flow-off flow-step flow-screen flow-sel flow-mode flow-tier
+          flow-cup flow-track flow-round flow-standings flow-awards flow-result flow-tick
+          flow-commands flow-save flow-clean flow-store? flow-unlocks flow-cup-result flow-retransmits
+          flow-active? flow-owns-start? flow-menu? flow-panel? flow-fade flow-rows flow-row-y
+          flow-hit flow-hud-best flow-start-card flow-retry flow-unlock-all flow-trial-tracks
+          flow-results-shown? flow-retransmits-left flow-gibson-line flow-describe
+          flow-paused? flow-pause-box
+          nav nav? nav-up nav-down nav-left nav-right nav-confirm nav-back nav-pause nav-tap NAV-NONE nav-merge
+          RESULTS-DELAY FADE-TICKS PLAYER-NAME MENU-Y0 MENU-STEP PANEL-Y0 BACK-ROW PAUSE-Y0)
+
+  (begin
+    (define PLAYER-NAME "ZERO")
+    ;; A delivery's results wait this long after the line: the uplink's
+    ;; first bars, every screen in the city showing the broadcast.
+    (define RESULTS-DELAY 150)
+    ;; The fade between deliveries, each way (the title's are its knobs).
+    (define FADE-TICKS 30)
+
+    ;; One frame's menu input. tap: #f, or (vx . vy) in view pixels, or 'any
+    ;; for a tap whose position the page did not say. pause: a race's own
+    ;; pause press, Escape, Backspace or a pad's Start (BACK alone never
+    ;; pauses: a pad's B is BACK and the brake; P is the palette).
+    (define-struct nav
+      (up default: #f) (down default: #f) (left default: #f) (right default: #f)
+      (confirm default: #f) (back default: #f) (pause default: #f) (tap default: #f))
+    (define NAV-NONE (nav))
+    ;; Two frames' input as one (a frame that ran no tick hands its presses
+    ;; to the next); a tap that says where wins.
+    (define (nav-merge a b)
+      (nav up: (or (nav-up a) (nav-up b)) down: (or (nav-down a) (nav-down b))
+           left: (or (nav-left a) (nav-left b)) right: (or (nav-right a) (nav-right b))
+           confirm: (or (nav-confirm a) (nav-confirm b)) back: (or (nav-back a) (nav-back b))
+           pause: (or (nav-pause a) (nav-pause b))
+           tap: (let ((x (nav-tap a)) (y (nav-tap b)))
+                  (cond ((pair? x) x) ((pair? y) y) (else (or x y))))))
+
+    (define-struct flow
+      (screen default: 'title)
+      (sel default: 0)
+      (mode default: 'run)
+      (tier default: 'learner)
+      (cup default: #f)
+      (track default: #f)
+      (round default: 0)
+      (standings default: '())
+      (awards default: '())
+      (result default: #f)
+      (retransmits default: 0)
+      (clean default: 0)          ; deliveries graded CLEAN this cup
+      (tick default: 0)
+      (pending default: #f)       ; what a fade leads to: next or retry
+      (commands default: '())
+      (save default: #f)
+      (store? default: #t)        ; #f once unlock-all has changed the save
+      (unlocks default: '())
+      (cup-result default: #f))   ; (place points cleared? failed?)
+
+    (define (flow-new save) (flow save: save cup: (first-cup)))
+    (define (flow-off f) (flow f screen: 'off commands: '()))
+
+    (define (first-cup) (if (pair? (cup-ids)) (car (cup-ids)) #f))
+
+    (define (flow-active? f) (not (eq? (flow-screen f) 'off)))
+    ;; Whether a start press is the flow's, not the race's or the title's.
+    (define (flow-owns-start? f) (and (flow-active? f) (not (eq? (flow-screen f) 'title))))
+    ;; The menus over the title's attract mode.
+    (define (flow-menu? f) (and (memq (flow-screen f) '(mode tier cup trial)) #t))
+    ;; Whether the flow draws the end-of-race panel instead of the HUD's.
+    (define (flow-panel? f)
+      (and (memq (flow-screen f) '(results standings cup-end trial-results fade)) #t))
+    (define (flow-paused? f) (eq? (flow-screen f) 'paused))
+    ;; The race's PAUSE button for taps and clicks, top left under the
+    ;; lap times (a touch on the right half is a boost in the stick scheme):
+    ;; (x y w h) in view pixels.
+    (define (flow-pause-box) '(4 56 64 18))
+    (define (in-pause-box? tap)
+      (and (pair? tap)
+           (let ((b (flow-pause-box)))
+             (and (>= (car tap) (car b)) (< (car tap) (+ (car b) (caddr b)))
+                  (>= (cdr tap) (cadr b)) (< (cdr tap) (+ (cadr b) (cadddr b)))))))
+    (define (flow-results-shown? f)
+      (or (not (eq? (flow-screen f) 'results)) (>= (flow-tick f) RESULTS-DELAY)))
+
+    ;; How dark the frame is between deliveries, 0 to 1.
+    (define (flow-fade f)
+      (case (flow-screen f)
+        ((fade) (min 1.0 (/ (exact->inexact (flow-tick f)) FADE-TICKS)))
+        ((racing) (if (and (flow-pending f) (< (flow-tick f) FADE-TICKS))
+                      (- 1.0 (/ (exact->inexact (flow-tick f)) FADE-TICKS))
+                      0.0))
+        (else 0.0)))
+
+    (define (flow-unlock-all f)
+      (flow f save: (save-unlock-all (flow-save f) (cup-ids)) store?: #f))
+
+    ;; --- what each screen offers ------------------------------------------------------
+
+    (define (trial-tracks save)
+      (let loop ((cs (cup-ids)) (acc '()))
+        (if (null? cs)
+            acc
+            (loop (cdr cs) (if (save-cup-open? save (cup-ids) (car cs)) (append acc (cup-tracks (car cs))) acc)))))
+    (define (flow-trial-tracks f) (trial-tracks (flow-save f)))
+
+    (define (flow-retransmits-left f)
+      (let ((n (tier-retransmits (flow-tier f))))
+        (if (eq? n #t) #t (max 0 (- n (flow-retransmits f))))))
+
+    ;; Rows: (id label enabled?).
+    (define (flow-rows f)
+      (let ((s (flow-save f)))
+        (case (flow-screen f)
+          ((mode) (list (list 'run "RUN" (and (first-cup) #t)) (list 'trial "TIME TRIAL" (pair? (trial-tracks s)))))
+          ((tier) (map (lambda (t) (list t (tier-label t) (save-tier-open? s t))) TIER-IDS))
+          ((cup) (map (lambda (c) (list c (cup-name c) (save-cup-open? s (cup-ids) c))) (cup-ids)))
+          ((trial) (map (lambda (t) (list t (track-title t) #t)) (trial-tracks s)))
+          ((results)
+           (let ((r (flow-result f)))
+             (if (cdr (assq 'corrupt? r))
+                 (if (tier-corrupt-ends-cup? (flow-tier f))
+                     (list (list 'end "END THE CUP" #t))
+                     (let ((left (flow-retransmits-left f)))
+                       (list (list 'retransmit
+                                   (if (eq? left #t) "RETRANSMIT"
+                                       (string-append "RETRANSMIT (" (number->string left) " LEFT)"))
+                                   (or (eq? left #t) (> left 0)))
+                             (list 'continue "TAKE 0 POINTS" #t))))
+                 (list (list 'continue "CONTINUE" #t)))))
+          ((standings)
+           ;; QUIT CUP: the way out between deliveries (no result recorded;
+           ;; the best times already are)
+           (if (< (flow-round f) (cup-length (flow-cup f)))
+               (list (list 'next "NEXT DELIVERY" #t) (list 'quit "QUIT CUP" #t))
+               (list (list 'uplink "TO THE UPLINK" #t))))
+          ((cup-end) (list (list 'done "CONTINUE" #t)))
+          ;; in a cup a restart is a RETRANSMIT, so ELITE has none
+          ((paused)
+           (let ((left (if (eq? (flow-mode f) 'trial) #t (flow-retransmits-left f))))
+             (list (list 'resume "RESUME" #t)
+                   (list 'restart
+                         (if (eq? left #t) "RESTART RACE"
+                             (string-append "RESTART RACE (" (number->string left) " LEFT)"))
+                         (or (eq? left #t) (> left 0)))
+                   (if (eq? (flow-mode f) 'trial)
+                       (list 'quit "QUIT TO MENU" #t)
+                       (list 'quit "QUIT CUP" #t)))))
+          ((trial-results) (list (list 'retry "RETRY" #t) (list 'tracks "CHANGE TRACK" #t) (list 'menu "MENU" #t)))
+          (else '()))))
+
+    ;; The layout the drawing and the taps share, in view pixels (480 x 270):
+    ;; menus under the logo, panels' actions under their panel.
+    (define MENU-Y0 122)
+    (define MENU-STEP 18)
+    (define PANEL-Y0 206)
+    (define BACK-ROW 252)          ; the menus' BACK, bottom left
+    (define PAUSE-Y0 138)          ; the pause panel's rows, under PAUSED
+    (define (flow-row-y f k)
+      (cond
+        ((flow-menu? f) (+ MENU-Y0 (* k MENU-STEP)))
+        ((flow-paused? f) (+ PAUSE-Y0 (* k MENU-STEP)))
+        (else
+          (+ (case (flow-screen f) ((trial-results) 190) ((standings) 196) (else PANEL-Y0))
+             (* k (if (eq? (flow-screen f) 'trial-results) 16 18))))))
+
+    ;; The row a tap at (vx . vy) lands on: its index, 'back, or #f. Rows are
+    ;; 14 pixels of scale-2 text with 2 above and below, the full width.
+    (define (flow-hit f vx vy)
+      (cond ((and (flow-menu? f) (< vx 80) (>= vy (- BACK-ROW 6)) (< vy 270)) 'back)
+            ;; the pause menu's rows are its panel's, not the screen's width:
+            ;; a thumb resting at the edge in a race must not quit the cup
+            ((and (flow-paused? f) (or (< vx 90) (>= vx 390))) #f)
+            (else
+             (let loop ((k 0) (rows (flow-rows f)))
+               (cond ((null? rows) #f)
+                     ((let ((y (flow-row-y f k))) (and (>= vy (- y 2)) (< vy (+ y 16)))) k)
+                     (else (loop (+ k 1) (cdr rows))))))))
+
+    ;; --- the race's result --------------------------------------------------------------
+
+    (define (race-time r p)
+      (and (racer-finished p) (- (racer-finished p) (race-start-tick r))))
+
+    ;; An alist, read at the tick the race ended.
+    (define (race-result f r)
+      (let* ((p (race-player r))
+             (corrupt? (eq? (race-phase r) 'corrupt))
+             (integrity (if corrupt? 0.0 (machine-integrity (racer-machine p))))
+             (place (racer-place p))
+             (grade (grade-of integrity)))
+        (list (cons 'track (flow-track f))
+              (cons 'corrupt? corrupt?)
+              (cons 'place place)
+              (cons 'time (race-time r p))
+              (cons 'integrity integrity)
+              (cons 'best-lap (racer-best-lap p))
+              (cons 'grade grade)
+              (cons 'place-points (if corrupt? 0 (place-points place)))
+              (cons 'grade-points (if corrupt? 0 (grade-points grade)))
+              (cons 'points (if corrupt? 0 (delivery-points place integrity))))))
+
+    ;; The delivery's points for everyone, read when the results are left:
+    ;; the rivals still running by then are placed by how far they have got.
+    ;; A corrupt player scores nothing, and the rivals share its places.
+    (define (awards f r)
+      (let* ((res (flow-result f))
+             (corrupt? (cdr (assq 'corrupt? res)))
+             (racers (cons (race-player r) (race-rivals r)))
+             (ranked (let ins ((xs racers) (out '()))
+                       (if (null? xs) out
+                           (ins (cdr xs) (let put ((o out))
+                                           (cond ((null? o) (list (car xs)))
+                                                 ((< (racer-place (car xs)) (racer-place (car o))) (cons (car xs) o))
+                                                 (else (cons (car o) (put (cdr o))))))))))
+             (field (if corrupt? (filter (lambda (x) (not (eq? x (race-player r)))) ranked) ranked)))
+        (let loop ((xs field) (k 1) (acc (if corrupt? (list (cons PLAYER-NAME 0)) '())))
+          (if (null? xs)
+              (reverse acc)
+              (loop (cdr xs) (+ k 1)
+                    (cons (cons (racer-name (car xs))
+                                (if (eq? (car xs) (race-player r)) (cdr (assq 'points res)) (place-points k)))
+                          acc))))))
+
+    ;; --- the steps ----------------------------------------------------------------------
+
+    (define (to f screen . sel) (flow f screen: screen tick: 0 sel: (if (pair? sel) (car sel) 0)))
+    (define (cmd f . cs) (flow f commands: (append (flow-commands f) cs)))
+
+    (define (index-of x xs)
+      (let loop ((xs xs) (i 0)) (cond ((null? xs) 0) ((eq? (car xs) x) i) (else (loop (cdr xs) (+ i 1))))))
+
+    ;; The selection moved by up and down, wrapping.
+    (define (moved f n)
+      (let ((d (cond ((and (nav-up n) (not (nav-down n))) -1) ((and (nav-down n) (not (nav-up n))) 1) (else 0)))
+            (k (length (flow-rows f))))
+        (if (or (= d 0) (= k 0)) f (flow f sel: (modulo (+ (flow-sel f) d) k)))))
+
+    ;; The row chosen this frame (its id), 'back, or #f. A tap on a row
+    ;; selects and chooses it; a tap whose place is unknown chooses the
+    ;; selection.
+    (define (choice f n)
+      (let ((tap (nav-tap n)))
+        (cond ((pair? tap)
+               (let ((h (flow-hit f (car tap) (cdr tap))))
+                 (cond ((eq? h 'back) (cons 'back f))
+                       (h (cons (car (list-ref (flow-rows f) h)) (flow f sel: h)))
+                       ;; a panel with one action takes a tap anywhere
+                       ((and (not (flow-menu? f)) (= 1 (length (flow-rows f))))
+                        (cons (car (car (flow-rows f))) f))
+                       (else (cons #f f)))))
+              ((nav-back n) (cons 'back f))
+              ((or (nav-confirm n) (eq? tap 'any))
+               (let ((rows (flow-rows f)))
+                 (if (pair? rows) (cons (car (list-ref rows (min (flow-sel f) (- (length rows) 1)))) f) (cons #f f))))
+              (else (cons #f f)))))
+
+    ;; The selection on the first row that can be chosen (COURIER's results
+    ;; with no retransmits left start on TAKE 0 POINTS).
+    (define (first-enabled f)
+      (let loop ((rs (flow-rows f)) (k 0))
+        (cond ((null? rs) f)
+              ((caddr (car rs)) (flow f sel: k))
+              (else (loop (cdr rs) (+ k 1))))))
+
+    (define (row-enabled? f id)
+      (let ((e (assq id (flow-rows f)))) (and e (caddr e))))
+
+    (define (preview f track) (cmd (flow f track: track) 'preview))
+
+    (define (flow-step f n r)
+      (let* ((f (flow f commands: '() tick: (+ (flow-tick f) 1))))
+        (case (flow-screen f)
+          ((off) f)
+          ((title) (if (or (nav-confirm n) (nav-tap n)) (to f 'mode (index-of (flow-mode f) '(run trial))) f))
+          ((mode tier cup trial) (menu-step (moved f n) n))
+          ((launch)
+           (if (eq? (race-phase r) 'countdown) (to f 'racing) f))
+          ((fade)
+           (if (>= (flow-tick f) FADE-TICKS) (cmd (to f 'racing) 'begin) f))
+          ((racing)
+           (cond ((memq (race-phase r) '(finished corrupt)) (race-over f r))
+                 ((and (memq (race-phase r) '(countdown race))
+                       (or (nav-pause n) (in-pause-box? (nav-tap n))))
+                  (to f 'paused))
+                 (else f)))
+          ((paused) (pause-step (moved f n) n))
+          ((results)
+           (if (flow-results-shown? f) (results-step (moved f n) n r) f))
+          ((standings cup-end trial-results) (panel-step (moved f n) n))
+          (else f))))
+
+    (define (menu-step f n)
+      (let* ((c (choice f n)) (id (car c)) (f (cdr c)) (s (flow-save f)))
+        (case (flow-screen f)
+          ((mode)
+           (cond ((eq? id 'back) (to f 'title))
+                 ((and (eq? id 'run) (row-enabled? f 'run))
+                  (to (flow f mode: 'run) 'tier
+                      ;; the last tier chosen, if it is open; else LEARNER
+                      (if (save-tier-open? s (flow-tier f)) (tier-index (flow-tier f)) 0)))
+                 ((and (eq? id 'trial) (row-enabled? f 'trial))
+                  (let* ((ts (trial-tracks s))
+                         (sel (if (memq (flow-track f) ts) (index-of (flow-track f) ts) 0)))
+                    (preview (to (flow f mode: 'trial) 'trial sel) (list-ref ts sel))))
+                 (else f)))
+          ((tier)
+           (cond ((eq? id 'back) (to f 'mode 0))
+                 ((and id (row-enabled? f id))
+                  (let* ((cups (cup-ids))
+                         (sel (if (memq (flow-cup f) cups) (index-of (flow-cup f) cups) 0)))
+                    (preview (to (flow f tier: id) 'cup sel) (car (cup-tracks (list-ref cups sel))))))
+                 (else f)))
+          ((cup)
+           (cond ((eq? id 'back) (to f 'tier (tier-index (flow-tier f))))
+                 ((and id (row-enabled? f id))
+                  ;; the player is seen first, so a level total ranks the player higher
+                  (cmd (to (flow f cup: id round: 0 standings: (list (cons PLAYER-NAME 0)) awards: '() retransmits: 0 clean: 0
+                                 result: #f track: (car (cup-tracks id)) pending: #f)
+                           'launch)
+                       'launch))
+                 ;; moving the selection previews the cup's first track
+                 (else (let ((sel-cup (list-ref (cup-ids) (flow-sel f))))
+                         (if (eq? (flow-track f) (car (cup-tracks sel-cup)))
+                             f
+                             (preview f (car (cup-tracks sel-cup))))))))
+          ((trial)
+           (let ((ts (trial-tracks s)))
+             (cond ((eq? id 'back) (to f 'mode 1))
+                   (id (cmd (to (flow f track: id pending: #f) 'launch) 'launch))
+                   ((and (pair? ts) (not (eq? (flow-track f) (list-ref ts (flow-sel f)))))
+                    (preview f (list-ref ts (flow-sel f))))
+                   (else f))))
+          (else f))))
+
+    ;; The tick a race ended: its result, its times in the save.
+    (define (race-over f r)
+      (let* ((res (race-result f r))
+             (trial? (eq? (flow-mode f) 'trial))
+             (rec (save-record-best (flow-save f) (flow-mode f) (if trial? 'trial (flow-tier f)) (flow-track f)
+                                    (and (not (cdr (assq 'corrupt? res))) (cdr (assq 'time res)))
+                                    ;; a corrupt TIME TRIAL doesn't count, its lap either
+                                    (and (not (and trial? (cdr (assq 'corrupt? res)))) (cdr (assq 'best-lap res)))))
+             (res (append res (list (cons 'new-race? (cadr rec)) (cons 'new-lap? (caddr rec)))))
+             (f (flow f result: res save: (car rec)
+                      clean: (+ (flow-clean f) (if (eq? (cdr (assq 'grade res)) 'clean) 1 0)))))
+        (let ((f (first-enabled (to f (if trial? 'trial-results 'results)))))
+          (if (or (cadr rec) (caddr rec)) (cmd f 'store) f))))
+
+    (define (results-step f n r)
+      (let* ((c (choice f n)) (id (car c)) (f (cdr c)))
+        (cond ((and (eq? id 'retransmit) (row-enabled? f 'retransmit))
+               (to (flow f retransmits: (+ (flow-retransmits f) 1)
+                         clean: (- (flow-clean f) (if (eq? (cdr (assq 'grade (flow-result f))) 'clean) 1 0))
+                         pending: 'retry)
+                   'fade))
+              ((eq? id 'end) (cup-over f #t))
+              ((eq? id 'continue)
+               (let ((aw (awards f r)))
+                 (to (flow f awards: aw standings: (standings-add (flow-standings f) aw)
+                           round: (+ (flow-round f) 1))
+                     'standings)))
+              (else f))))
+
+    ;; BACK on a panel moves to its way out (QUIT CUP, MENU) without
+    ;; taking it, so a stray Escape costs nothing; Enter then takes it.
+    (define (way-out f)
+      (let loop ((rs (flow-rows f)) (k 0))
+        (cond ((null? rs) f)
+              ((memq (car (car rs)) '(quit menu done)) (flow f sel: k))
+              (else (loop (cdr rs) (+ k 1))))))
+
+    (define (panel-step f n)
+      (let* ((c (choice f n)) (id (car c)) (f (cdr c)))
+        (case id
+          ((back) (way-out f))
+          ((quit) (cmd (to f 'mode 0) 'to-title))
+          ((next)
+           (to (flow f track: (list-ref (cup-tracks (flow-cup f)) (flow-round f)) pending: 'next) 'fade))
+          ((uplink) (cup-over f #f))
+          ((done) (cmd (to f 'mode 0) 'to-title))
+          ((retry) (to (flow f pending: 'retry) 'fade))
+          ((tracks) (cmd (to f 'trial (index-of (flow-track f) (trial-tracks (flow-save f)))) 'to-title))
+          ((menu) (cmd (to f 'mode 1) 'to-title))
+          (else f))))
+
+    ;; RESUME (also BACK, or the pause press again) goes back to the race
+    ;; with no fade; RESTART RACE starts it again at once from its
+    ;; countdown, fading in (the old race never runs on under a fade out),
+    ;; and in a cup it is a RETRANSMIT; QUIT leaves for the menus, no
+    ;; result kept.
+    (define (pause-step f n)
+      (let* ((c (choice f n)) (id (car c)) (f (cdr c))
+             (id (if (nav-pause n) 'resume id)))
+        (case id
+          ((resume back) (flow f screen: 'racing tick: FADE-TICKS))
+          ((restart)
+           (if (row-enabled? f 'restart)
+               (cmd (to (flow f retransmits: (if (eq? (flow-mode f) 'trial) (flow-retransmits f) (+ (flow-retransmits f) 1))
+                              pending: 'retry)
+                        'racing)
+                    'begin)
+               f))
+          ((quit) (cmd (to f 'mode (if (eq? (flow-mode f) 'trial) 1 0)) 'to-title))
+          (else f))))
+
+    ;; The cup's end: the place overall, the save, and what it opened.
+    (define (cup-over f failed?)
+      (let* ((st (flow-standings f))
+             (place (if failed? #f (standings-place st PLAYER-NAME)))
+             (points (standings-points st PLAYER-NAME))
+             (cleared? (and (not failed?) (cleared-place? place)))
+             (s0 (flow-save f))
+             (s1 (if place (save-record-cup s0 (flow-cup f) (flow-tier f) place points) s0))
+             (s2 (if cleared? (save-clear s1 (flow-cup f) (flow-tier f)) s1))
+             (opened (append
+                      (filter (lambda (x) x)
+                              (map (lambda (t) (and (not (save-tier-open? s0 t)) (save-tier-open? s2 t)
+                                                    (string-append (tier-label t) " UNLOCKED.")))
+                                   TIER-IDS))
+                      (filter (lambda (x) x)
+                              (map (lambda (c) (and (not (save-cup-open? s0 (cup-ids) c)) (save-cup-open? s2 (cup-ids) c)
+                                                    (string-append (cup-name c) " UNLOCKED.")))
+                                   (cup-ids))))))
+        (cmd (to (flow f save: s2 unlocks: opened cup-result: (list place points cleared? failed?)) 'cup-end)
+             'store)))
+
+    ;; From TIME TRIAL's race (R, a pad's Back): the same track again, now.
+    (define (flow-retry f) (flow f screen: 'racing tick: FADE-TICKS pending: #f commands: '()))
+
+    ;; --- what the shell shows ---------------------------------------------------------
+
+    ;; The best lap the HUD shows: this mode and tier on this track.
+    (define (flow-hud-best f)
+      (and (memq (flow-screen f) '(racing paused launch fade results trial-results))
+           (let ((b (save-best (flow-save f) (flow-mode f)
+                               (if (eq? (flow-mode f) 'trial) 'trial (flow-tier f)) (flow-track f))))
+             (and b (cadr b)))))
+
+    ;; The countdown card's first line, or #f.
+    (define (flow-start-card f)
+      (and (memq (flow-screen f) '(launch racing paused fade)) (flow-track f)
+           (if (eq? (flow-mode f) 'trial)
+               (string-append "TIME TRIAL: " (track-title (flow-track f)))
+               (string-append "DELIVERY " (number->string (+ 1 (flow-round f))) " OF "
+                              (number->string (cup-length (flow-cup f))) ": " (track-title (flow-track f))))))
+
+    ;; Gibson's line at the cup's end (D26: drafts for David's review).
+    (define (flow-gibson-line f)
+      (let ((cr (flow-cup-result f)))
+        (cond ((not cr) #f)
+              ((cadddr cr) "# Static suits you.")
+              ((and (eqv? (car cr) 1) (= (flow-clean f) (cup-length (flow-cup f)))) "# Catchy. I'll have it removed.")
+              ((caddr cr) "# Loud. Forgotten by morning.")
+              (else "# Noise. Nobody tuned in."))))
+
+    (define (flow-describe f)
+      (string-append "flow " (symbol->string (flow-screen f))
+                     " sel " (number->string (flow-sel f))
+                     " mode " (symbol->string (flow-mode f))
+                     " tier " (symbol->string (flow-tier f))
+                     " track " (if (flow-track f) (symbol->string (flow-track f)) "-")
+                     " round " (number->string (flow-round f))
+                     ;; the last cup's place overall, - before one ends or when it was lost
+                     " cup-place " (let ((cr (flow-cup-result f))) (if (and cr (car cr)) (number->string (car cr)) "-"))
+                     ;; the tiers the save opens, for checks across a restart
+                     " open " (let join ((ts (filter (lambda (t) (save-tier-open? (flow-save f) t)) TIER-IDS)))
+                                (cond ((null? ts) "-")
+                                      ((null? (cdr ts)) (symbol->string (car ts)))
+                                      (else (string-append (symbol->string (car ts)) "," (join (cdr ts))))))))))

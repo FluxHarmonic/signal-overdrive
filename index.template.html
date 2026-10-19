@@ -8,7 +8,9 @@
   Touch schemes (?touch=zones|drag|stick, or the SCHEME button on a phone).
   Every scheme accelerates on its own; each sends the whole touch state as
   ("touch", "steer,throttle,brake,boost,drift") when it changes, and
-  ("tap", "") when a finger lands (a start on the title and end screens).
+  ("tap", "FX,FY") when a finger lands (a start on the title and end screens),
+  FX and FY its place as fractions of the canvas, so the game's menus take
+  the row it lands on. A mouse click on the canvas sends the same.
     zones   a thumb on the left half steers left, on the right half right;
             both thumbs down brakes; the BOOST button boosts
     drag    one finger anywhere steers by how far it has moved sideways
@@ -222,6 +224,15 @@
       el("so-zl").classList.remove("on"); el("so-zr").classList.remove("on"); ring.style.display = knob.style.display = "none"; }
 
     var canvas = el("stage");
+    // where a tap or click lands, as fractions of the canvas
+    function tapAt(p) {
+      var b = canvas.getBoundingClientRect();
+      if (!p || !b.width || !b.height) return "";
+      return ((p.clientX - b.left) / b.width).toFixed(4) + "," + ((p.clientY - b.top) / b.height).toFixed(4);
+    }
+    canvas.addEventListener("pointerdown", function (e) {
+      if (e.pointerType === "mouse" && e.button === 0) send("tap", tapAt(e));
+    });
     canvas.addEventListener("touchstart", function (e) {
       document.body.classList.add("so-touch");
       var half = window.innerWidth / 2;
@@ -232,7 +243,7 @@
         // a boost as a finger lands: drag's second finger, stick's right thumb
         if ((scheme === "drag" && n >= 1) || (scheme === "stick" && t.clientX >= half)) boostPulse = true;
       }
-      send("tap", "");
+      send("tap", tapAt(e.changedTouches[0]));
       // the pulse must reach the game as its own message, then clear
       update(); if (last.split(",")[3] === "1") { last = ""; update(); }
       e.preventDefault();

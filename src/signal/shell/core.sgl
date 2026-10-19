@@ -32,6 +32,10 @@
           (signal scene)
           (signal title)
           (signal intro)
+          (signal flow)
+          (signal flow draw)
+          (signal flow save)
+          (only (signal flow tierdata) tier-race-tuning)
           (signal shell audio)
           (signal fx beat)
           (signal fx state)
@@ -46,7 +50,7 @@
   (export core-boot! core-frame! core-keys core-sticks core-pad core-param! core-touch!
           core-tap! core-race core-tuning core-describe core-probe core-knobs-markdown GAME-NAME
           core-audio-start! core-focus! core-paused? core-advance! core-headless-frame! core-gesture!
-          core-startup-mark! core-visible!)
+          core-startup-mark! core-visible! core-escape-quits? core-flow)
 
   (begin
     (define GAME-NAME "signal-overdrive")
@@ -62,6 +66,17 @@
     ;; the title screen ((signal title)): until it is done, a start goes to
     ;; it, not to the race
     (define *title* (title-new))
+    ;; the game's flow ((signal flow)): the menus over the title, each
+    ;; delivery's results, the cup's standings and its end, TIME TRIAL. Off
+    ;; (the race as before) with the start parameter or the title knob at 0.
+    (define *flow* (flow-new (save-new)))
+    (define *flow-base* #f)       ; the session's rivals, before the flow set any
+    (define *launch* #f)          ; the flow asked the title to fade into a race
+    (define *flow-began* #f)      ; the flow started a countdown this tick
+    (define *tap-at* #f)          ; this frame's tap, in view pixels
+    (define *bare-tap* #f)        ; a tap that did not say where
+    (define *stick-latch* 0)      ; the pad stick's last menu direction
+    (define (core-flow) *flow*)
     ;; before it, the start gate and the card ((signal intro)); made at the
     ;; boot, when the platform is known
     (define *intro* (intro-none))
@@ -87,7 +102,9 @@
     ;; counts resync requests but never executes them. Arms only.
     (define *depth-arm* #f)
 
-    (define (core-paused?) (or *paused* (not *focused*)))
+    ;; The flow's pause menu holds the race as F5 and a blur do: the clock
+    ;; frozen, the race song closed, the theme's menu version playing.
+    (define (core-paused?) (or *paused* (not *focused*) (and *flow* (flow-paused? *flow*))))
 
     ;; Whether anyone can see the game: the web page says when its tab is
     ;; hidden (a hidden tab is paused and silent; a blurred but visible
@@ -196,13 +213,20 @@
     (define *ghost* #f)          ; a vector of (x y heading), one per tick
     (define *ghost-track* #f)
     (define *ghost-best* #f)
+    (define *ghosts* '())        ; (track ghost best) for the tracks not being raced
 
     ;; was: the phase before this tick (the last lap ends in the tick that
     ;; turns the phase to finished, and must count too)
     (define (ghost-tick! r was)
       (let* ((p (race-player r)) (m (racer-machine p)) (name (track-name (race-track r))))
         (unless (eq? name *ghost-track*)
-          (set! *ghost-track* name) (set! *ghost* #f) (set! *ghost-best* #f) (set! *trail* '()))
+          ;; each track keeps its own ghost for the session
+          (when *ghost-track*
+            (set! *ghosts* (cons (list *ghost-track* *ghost* *ghost-best*)
+                                 (filter (lambda (g) (not (eq? (car g) *ghost-track*))) *ghosts*))))
+          (let ((g (assq name *ghosts*)))
+            (set! *ghost-track* name) (set! *ghost* (and g (cadr g))) (set! *ghost-best* (and g (caddr g)))
+            (set! *trail* '())))
         (when (or (eq? (race-phase r) 'race) (eq? was 'race))
           ;; a new lap began this tick: was the one before it the best?
           (when (= (racer-lap-start p) (race-tick r))
@@ -398,6 +422,11 @@
       ;; a boot is a new session, its title too: a start or a skip from an
       ;; earlier boot in the same process does not carry over
       (set! *title* (title-new))
+      ;; the save: unlocks and best times, from the store
+      (set! *flow* (flow-new (save-load)))
+      ;; *flow-base* stays: *tuning* lives across boots too, and may hold a
+      ;; TIME TRIAL's empty field the base must not take as the session's
+      (set! *launch* #f)
       (load-best!))
 
     ;; A URL parameter or a command-line --key=value: a knob; or
@@ -407,6 +436,8 @@
     (define *start-now* #f)
     ;; the track=... asked for, applied once the development controls are on
     (define *track-request* #f)
+    ;; unlock=all given before ?dev, applied with it
+    (define *unlock-request* #f)
     (define (track-request!)
       (when (and *track-request* (dev-keys?))
         (let ((kv *track-request*))
@@ -420,13 +451,18 @@
             (begin
               (song-override! *song-request*)
               (set! *song-request* #f)
-              (set! *race* (race-new *tuning*))
+              (set! *race* (race-rebuild))
               (music-prepare!)
               (say "song " (symbol->string (song-id))))
             (say "song=" (symbol->string *song-request*) " waits for ?dev"))))
     (define (core-param! kv)
       (cond ((string=? kv "autopilot") (set! *autopilot* #t) (say "autopilot on"))
-            ((string=? kv "start") (set! *start-now* #t) (intro-skip!) (title-skip!))
+            ((string=? kv "start") (set! *start-now* #t) (intro-skip!) (title-skip!) (set! *flow* (flow-off *flow*)))
+            ;; development: every tier and cup open, for this session only
+            ((string=? kv "unlock=all")
+             (if (dev-keys?)
+                 (begin (set! *flow* (flow-unlock-all *flow*)) (say "unlock all (this session, not saved)"))
+                 (begin (set! *unlock-request* #t) (say "unlock=all waits for ?dev"))))
             ((string=? kv "pointer=coarse") (set! *touch-device* #t))
             ((string=? kv "pointer=fine") (set! *touch-device* #f))
             ((string=? kv "motion=reduce") (set! *reduce-motion* #t))
@@ -439,7 +475,8 @@
             ((or (string=? kv "dev") (and (> (string-length kv) 3) (string=? (substring kv 0 4) "dev=")))
              (set! *dev* #t) (say "dev keys on")
              (song-request!)
-             (track-request!))
+             (track-request!)
+             (when *unlock-request* (set! *unlock-request* #f) (core-param! "unlock=all")))
             ;; no HUD: clean captures, and the P15 gate's static frame
             ((string=? kv "nohud") (set! *no-hud* #t))
             ;; no machines or gate: the P15 gate's frame must not move, and the
@@ -496,7 +533,8 @@
              (let ((t (tuning-parse! *tuning* kv)))
                (when t
                  (set! *tuning* t)
-                 (unless (fx-param? kv) (set! *race* (race-new *tuning*)) (music-prepare!))
+                 (flow-base-note! kv t)
+                 (unless (fx-param? kv) (set! *race* (race-rebuild)) (music-prepare!))
                  (say "tuning " kv))))))
 
     ;; "steer,throttle,brake,boost,drift" from the page (0/1 for the last two).
@@ -513,8 +551,20 @@
         (set! *touch* (list (num 0) (num 1) (num 2) boost (> (num 4) 0.5)))))
     (define *touch-boost-pending* #f)
 
-    ;; A tap on the page (a start on the title and end screens).
-    (define (core-tap!) (set! *tapped* #t))
+    ;; A tap on the page (a start on the title and end screens). The page
+    ;; may say where, as "fx,fy", fractions of the canvas: the menus and
+    ;; panels then take the row it lands on.
+    (define (core-tap! . payload)
+      (set! *tapped* #t)
+      (let* ((xy (and (pair? payload) (parse-xy (car payload))))
+             (v (and xy (scene-view-point (car xy) (cdr xy)))))
+        (if v (set! *tap-at* v) (set! *bare-tap* #t))))
+    (define (parse-xy s)
+      (let ((i (let find ((k 0)) (cond ((>= k (string-length s)) #f) ((char=? (string-ref s k) #\,) k) (else (find (+ k 1)))))))
+        (and i
+             (let ((x (string->number (substring s 0 i)))
+                   (y (string->number (substring s (+ i 1) (string-length s)))))
+               (and x y (cons (exact->inexact x) (exact->inexact y)))))))
 
     ;; --- input ------------------------------------------------------------------------------
 
@@ -587,6 +637,120 @@
     (define (core-gesture!)
       (set! *gestured* #t)
       (core-audio-start!))
+    ;; --- the flow ---------------------------------------------------------------------
+    ;; One frame's menu input: presses this frame (the pad's stick as a
+    ;; press when it crosses 0.6), and the frame's tap.
+    ;; A frame that ran no tick (half the frames at 120 Hz) hands its presses
+    ;; to the next frame's first tick, as a tap waits.
+    ;; *nav-read*: this frame's input was read (a press is read once: the
+    ;; pause menu's resume is not carried into a pause on the next tick)
+    (define *nav-carry* NAV-NONE)
+    (define *nav-read* #f)
+    (define (frame-nav)
+      (let ((n (nav-merge *nav-carry* (frame-nav-now))))
+        (set! *nav-carry* NAV-NONE)
+        (set! *nav-read* #t)
+        n))
+    (define (frame-nav-now)
+      (let* ((ly (pad-axis *pad* 'ly)) (lx (pad-axis *pad* 'lx))
+             (dir (cond ((< ly -0.6) 'up) ((> ly 0.6) 'down) ((< lx -0.6) 'left) ((> lx 0.6) 'right) (else 0)))
+             (stick (and (not (eqv? dir 0)) (not (eq? dir *stick-latch*)) dir))
+             ;; a tap that did not say where chooses the selection
+             (tap (or *tap-at* (and *bare-tap* 'any))))
+        (set! *stick-latch* dir)
+        (set! *tap-at* #f)
+        (set! *bare-tap* #f)
+        (nav up: (or (pressed? 'up 'w) (pad-pressed? *pad* 'up) (eq? stick 'up))
+             down: (or (pressed? 'down 's) (pad-pressed? *pad* 'down) (eq? stick 'down))
+             left: (or (pressed? 'left 'a) (pad-pressed? *pad* 'left) (eq? stick 'left))
+             right: (or (pressed? 'right 'd) (pad-pressed? *pad* 'right) (eq? stick 'right))
+             confirm: (or (pressed? 'return 'space) (pad-pressed? *pad* 'start) (pad-pressed? *pad* 'a))
+             back: (or (pressed? 'escape 'backspace) (pad-pressed? *pad* 'b))
+             ;; a race's pause: never a pad's B, which is also the brake
+             pause: (or (pressed? 'escape 'backspace) (pad-pressed? *pad* 'start))
+             tap: tap)))
+    ;; Natively Escape quits on the title (and with no flow, as before); in
+    ;; a race it pauses, and on the menus and panels it is BACK.
+    (define (core-escape-quits?) (and (memq (flow-screen *flow*) '(off title)) #t))
+
+    ;; The race the flow names: its track, and the mode and tier
+    ;; ((signal flow tierdata)), from the session's own field of rivals.
+    (define (flow-config!)
+      (unless *flow-base*
+        (set! *flow-base* (list (cons 'rivals (tuning-ref *tuning* 'rivals)))))
+      (set! *tuning* (tier-race-tuning (tuning-set *tuning* 'track (track-index-of (flow-track *flow*)))
+                                       *flow-base* (flow-mode *flow*) (flow-tier *flow*))))
+    ;; The one place the flow builds a race (its restarts go through
+    ;; race-start, which keeps what race-new was given). INTEGRATION SEAM:
+    ;; once race-new takes tier: and mode: ((signal tiers)), this becomes
+    ;;   (race-new *tuning* tier: (flow-tier *flow*)
+    ;;             mode: (tier-race-mode (flow-mode *flow*)))
+    ;; The flow never sets a number from the tier: the race's tier data
+    ;; owns pace and ICE; see (signal flow tierdata).
+    (define (flow-race-new) (race-new *tuning*))
+    ;; A param, a knob or a song request rebuilding the race: in a flow,
+    ;; through the seam, so the race keeps the flow's mode and tier.
+    (define (race-rebuild) (if (flow-active? *flow*) (flow-race-new) (race-new *tuning*)))
+    ;; A rivals= param after the base was taken is the session's new
+    ;; field: the next race the flow names starts from it.
+    (define (flow-base-note! kv t)
+      (when *flow-base*
+        (set! *flow-base*
+              (map (lambda (e)
+                     (let ((k (symbol->string (car e))))
+                       (if (and (> (string-length kv) (string-length k))
+                                (string=? (substring kv 0 (+ (string-length k) 1)) (string-append k "=")))
+                           (cons (car e) (tuning-ref t (car e)))
+                           e)))
+                   *flow-base*))))
+    (define (flow-command! c)
+      (case c
+        ((preview) (flow-config!) (set! *race* (flow-race-new)) (music-prepare!))
+        ((launch) (flow-config!) (set! *race* (flow-race-new)) (music-prepare!) (set! *launch* #t))
+        ((begin) (flow-config!) (restart-race!) (set! *flow-began* #t))
+        ((to-title)
+         (set! *race* (race-new *tuning*))
+         (music-prepare!)
+         (set! *title* (title-new))
+         (set! *cam-heading* #f))
+        ((store)
+         (when (flow-store? *flow*)
+           (say (if (save-store! (flow-save *flow*)) "progress saved" "progress NOT saved"))))
+        (else #f)))
+    ;; nav?: this tick may read the frame's input (its first tick).
+    (define (flow-tick! r nav?)
+      (when (and (or (eq? (flow-screen *flow*) 'title) (flow-menu? *flow*)) (not (title-active? *title*)))
+        (set! *flow* (flow-off *flow*)))
+      (let ((was (flow-screen *flow*)))
+        (set! *flow* (flow-step *flow* (if nav? (frame-nav) NAV-NONE) r))
+        (for-each flow-command! (flow-commands *flow*))
+        (unless (eq? was (flow-screen *flow*))
+          (when (or (eq? was 'paused) (flow-paused? *flow*)) (pause-changed!))
+          (say (flow-describe *flow*)))))
+    ;; Into or out of the pause menu, as F5 does: the sound follows, and the
+    ;; frame after it owes no ticks for the time spent paused.
+    (define (pause-changed!)
+      ;; a finger on the pause menu (a boost landing, a held zone) is not
+      ;; the race's: the touch state starts over either way
+      (set! *touch* (list 0.0 0.0 0.0 #f #f))
+      (set! *touch-boost-pending* #f)
+      (set! *nav-carry* NAV-NONE)
+      (set! *skip-interval* #t)
+      (audio-pause! (core-paused?))
+      (music-frame! (race-song *race*) (music-held?)))
+    ;; A new countdown on the current tuning's track, now: the frame's
+    ;; remaining ticks belong to the old race, and the new song opens at
+    ;; conductor tick 0 (as R's restart).
+    (define (restart-race!)
+      (race-begin! *race*)
+      (music-prepare!)
+      (music-close!)
+      (set! *clock* (clock-new))
+      (set! *pacing* (pacing-new))
+      (set! *skip-interval* #t))
+    ;; The ghost belongs to TIME TRIAL, and to the race without the flow.
+    (define (ghost-on?) (or (not (flow-active? *flow*)) (eq? (flow-mode *flow*) 'trial)))
+
     ;; The title ((signal title)): while it shows, a start goes to it; it
     ;; says when the race begins. Its events, and every race's start, go to
     ;; the music through title-emit!.
@@ -699,8 +863,10 @@
     (define (after-knob! key)
       (say "tuning " (symbol->string key) "=" (tuning-format-value (tuning-ref *tuning* key))
            " query ?" (tuning-query *tuning*))
+      ;; the overlay's rivals are the session's field, as a rivals= param's
+      (when (eq? key 'rivals) (flow-base-note! "rivals=" *tuning*))
       (when (memq key '(track laps rivals rival-pace))
-        (set! *race* (race-new *tuning*))
+        (set! *race* (race-rebuild))
         (music-prepare!)))
 
     ;; --- a frame ----------------------------------------------------------------------------
@@ -726,12 +892,14 @@
     (define (step! n)
       (set! *start-spent* #f)
       (let loop ((i 0))
-        (when (< i n)
+        ;; a pause opened on this tick holds the frame's later ticks
+        (when (and (< i n) (not (flow-paused? *flow*)))
           (let ((started?
           (let* ((was (race-phase *race*))
                  (start (and (start-asked?) (not *start-spent*)))
                  (in (controls))
-                 (r (race-step *tuning* *race* in (and start (not (title-active? *title*)))))
+                 (r (race-step *tuning* *race* in (and start (not (flow-owns-start? *flow*))
+                                                       (not (title-active? *title*)))))
                  (started? (and (eq? (race-phase r) (quote countdown))
                                 (not (eq? was (quote countdown))))))
             (set! *race* r)
@@ -740,7 +908,11 @@
             (if (intro-active? *intro*)
                 (when (intro-tick! r start) (set! *start-spent* #t))
                 (begin
-                  (title-tick! r start)
+                  ;; tick 0 reads the frame's input unless the pause menu already
+                  ;; read it this frame (a press is read once)
+                  (when (flow-active? *flow*) (flow-tick! *race* (and (= i 0) (not *start-spent*) (not *nav-read*))))
+                  ;; with the flow on, the title starts only when the flow launches
+                  (title-tick! *race* (if (flow-active? *flow*) (let ((l *launch*)) (set! *launch* #f) l) start))
                   ;; after the card: the mark goes once the attract camera passes it
                   (set! *intro* (intro-follow *intro* (title-camera *title* *tuning* (race-track *race*) VIEW-W VIEW-H)
                                               *race*))))
@@ -758,7 +930,7 @@
             ;; player's: no stored best lap, no ghost
             (unless (or *autopilot* (showcase?))
               (record-best!)
-              (ghost-tick! r was))
+              (when (ghost-on?) (ghost-tick! r was)))
             (let ((t0 (current-jiffy)))
               (fx-tick! r)
               (set! *fx-frame-ms* (+ *fx-frame-ms* (ms-since t0))))
@@ -774,14 +946,25 @@
                    (ch (or *cam-heading* h))
                    (lag (tuning-ref *tuning* 'cam-lag)))
               (set! *cam-heading* (if (eq? (race-phase r) 'title) h (+ ch (* (- h ch) (- 1.0 lag))))))
-            started?)))
+            (or started? *flow-began*))))
           (set! *flash* (max 0 (- *flash* 1)))
           (when *spark* (set! *spark* (cons (+ 1 (car *spark*)) (cdr *spark*))))
           (if started?
               (begin
                 (set! *clock* (clock-new))
-                (set! *skip-interval* #t))
-              (loop (+ i 1)))))))
+                (set! *skip-interval* #t)
+                ;; the flow's countdown: the camera starts behind the new race
+                (when *flow-began* (set! *flow-began* #f) (set! *cam-heading* #f)))
+              (loop (+ i 1))))))
+      ;; A tap waits for a tick, as *tapped* does, but no longer: one the
+      ;; flow did not read by then (the gate's click, a tap that skipped the
+      ;; card) never reaches a menu later.
+      (if (> n 0)
+          (begin (set! *tap-at* #f) (set! *bare-tap* #f))
+          ;; no tick: the presses wait for the next frame's (not through the
+          ;; card, whose press is its own, nor the pause menu, read each frame)
+          (when (and (not *nav-read*) (flow-active? *flow*) (not (flow-paused? *flow*)) (not (intro-active? *intro*)))
+            (set! *nav-carry* (frame-nav)))))
 
     ;; The player, for the touch check: what a gesture did, from the game.
     (define (core-probe)
@@ -795,6 +978,10 @@
                        " phase " (symbol->string (race-phase *race*))
                        " title " (symbol->string (title-phase *title*)) " fade " (r3 (title-fade *title* *tuning*))
                        " intro " (symbol->string (intro-phase *intro*))
+                       " " (flow-describe *flow*)
+                       " rivals " (number->string (length (race-rivals *race*)))
+                       " race-track " (symbol->string (track-name (race-track *race*)))
+                       " race-tick " (number->string (race-tick *race*))
                        " glitch " (r3 (max *glitch* (card-glitch))) " card-fade " (r3 (intro-fade *intro* *tuning*))
                        " motion " (if *reduce-motion* "reduce" "full")
                        ;; the sound, for the audio check
@@ -938,6 +1125,7 @@
                        " sim-ms " (number->string (/ (round (* 10.0 *sim-ms*)) 10.0))
                        " draw-ms " (number->string (/ (round (* 10.0 *draw-ms*)) 10.0))
                        " phase " (symbol->string (race-phase *race*))
+                       " " (flow-describe *flow*)
                        " lap " (number->string (racer-lap (race-player *race*)))
                        " s " (number->string (exact (round (machine-s m))))
                        " speed " (number->string (speed-kmh m))
@@ -954,6 +1142,9 @@
         (set! *paused* (not *paused*))
         (audio-pause! (core-paused?))
         (music-frame! (race-song *race*) (music-held?)))
+      ;; The pause menu runs no race ticks, so it reads this frame's input here.
+      (set! *nav-read* #f)
+      (when (flow-paused? *flow*) (flow-tick! *race* #t))
       (when (> dt 0.0)
         (set! *fps* (+ (* 0.95 *fps*) (* 0.05 (/ 1.0 dt))))
         (set! *frame-ms* (+ (* 0.95 *frame-ms*) (* 0.05 (* 1000.0 dt)))))
@@ -963,7 +1154,12 @@
         (say "fps readout " (if *fps-on* "on" "off")))
       (overlay-keys!)
       (fx-keys!)
-      (when (or (pressed? 'r) (pad-pressed? *pad* 'back))
+      (when (and (or (pressed? 'r) (pad-pressed? *pad* 'back))
+                 (eq? (flow-screen *flow*) 'racing) (eq? (flow-mode *flow*) 'trial))
+        (set! *flow* (flow-retry *flow*))
+        (restart-race!)
+        (say "restart"))
+      (when (and (or (pressed? 'r) (pad-pressed? *pad* 'back)) (not (flow-active? *flow*)))
         (intro-skip!)
         (title-skip!)
         (race-begin! *race*)
@@ -1030,7 +1226,18 @@
         (when marking? (core-startup-mark! "audio")))
       (let ((t0 (current-jiffy)))
        (scene-frame! *tuning* *race* (or *cam-heading* 0.0)
-                    (list (cons 'best *best*)
+                    (list (cons 'best (if (memq (flow-screen *flow*) '(racing paused launch fade results trial-results))
+                                          (let ((a (flow-hud-best *flow*)) (b (racer-best-lap (race-player *race*))))
+                                            (if (and a b) (min a b) (or a b)))
+                                          *best*))
+                          (cons 'flow-panel (flow-panel? *flow*))
+                          (cons 'start-card (flow-start-card *flow*))
+                          (cons 'draw-ui (and (not *no-hud*) (not (intro-active? *intro*))
+                                              (memq (flow-screen *flow*) '(mode tier cup trial results standings cup-end trial-results paused racing))
+                                              (lambda (kit)
+                                                (flow-draw! *flow* kit *race*
+                                                            (list (cons 'calm *reduce-motion*) (cons 'touch *touch-device*)
+                                                                  (cons 'web (eq? *platform* 'web)))))))
                           (cons 'flash *flash*)
                           (cons 'spark *spark*)
                           (cons 'kick *kick*)
@@ -1044,7 +1251,7 @@
                           (cons (quote hud) (and (not *no-hud*) (title-hud? *title*) (not (intro-active? *intro*))))
                           (cons (quote camera) (or (intro-camera *intro* *tuning* *race* VIEW-W VIEW-H)
                                                    (title-camera *title* *tuning* (race-track *race*) VIEW-W VIEW-H)))
-                          (cons (quote fade) (max (intro-fade *intro* *tuning*) (title-fade *title* *tuning*)))
+                          (cons (quote fade) (max (intro-fade *intro* *tuning*) (title-fade *title* *tuning*) (flow-fade *flow*)))
                           (cons (quote draw-ground) (and (intro-mark-shown? *intro*)
                                                          (or (intro-active? *intro*) (memq (title-phase *title*) '(attract out)))
                                                          (lambda (c) (intro-draw-mark! c *race*))))
@@ -1054,7 +1261,8 @@
                                                        (lambda (centred!) (centred! (intro-gate-line *touch-device*) 130 "#4DF2D9" 2)))
                                                       ((intro-active? *intro*) #f)
                                                       ;; the prompt blinks; with reduced motion, steady
-                                                      ((and (or (title-prompt? *title*)
+                                                      ((and (not (flow-owns-start? *flow*))
+                                                            (or (title-prompt? *title*)
                                                                 (and *reduce-motion* (eq? (title-phase *title*) 'attract)))
                                                             (not *no-hud*))
                                                        (lambda (centred!)
@@ -1064,7 +1272,7 @@
                           (cons (quote sprites) (not *no-sprites*))
                           (cons 'corrupt *corrupt*)
                           (cons 'popups *popups*)
-                          (cons 'ghost (ghost-now *race*))
+                          (cons 'ghost (and (ghost-on?) (ghost-now *race*)))
                           (cons 'time (/ (race-tick *race*) 60.0))
                           (cons 'start-line (if (eq? *platform* 'web) "PRESS ENTER OR TAP" "PRESS ENTER"))
                           (cons 'restart-line (if (eq? *platform* 'web) "ENTER OR TAP TO RUN IT AGAIN" "ENTER TO RUN IT AGAIN"))
