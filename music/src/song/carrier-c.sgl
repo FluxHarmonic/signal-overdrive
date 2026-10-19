@@ -440,7 +440,7 @@
       (let ((events (carrier-c-events)))
         (check-p13! CARRIER-C-SECTIONS events (answer-bars) '(hold))
         (song-text "Carrier: Slipstream" CARRIER-C-SECTIONS events
-                   (race-bus-text (quote threshold) -16 (quote attack) 2 (quote makeup) 3.7) (bank)
+                   (race-bus-text (quote threshold) -16 (quote attack) 2 (quote makeup) 3.6) (bank)
                    ;; channel 7 sounds as the pluck: the twin and the riser's arp take its send and pan
                    (quote voices) (list (cons 7 I-PLUCK)))))
 
