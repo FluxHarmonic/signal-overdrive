@@ -1,5 +1,5 @@
 (tune version: 1 name: "Carrier: Night Shift" tempo: 140 speed: 3 channels: 8 meter: (8 4)
-  (bus reverb: zitarev size: 0.8 damp: 0.55 mix: 0.3 comp: on threshold: -12 ratio: 3 attack: 8 release: 110 makeup: -0.5)
+  (bus reverb: zitarev size: 0.8 damp: 0.55 mix: 0.3 comp: on threshold: -16 ratio: 4 attack: 2 release: 80 makeup: 3)
   (instruments
     (instrument id: 1 name: "thud" patch: (chip-kick decay: 0.17 drive: 0.6 index: 1.3 sweep: 2.6 sweep-decay: 0.018) volume: 46 pan: 0)
     (instrument id: 2 name: "snare-clap" patch: (chip-snare body: 0.6 crush-bits: 12 hp: 1500 noise: 0.6 noise-decay: 0.12) volume: 40 gain: 0.7 send: 0.06 layers: ((chip-clap cutoff: 5600 decay: 0.045 gain: 0.85 hp: 1200 spacing: 0.006 octave: 0 volume: 0.55) (chip-hat crush-bits: 12 decay: 0.018 hp: 6500 metal: 0.7 noise: 0.1 octave: 0 volume: 0.3)) pan: 0)

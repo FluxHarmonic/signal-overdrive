@@ -423,7 +423,8 @@
     (define (carrier-a-text)
       (let ((events (carrier-a-events)))
         (check-p13! CARRIER-A-SECTIONS events (answer-bars) '(hold))
-        (song-text "Carrier: Undertow" CARRIER-A-SECTIONS events (race-bus-text) (bank))))
+        (song-text "Carrier: Undertow" CARRIER-A-SECTIONS events
+                   (race-bus-text (quote threshold) -16 (quote attack) 4 (quote makeup) 3.4) (bank))))
 
     (define (with-cadence chords bars)
       (let loop ((cs chords) (i 0) (acc '()))

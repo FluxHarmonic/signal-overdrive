@@ -112,9 +112,20 @@
        "  )\n"))
 
     ;; Carrier's race bus: makeup -0.5 dB, so the loudest bars peak near
-    ;; -2 dBFS and the game's cues have room on top
-    (define (race-bus-text)
-      "  (bus reverb: zitarev size: 0.8 damp: 0.55 mix: 0.3 comp: on threshold: -12 ratio: 3 attack: 8 release: 110 makeup: -0.5)\n")
+    ;; -2 dBFS and the game's cues have room on top.
+    ;; A song whose loudness or peaks differ from Carrier's passes its own
+    ;; compressor settings to match Carrier's par race (about -14.8 LUFS,
+    ;; true peak -2.1 dBFS) on the same path, keyword style:
+    ;; (race-bus-text 'threshold -16 'makeup 2.8). Unset keys keep Carrier's.
+    (define (race-bus-text . opts)
+      (define (opt key default)
+        (let loop ((o opts))
+          (cond ((null? o) default)
+                ((eq? (car o) key) (cadr o))
+                (else (loop (cddr o))))))
+      (string-append "  (bus reverb: zitarev size: 0.8 damp: 0.55 mix: 0.3 comp: on threshold: " (num (opt 'threshold -12))
+                     " ratio: " (num (opt 'ratio 3)) " attack: " (num (opt 'attack 8))
+                     " release: " (num (opt 'release 110)) " makeup: " (num (opt 'makeup -0.5)) ")\n"))
 
     ;; ------------------------------------------------------------
     ;; Helpers

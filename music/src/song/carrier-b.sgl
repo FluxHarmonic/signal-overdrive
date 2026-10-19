@@ -420,7 +420,8 @@
     (define (carrier-b-text)
       (let ((events (carrier-b-events)))
         (check-p13! CARRIER-B-SECTIONS events (answer-bars) '(hold))
-        (song-text "Carrier: Night Shift" CARRIER-B-SECTIONS events (race-bus-text) (bank)
+        (song-text "Carrier: Night Shift" CARRIER-B-SECTIONS events
+                   (race-bus-text (quote threshold) -16 (quote ratio) 4 (quote attack) 2 (quote release) 80 (quote makeup) 3.0) (bank)
                    ;; channel 7 sounds as the arp: the counter-line and the hollow lead under
                    ;; the hot one in the uplink take its send and pan
                    (quote voices) (list (cons 7 I-ARP)))))
