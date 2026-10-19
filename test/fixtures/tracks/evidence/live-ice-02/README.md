@@ -43,8 +43,12 @@ The private review archive's SHA256 is
 `4cc190766d0d43f757d31209dbe73918eb42182ff43b01d064d0967620dbdec2`;
 its executable's SHA256 is
 `61f42f406633c5b2174bf422fe40d7a8f9a6e51c486cf1f26e24014bb02f0d21`.
-Web compilation was still running when this receipt was collected; this
-receipt makes no web-build or total-release acceptance claim.
+Web compilation subsequently completed in cp53 with RESULT0, including
+Asyncify and wasm-opt optimization. `builds.json` records the final build
+result, artifact sizes/SHA256 hashes and the checked WASM header. The
+isolated snapshot has no git metadata, so its web stamp is `unversioned`;
+the explicit production source commit above identifies the code. This is
+build evidence only, with no browser-runtime or performance claim.
 
 Limitations remain explicit: the actual Quayside/Basin seed0 AI paths
 admit no tracer, and Basin ELITE seed0 admits no Void wake. Safety admission
