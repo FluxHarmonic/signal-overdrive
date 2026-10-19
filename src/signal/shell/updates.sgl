@@ -20,7 +20,11 @@
       (unless visible? (set! *chosen* #f)))
 
     (define (update-notify! state)
-      (cond ((string=? state "waiting")
+      (cond ((string=? state "none")
+             (set! *waiting* #f)
+             (set! *chosen* #f)
+             (set! *blocked* #f))
+            ((string=? state "waiting")
              (set! *waiting* #t))
             ((string=? state "blocked")
              (set! *blocked* #t))))

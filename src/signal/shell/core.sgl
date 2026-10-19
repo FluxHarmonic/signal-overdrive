@@ -37,6 +37,7 @@
           (signal flow save)
           (only (signal flow tierdata) tier-race-tuning)
           (signal shell audio)
+          (signal shell updates)
           (signal fx beat)
           (signal fx state)
           (signal fx showcase)
@@ -399,6 +400,7 @@
 
     (define (core-boot! platform)
       (set! *platform* platform)
+      (update-menu! #f)
       (set! *clock* (clock-new))
       (set! *pacing* (pacing-new))
       (set! *paused* #f)
@@ -705,6 +707,7 @@
                    *flow-base*))))
     (define (flow-command! c)
       (case c
+        ((update) (update-choose!))
         ((preview) (flow-config!) (set! *race* (flow-race-new)) (music-prepare!))
         ((launch) (flow-config!) (set! *race* (flow-race-new)) (music-prepare!) (set! *launch* #t))
         ((begin) (flow-config!) (restart-race!) (set! *flow-began* #t))
@@ -1136,6 +1139,13 @@
     ;; Advance a frame without drawing. Headless checks exercise this
     ;; same input, pacing and fixed-tick path as both graphical shells.
     (define (core-advance! dt)
+      ;; Web availability is presentation state; native sessions never gain
+      ;; an update row. The flow emits a command only on an actual choice.
+      (set! *flow* (flow-with-update *flow*
+                                    (and (eq? *platform* 'web) (update-waiting?))))
+      (update-menu! (and (eq? *platform* 'web)
+                         (eq? (flow-screen *flow*) 'mode)
+                         (not (intro-active? *intro*))))
       (set! *frame-jiffy* (current-jiffy))
       (set! *frame-wall* (* 1000.0 (current-second)))
       (when (and (dev-keys?) (pressed? 'f5))
@@ -1214,7 +1224,12 @@
         (set! *fx-frame-ms* 0.0)
         (step! (clock-steps *clock*))
         (set! *fx-ms* (ease *fx-ms* *fx-frame-ms*))
-        (set! *sim-ms* (ease *sim-ms* (ms-since t0)))))
+        (set! *sim-ms* (ease *sim-ms* (ms-since t0))))
+      ;; Revoke permission in the same frame that leaves the mode menu;
+      ;; a pause, result panel, countdown or race is never an update menu.
+      (update-menu! (and (eq? *platform* 'web)
+                         (eq? (flow-screen *flow*) 'mode)
+                         (not (intro-active? *intro*)))))
 
     (define *startup-frames* 0)
     (define (core-frame! dt win-w win-h integer-only)
@@ -1237,6 +1252,7 @@
                                               (lambda (kit)
                                                 (flow-draw! *flow* kit *race*
                                                             (list (cons 'calm *reduce-motion*) (cons 'touch *touch-device*)
+                                                                  (cons 'update-blocked (update-blocked?))
                                                                   (cons 'web (eq? *platform* 'web)))))))
                           (cons 'flash *flash*)
                           (cons 'spark *spark*)

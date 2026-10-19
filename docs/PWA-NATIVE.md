@@ -24,10 +24,12 @@ A racing or suspended/unresponsive tab blocks the swap. A paused race is unsafe.
 Activation removes obsolete caches, scoped to this game directory. Update code
 does not write or clear localStorage.
 
-The main-menu seam is pending integration with the race-flow branch; 81d69b8 has
-no main menu. `(signal shell updates)` exports the waiting flag, menu permission,
-and once-only choice. The page uses Crash's `update/waiting`, `update/chosen?`
-dispatch bridge. Do not substitute a browser card or automatic menu transition.
+The race-flow mode menu shows INSTALL UPDATE after RUN and TIME TRIAL only when
+the worker reports a ready build. Its existing keyboard, gamepad and touch row
+selection emits an update command. `(signal shell updates)` carries the waiting
+flag, menu permission and once-only choice through Crash's `update/waiting`,
+`update/chosen?` dispatch bridge. The shell revokes permission in the same frame
+that leaves this menu; native sessions never acquire the web item.
 
 Chrome verification must run on Phantom, never the laptop. The deterministic
 controls are `node --test test/test-pwa.mjs`; `node scripts/check-pwa-controls.mjs`
