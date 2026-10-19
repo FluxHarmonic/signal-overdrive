@@ -17,6 +17,8 @@
 
 (test-group "song=ID is a development control"
   (test "natively it applies at once"
+    ;; the requested song must differ from the bound one, or this passes vacuously
+    (assert-false (eq? bound 'carrier-a))
     (core-boot! 'desktop)
     (core-param! "song=carrier-a")
     (assert-equal 'carrier-a (song-id))
@@ -25,6 +27,7 @@
     (assert-equal bound (song-id)))
 
   (test "on the web it waits for ?dev, then applies"
+    (assert-false (eq? bound 'carrier-b))
     (core-boot! 'web)
     (core-param! "song=carrier-b")
     (assert-equal bound (song-id))
