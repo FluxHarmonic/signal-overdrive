@@ -6,6 +6,11 @@
         (signal music transport)
         (substratic time clock))
 
+;; These tests pin Carrier's arrangement (its bars and repeats). The current
+;; song is shared library state, and an earlier test file's race selects its
+;; track's song, so select Carrier here.
+(song-select! 'carrier)
+
 (define (advance c ticks)
   (let loop ((c c) (remaining ticks))
     (if (= remaining 0)

@@ -6,6 +6,7 @@
         (motif tune)
         (motif tune player)
         (signal music score)
+        (only (signal music song) song-select!)
         (signal music conductor)
         (signal music transport)
         (signal music playback)
@@ -300,6 +301,9 @@
 ;; starting LEAD seconds into lap1 with the ear at its start, as in
 ;; shell-frames. Returns (samples . the splice's log entry or #f).
 (define (spliced lead frames)
+  ;; the stream plays the current song, and a boot selects track 0's; the
+  ;; comparison renders `tune`, so play its score
+  (song-select! SCORE-ID)
   (let* ((c0 (conductor-new 'lap1))
          (all (make-bytevector (* 8 735 frames) 0))
          (out (make-bytevector (* 8 735) 0)))
