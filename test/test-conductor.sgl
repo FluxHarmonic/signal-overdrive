@@ -314,6 +314,8 @@
 
   (test "a device that never starts is waited for START-HOLD-CAP seconds, then the race starts"
     (let ((r (late-device #f 3.0 #t)))
+      ;; it starts at all
+      (assert-true (number? (caddr r)))
       (assert-true (> (caddr r) (- START-HOLD-CAP 0.02)))
       (assert-true (< (caddr r) (+ START-HOLD-CAP 0.05)))
       ;; and runs on wall time after it
