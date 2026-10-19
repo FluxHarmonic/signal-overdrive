@@ -233,6 +233,23 @@ Curved active/warning meshes and dedicated pair sprites are wired into the
 scene; source/native/audio/draw tests remain separate from track acceptance.
 The handling oval has no authored automatic live hazards.
 
+Run `check-pair-wake` for the shared placement, runtime, race and canonical
+oracle regressions. `check-density-cup` drives all three cup tracks at every
+tier, reporting actual lap crossings, PAR and per-kind hazard/paired-rival
+observations. `check-density-histories` then audits those crossing reports
+with the canonical scheduler across seeds and shared tier profiles. Keep
+each individual status: an overall timeout never establishes acceptance.
+
+On Phantom, `check-native-direct` checks the real queued audio mute and
+visible curved meshes for every ICE kind. `check-native-scene` uses the
+existing standard native runner to capture complete shell/race scenes with
+current assets, normal camera and HUD. It fast-forwards genuine simulation
+ticks to choose frames; it does not measure frame times or audio pacing.
+The swarm's scheduled-state capture may be offscreen when this driver's
+pass misses its live cadence; the separate mesh proof establishes visible
+swarm geometry. Missing or stale captures and frame/shader errors fail the
+wrapper even if a native frame coroutine swallows an exception.
+
 The generated/probe data roundtrip includes the full schedule; cross-language
 parity checks exercise the actual runtime adapters over seeds, cadence/phrase
 boundaries, partial history, wrapped strips, targets and reservations. Separate

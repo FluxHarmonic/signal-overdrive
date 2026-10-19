@@ -1,0 +1,128 @@
+;;; Phantom-only integration captures from actual shell/race/scene state.
+;;; Fast fixed ticks select frames; these are not performance or pacing data.
+(import (sigil test)
+        (sigil fs)
+        (sigil desktop)
+        (sigil graphics)
+        (sigil graphics image)
+        (substratic image capture)
+        (signal track)
+        (signal race)
+        (signal handling)
+        (signal ice runtime)
+        (signal scene)
+        (signal title)
+        (signal intro)
+        (signal mode7 decal)
+        (signal shell core))
+
+(define (scene-texture name)
+  (let* ((image (load-image (string-append "assets/signal/" name)))
+         (texture (load-texture image)))
+    (image-free! image)
+    texture))
+
+(define captured '())
+
+(define (capture-scene! name)
+  (unless (member name captured)
+    ;; Present the complete normal game scene without moving the simulation.
+    (core-frame! 0.0 480 270 #t)
+    (wait-frame)
+    (let ((png (capture-frame-png 480 270))
+          (r (core-race)))
+      (assert-true (bytevector? png))
+      (write-file-bytes (string-append "build/ice-scene-" name ".png") png)
+      (display "SCENE ")
+      (write (list name (track-name (race-track r)) (race-tick r)
+                   (racer-lap (race-player r))
+                   (ice-state-active (race-ice r))
+                   (ice-state-telegraphs (race-ice r))))
+      (newline))
+    (set! captured (cons name captured))))
+
+(define (visible-zone? r zone)
+  (let* ((t (race-track r))
+         (s (machine-s (racer-machine (race-player r))))
+         (ahead (s-ahead t s (car (list-ref zone 3)))))
+    (and (> ahead 120.0) (< ahead 700.0))))
+
+(define (capture-hazards! prefix r zones warning?)
+  (for-each
+    (lambda (zone)
+      (when (visible-zone? r zone)
+        (capture-scene!
+          (string-append prefix "-" (cadr zone)
+                         (if warning? "-warning" "-active")))))
+    zones))
+
+(define (capture-race! id ticks)
+  (core-boot! 'desktop)
+  (for-each core-param!
+    (list "mute" "dev" "autopilot" "motion=reduce"
+          (string-append "track=" id) "start"))
+  ;; Let the normal camera lag settle during the real countdown, just as
+  ;; native startup's warm frames precede a player's first race view.
+  (let warm ((i 0))
+    (when (< i 120)
+      (core-advance! (/ 1.0 60.0))
+      (warm (+ i 1))))
+  (capture-scene! (string-append id "-grid"))
+  (let advance ((i 0))
+    (when (< i ticks)
+      (core-advance! (/ 1.0 60.0))
+      (let* ((r (core-race))
+             (state (race-ice r)))
+        (capture-hazards! id r (ice-state-active state) #f)
+        (capture-hazards! id r (ice-state-telegraphs state) #t)
+        ;; A legal schedule can miss this driver's pass through the swarm.
+        ;; Preserve its real state through the full renderer even offscreen;
+        ;; the separate curved-mesh proof checks visible swarm geometry.
+        (when (and (string=? id "breakwater")
+                   (let swarm ((zones (ice-state-active state)))
+                     (and (pair? zones)
+                          (or (string=? (cadar zones) "drone")
+                              (swarm (cdr zones))))))
+          (capture-scene! "breakwater-drone-scheduled"))
+        (when (and (string=? id "basin")
+                   (let flare ((rivals (race-rivals r)))
+                     (and (pair? rivals)
+                          (or (race-null-flare? r (car rivals))
+                              (flare (cdr rivals))))))
+          (capture-scene! "basin-null-warning")))
+      (when (= (modulo i 600) 0)
+        (display "SCENE progress ")
+        (write (list id i (race-phase (core-race))))
+        (newline))
+      (advance (+ i 1)))))
+
+(test-group "full live ICE scene"
+  (test "actual cup scheduler draws through shell, normal camera and HUD"
+    (run-game "Signal live ICE scene verification" 480 270
+      (lambda ()
+        (gfx-setup)
+        (set-viewport 480 270)
+        (scene-init!
+          (map (lambda (id)
+                 (let ((name (symbol->string id)))
+                   (list id
+                         (scene-texture (string-append name "-atlas.png"))
+                         (scene-texture (string-append name "-map.png"))
+                         (scene-texture (string-append name "-avg.png")))))
+               TRACKS)
+          (scene-texture "sky.png")
+          (scene-texture "machines.png")
+          (list (cons 'embers (scene-texture "lut-embers.png"))
+                (cons 'crash (scene-texture "lut-crash.png"))))
+        (title-set-logo! (scene-texture "title-logo.png"))
+        (intro-set-mark! (scene-texture "fh-mark.png"))
+        (decal-init! VIEW-W VIEW-H)
+        (capture-race! "breakwater" 6000)
+        (capture-race! "basin" 6300)
+        (for-each
+          (lambda (name)
+            (assert-true (and (member name captured) #t)))
+          '("breakwater-grid" "breakwater-firewall-active"
+            "breakwater-drone-scheduled" "breakwater-tracer-warning"
+            "basin-grid" "basin-null-warning"))
+        (gfx-shutdown)))))
