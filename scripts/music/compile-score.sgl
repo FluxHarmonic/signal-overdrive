@@ -20,7 +20,7 @@
 
 ;; The race songs the game carries. Carrier is the default: a track with
 ;; no song binding plays it.
-(define SONGS '(carrier carrier-a carrier-b))
+(define SONGS '(carrier carrier-a carrier-b carrier-c))
 
 (define arguments
   (let find ((remaining (cdr (command-line))))

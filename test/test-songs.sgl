@@ -18,8 +18,8 @@
 (define MARKS '(calm grid lap1 lap2 hold fill traced uplink results))
 
 (test-group "songs: the race songs"
-  (test "the game carries Carrier first, then the Docklands variations"
-    (assert-equal '(carrier carrier-a carrier-b) (song-ids)))
+  (test "the game carries Carrier first, then the three Docklands variations"
+    (assert-equal '(carrier carrier-a carrier-b carrier-c) (song-ids)))
 
   (test "each song's runtime data exactly matches a fresh compile of its tune and cue sheet"
     (for-each
@@ -31,7 +31,7 @@
           (assert-equal (score-field data 'sections) (vector-ref s 3))
           (assert-equal (score-field data 'onsets) (vector-ref s 4))
           (assert-equal (score-field data 'onset-masks) (vector-ref s 5))))
-      '(carrier-a carrier-b)))
+      '(carrier-a carrier-b carrier-c)))
 
   (test "each song keeps the section contract: the nine marks, grid 4, fill 2, the automatic exits"
     (for-each
@@ -68,7 +68,7 @@
                       (assert-equal '(1 2 3 4 5 6 7 8) (list-sort < channels))))
                   (if (and loop-from (> loop-from 0)) (list from (+ from loop-from)) (list from)))))
             (vector-ref (score-entry id) 3))))
-      '(carrier-a carrier-b)))
+      '(carrier-a carrier-b carrier-c)))
 
   (test "selecting a song switches its sections, rows, onsets and tune"
     (song-select! 'carrier-a)
