@@ -403,6 +403,13 @@
     ;; screenshots) or start (no title: the countdown at once); or ignored.
     (define *autopilot* #f)
     (define *start-now* #f)
+    ;; the track=... asked for, applied once the development controls are on
+    (define *track-request* #f)
+    (define (track-request!)
+      (when (and *track-request* (dev-keys?))
+        (let ((kv *track-request*))
+          (set! *track-request* #f)
+          (core-param! kv))))
     (define (core-param! kv)
       (cond ((string=? kv "autopilot") (set! *autopilot* #t) (say "autopilot on"))
             ((string=? kv "start") (set! *start-now* #t) (intro-skip!) (title-skip!))
@@ -416,7 +423,8 @@
             ((string=? kv "showcase") (core-param! "fx-showcase=1"))
             ((string=? kv "fps") (set! *fps-on* #t) (say "fps readout on"))
             ((or (string=? kv "dev") (and (> (string-length kv) 3) (string=? (substring kv 0 4) "dev=")))
-             (set! *dev* #t) (say "dev keys on"))
+             (set! *dev* #t) (say "dev keys on")
+             (track-request!))
             ;; no HUD: clean captures, and the P15 gate's static frame
             ((string=? kv "nohud") (set! *no-hud* #t))
             ;; no machines or gate: the P15 gate's frame must not move, and the
@@ -451,6 +459,13 @@
             ;; worklet-sab; a worklet only: worklet-msg; else scriptprocessor)
             ((and (> (string-length kv) 11) (string=? (substring kv 0 11) "audio-mode="))
              (set! *audio-mode* (substring kv 11 (string-length kv))))
+            ;; ?track= is a development control like the keys: on the web it
+            ;; needs ?dev, given before or after it, by name or by index.
+            ;; A player's race is on the track picked in the app.
+            ((and (> (string-length kv) 6) (string=? (substring kv 0 6) "track=")
+                  (not (dev-keys?)))
+             (set! *track-request* kv)
+             (say kv " waits for ?dev"))
             ;; ?track=oval|loop as well as ?track=0|1
             ((and (> (string-length kv) 6) (string=? (substring kv 0 6) "track=")
                   (memq (string->symbol (substring kv 6 (string-length kv))) TRACKS))
