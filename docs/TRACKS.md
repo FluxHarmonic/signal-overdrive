@@ -249,6 +249,9 @@ The swarm's scheduled-state capture may be offscreen when this driver's
 pass misses its live cadence; the separate mesh proof establishes visible
 swarm geometry. Missing or stale captures and frame/shader errors fail the
 wrapper even if a native frame coroutine swallows an exception.
+`check-native-review` copies a completed native bundle, assets, license and
+Guix launcher into a private review tree, smokes that isolated copy and
+creates a checksummed archive. It performs no publication or deployment.
 
 The generated/probe data roundtrip includes the full schedule; cross-language
 parity checks exercise the actual runtime adapters over seeds, cadence/phrase
