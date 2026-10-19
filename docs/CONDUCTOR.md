@@ -81,7 +81,8 @@ Carrier is the default race song: `music/carrier/race.cts` and its cue sheet
 `music/carrier/cues.sgl`, both written by the music package from
 `music/src/race/score.sgl` (`cd music && build/dev/bin/carrier race tune
 carrier/race.cts` and `race cues carrier/cues.sgl`). The Docklands
-variations are `music/carrier-a/` (Carrier: Undertow, Quayside) and
+variations, in cup order, are `music/carrier-c/` (Carrier: Slipstream,
+Breakwater), `music/carrier-a/` (Carrier: Undertow, Quayside) and
 `music/carrier-b/` (Carrier: Night Shift, Turning Basin), written by
 `carrier song tune ID` and `carrier song cues ID` from
 `music/src/song/`. The diagnostic

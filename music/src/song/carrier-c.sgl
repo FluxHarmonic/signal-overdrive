@@ -65,19 +65,26 @@
 
     ;; ------------------------------------------------------------
     ;; The lead and its twin. The twin is the call a third under in D
-    ;; Dorian; under the answer it skips the D (F C E C), so no D sounds
-    ;; on a lead before the uplink but Carrier's own call.
+    ;; Dorian; its E ties under the call's last A and G, since the stab on
+    ;; 14 anticipates C or E minor. Under the answer it never plays the D,
+    ;; so no D sounds on a lead before the uplink but Carrier's own call:
+    ;; in the chorus F then a held C (F major's tones; an E under the G
+    ;; would rub the stab's F); in the drop F and C, then it drops out
+    ;; under the held E (a C there would muddy G minor); over a cadence
+    ;; bar F C E, then A major's C sharp.
     ;; ------------------------------------------------------------
-    (define CALL-TWIN '((0 3 B 4 42) (3 3 F 5 38) (6 2 A 5 40) (8 6 G 5 44) (14 2 F 5 36) (16 10 E 5 40)))
-    (define ANSWER-TWIN '((0 3 F 5 42) (3 3 C 5 38) (6 2 E 5 40) (8 8 C 5 42)))
-    ;; over a cadence bar's A major the twin's last note is its C sharp
-    (define ANSWER-TWIN-CADENCE '((0 3 F 5 42) (3 3 C 5 38) (6 2 E 5 40) (8 8 Cs 5 42)))
+    (define CALL-TWIN '((0 3 B 4 42) (3 3 F 5 38) (6 2 A 5 40) (8 6 G 5 44) (14 12 E 5 38)))
+    (define ANSWER-TWINS
+      '((chorus (0 3 F 5 42) (3 13 C 5 40))
+        (drop (0 3 F 5 42) (3 5 C 5 38))
+        (cadence (0 3 F 5 42) (3 3 C 5 38) (6 2 E 5 40) (8 8 Cs 5 42))))
     (define (lead at notes up dvol) (phrase 6 I-SQUARE at notes up dvol))
     (define (twin at notes up dvol end) (phrase 7 I-TWIN at (clip-phrase notes end) up dvol))
     (define (call at up dvol) (append (lead at CALL up dvol) (twin at CALL-TWIN up (- dvol 4) 32)))
-    (define (answer at up dvol . cadence)
+    ;; kind: chorus, drop or cadence
+    (define (answer at up dvol kind)
       (append (lead at ANSWER up dvol)
-              (twin at (if (pair? cadence) ANSWER-TWIN-CADENCE ANSWER-TWIN) up (- dvol 4) 16)))
+              (twin at (cdr (assq kind ANSWER-TWINS)) up (- dvol 4) 16)))
 
     ;; ------------------------------------------------------------
     ;; The pluck: the chord's tones on the call's accents, rising then
@@ -141,6 +148,10 @@
     (define HOLD '((F . M) (C . M) (G . M) (E . m) (C . M) (A . M) (A . M)))
 
     (define (root c) (bass-root (car c)))
+
+    ;; the bass's last eighth under a stab that anticipates the next chord:
+    ;; that chord's fifth (the current chord's would sit under it)
+    (define (lead-in next) (+ (root next) 7))
 
     ;; The cadence bar under an answer: F major for its first half, A
     ;; major for its second (the held E over A, its C sharp leading to D).
@@ -240,13 +251,13 @@
              (let* ((at (at-bar (+ s b))) (c (list-ref CHORUS b)) (next (list-ref CHORUS (modulo (+ b 1) 8)))
                     (k (modulo b 4)))
                (append
-                (roll-bar at (root c) 40)
+                (if (= k 2) (roll-bar at (root c) 40) (roll-bar at (root c) 40 (lead-in next)))
                 (stabs at c (if (= k 2) #f next) 30)
                 (if (= b 0) (motorik at b 'crash) (motorik at b))
                 (if (odd? b) (ticks-open at (range 16) 30 14 24) (ticks-on at (range 16) ACCENTS 30 14))
                 (if (= b 0) (crash at 38) '())
                 (cond ((= k 0) (call at 0 0))
-                      ((= k 2) (answer at 0 0))
+                      ((= k 2) (answer at 0 0 'chorus))
                       (else '())))))
            (range 8)))
 
@@ -343,7 +354,8 @@
                (append
                 (if (= b 14)
                     (cadence-bar at #t)
-                    (append (roll-bar at (root c) 42) (stabs at c (if (= k 2) #f next) 30)))
+                    (append (if (= k 2) (roll-bar at (root c) 42) (roll-bar at (root c) 42 (lead-in next)))
+                            (stabs at c (if (= k 2) #f next) 30)))
                 (if (>= b 8)
                     (append (ticks-on at '(0 1 3 4 5 7 8 9 11 12 13 15) ACCENTS 30 15)
                             (open-tick at 2 16) (open-tick at 6 18) (open-tick at 10 16)
@@ -352,14 +364,14 @@
                 (if crash? (motorik at b 'crash 'drive) (motorik at b 'drive))
                 (if crash? (crash at 42) '())
                 (cond ((= k 0) (call at 0 0))
-                      ((= k 2) (if (= b 14) (answer at 12 -2 'cadence) (answer at 12 -2)))
+                      ((= k 2) (answer at 12 -2 (if (= b 14) 'cadence 'drop)))
                       (else '()))
                 (traced-ice at b))))
            (range 16)))
 
     ;; ------------------------------------------------------------
     ;; uplink: the melody whole. Call, answer, and the D, over Dm C F|A
-    ;; Dm; then all of it an octave up. The twin holds A under the D.
+    ;; Dm; then all of it an octave up. The twin holds F under the D.
     ;; Gibson's lock-on is cut off as the D lands.
     ;; ------------------------------------------------------------
     (define (uplink-part s)
@@ -369,7 +381,7 @@
                (append
                 (if (= k 2)
                     (cadence-bar at #t)
-                    (append (roll-bar at (root c) 42) (stabs at c next (if crash? 32 30))))
+                    (append (roll-bar at (root c) 42 (lead-in next)) (stabs at c next (if crash? 32 30))))
                 (if (= b 7) (ticks-on at EIGHTHS ACCENTS 24 10) (ticks-on at (range 16) ACCENTS 30 15))
                 (cond ((= b 7) (kick at '((0 46))))
                       (crash? (motorik at b 'crash 'drive))
@@ -378,10 +390,10 @@
                 (case b
                   ((0) (call at 0 0))
                   ((2) (answer at 0 0 'cadence))
-                  ((3) (append (lead at '((0 14 D 5 48)) 0 0) (twin at '((0 14 A 4 44)) 0 -4 16)))
+                  ((3) (append (lead at '((0 14 D 5 48)) 0 0) (twin at '((0 14 F 4 44)) 0 -4 16)))
                   ((4) (call at 12 -2))
                   ((6) (answer at 12 -2 'cadence))
-                  ((7) (append (lead at '((0 16 D 6 46)) 0 0) (twin at '((0 16 A 5 42)) 0 -4 16)))
+                  ((7) (append (lead at '((0 16 D 6 46)) 0 0) (twin at '((0 16 F 5 42)) 0 -4 16)))
                   (else '()))
                 (case b
                   ((0) (ice at 14 1 EB6 20))
