@@ -24,7 +24,8 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../.
 const W = 1024, LH = 96;
 const sky = new Canvas(W, LH * 3);
 // code: the effects code (255 - alpha), read by the ground shader: 1 the
-// tower's bands, 2-9 a window group, 10-41 a sign, 42 a far lit floor.
+// tower's bands, 2-9 a window group, 10-41 a sign, 42 a far lit floor,
+// 43 the rest of the tower (drawn in front of the mid layer).
 const set = (layer, x, y, c, code = 0) => { if (y >= 0 && y < LH) sky.set(((x % W) + W) % W, layer * LH + y, c, 255 - code); };
 const get = (layer, x, y) => sky.get(((x % W) + W) % W, layer * LH + y);
 
@@ -46,14 +47,27 @@ function block(layer, x0, w, top, body, edge) {
     x += w + Math.floor(R() * 4) - 2;
   }
   // Gibson's tower: tall, stepped, banded in cyan as Phantom Burn draws it
-  // (the bands turn violet while you're TRACED), a red light on top
+  // (the bands turn violet while you're TRACED), a red light on top. It
+  // looms: its pixels carry code 43 (the bands code 1), and the ground
+  // shader draws them in front of the mid layer, so only the near layer's
+  // low blocks hide its foot (t-0fa163). It stays this size in Docklands;
+  // each district nearer draws it larger (the Neon Row bible: 28 px, then 42).
   const gx = 610;
-  block(0, gx - 14, 28, 30, C.BAR_C, C.ARCHIVE);
-  block(0, gx - 9, 18, 14, C.BAR_C, C.ARCHIVE);
-  block(0, gx - 4, 8, 4, C.BAR_C, null);
-  for (let y = 0; y < 4; y++) set(0, gx, y, C.SIDE_DARK);
-  set(0, gx, 0, C.TRACE_HOT);
-  for (let y = 18; y < LH; y += 5) for (let k = gx - 7; k < gx + 8; k += 2) set(0, k, y, C.TEAL_MID, 1);
+  const tower = (x0, w, top, edge) => {
+    for (let x = x0; x < x0 + w; x++) for (let y = top; y < LH; y++) set(0, x, y, x === x0 && edge ? edge : C.BAR_C, 43);
+  };
+  tower(gx - 14, 28, 30, C.ARCHIVE);
+  tower(gx - 9, 18, 14, C.ARCHIVE);
+  tower(gx - 4, 8, 4, null);
+  for (let y = 0; y < 4; y++) set(0, gx, y, C.SIDE_DARK, 43);
+  set(0, gx, 0, C.TRACE_HOT, 43);
+  // the bands: a solid line every 4 rows across each step of the tower,
+  // inside its edges (four times the band pixels the first sky had, so
+  // the TRACED violet reads at a glance)
+  for (let y = 8; y < LH; y += 4) {
+    const half = y < 14 ? 3 : y < 30 ? 7 : 12;
+    for (let k = gx - half; k <= gx + half - 1; k++) set(0, k, y, C.TEAL_MID, 1);
+  }
 }
 
 // ---- mid ----------------------------------------------------------------------------------
@@ -142,8 +156,13 @@ console.log(`gen-sky: ${W}x${LH * 3}, ${sky.colourCount()} colours`);
 if (process.argv.includes("--zoom")) {
   const z = 2, out = new Canvas(W * z, LH * z);
   for (let y = 0; y < LH; y++) for (let x = 0; x < W; x++) {
-    let c = [0x2e, 0x1c, 0x4d];
-    for (let l = 0; l < 3; l++) { const p = get(l, x, y); if (p[3]) c = p.slice(0, 3); }
+    // the shader's order: far, mid, then the tower (far, codes 1 and 43), then near
+    let c = [0x2e, 0x1c, 0x4d], tw = null;
+    for (let l = 0; l < 3; l++) {
+      const p = get(l, x, y);
+      if (p[3]) { c = p.slice(0, 3); if (l === 0 && (255 - p[3] === 1 || 255 - p[3] === 43)) tw = c; }
+      if (l === 1 && tw) c = tw;
+    }
     for (let j = 0; j < z; j++) for (let i = 0; i < z; i++) out.set(x * z + i, y * z + j, c);
   }
   fs.mkdirSync(path.join(ROOT, "docs"), { recursive: true });
