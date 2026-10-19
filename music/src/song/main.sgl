@@ -1,0 +1,167 @@
+;;; (song main) - The race songs beyond Carrier: their tools
+;;;
+;;;   carrier song list                       the songs
+;;;   carrier song tune ID OUT.cts            write the song's tune; refuses to
+;;;                                           overwrite a tracker edit
+;;;   carrier song cues ID OUT.sgl            write its cue sheet
+;;;   carrier song render ID IN.cts OUT.wav MARK:BARS ...
+;;;                                           a race path played through: each
+;;;                                           section for BARS bars, its loop
+;;;                                           applied as the game's conductor
+;;;                                           applies it (grid:4 lap1:18 ...)
+;;;   carrier song stems ID IN.cts DIR MARK:BARS ...
+;;;                                           the same path, each channel soloed:
+;;;                                           peak and RMS, and DIR/stem-chN.wav
+;;;
+;;; Renders go through the live player with the game's channel inserts at
+;;; rest, as `carrier race render` does for Carrier, so they sound as the
+;;; game plays a clean race.
+
+(define-library (song main)
+  (import (sigil core) (sigil io) (sigil string) (sigil list) (sigil fs) (sigil crypto) (sigil math)
+          (motif tune) (motif tune player)
+          (carrier render) (carrier analysis)
+          (only (race main) game-inserts)
+          (song kit) (song carrier-a) (song carrier-b) (song uplink) (song night-wire))
+  (export song-main)
+  (begin
+    (define (say . xs) (for-each display xs) (newline))
+    (define SR 48000)
+
+    ;; id -> (tune-text cues-text sections)
+    (define SONGS
+      (list (list 'carrier-a carrier-a-text carrier-a-cues-text CARRIER-A-SECTIONS)
+            (list 'carrier-b carrier-b-text carrier-b-cues-text CARRIER-B-SECTIONS)
+            (list 'uplink uplink-text uplink-cues-text UPLINK-SECTIONS)
+            (list 'night-wire night-wire-text night-wire-cues-text NIGHT-WIRE-SECTIONS)))
+    (define (song-of id)
+      (or (assq (string->symbol id) SONGS)
+          (error "song: no such song; `carrier song list` names them" id)))
+    (define (song-sections s) (cadddr s))
+
+    (define (fixed x d)
+      (let* ((k (expt 10.0 d)) (r (/ (round (* x k)) k)))
+        (number->string r)))
+    (define (dbfs x) (fixed (* 20 (/ (log (max x 1e-9)) (log 10.0))) 2))
+
+    ;; OUT.sha256 holds the hash of what was written; an OUT that no longer
+    ;; matches it (a tracker edit) is not overwritten unless it already
+    ;; equals the new output
+    (define (cmd-tune s out)
+      (let* ((t (read-tune-string ((cadr s))))
+             (text (tune->string t))
+             (new-hash (sha256 text))
+             (side (string-append out ".sha256"))
+             (cur (and (file-exists? out) (sha256 (read-file-string out))))
+             (last (and (file-exists? side) (string-trim (read-file-string side)))))
+        (cond
+          ((and cur (not (equal? cur new-hash)) (not (equal? cur last)))
+           (say "song: REFUSING to overwrite " out ": "
+                (if last
+                    "it changed since it was generated (a tracker edit?)."
+                    (string-append "there is no " side " to show it is generated output."))
+                " Fold the edit into the song's source or move the file aside, then regenerate.")
+           1)
+          (else
+           (write-file-string out text)
+           (write-file-string side (string-append new-hash "\n"))
+           (say "song: wrote " out " (" (number->string (length (tune-order t))) " bars, "
+                (number->string (length (tune-marks t))) " marks)"
+                (if (equal? cur new-hash) ", unchanged" ""))
+           0))))
+
+    (define (cmd-cues s out)
+      (let ((text ((caddr s))))
+        (read (open-input-string text))     ; it must read back as data
+        (write-file-string out text)
+        (say "song: wrote " out)
+        0))
+
+    ;; ------------------------------------------------------------
+    ;; A race path: ((mark . bars) ...) -> the order list it plays
+    ;; ------------------------------------------------------------
+    (define (parse-step sections str)
+      (let* ((i (let find ((k 0)) (cond ((>= k (string-length str)) #f)
+                                        ((char=? (string-ref str k) #\:) k)
+                                        (else (find (+ k 1))))))
+             (mark (and i (string->symbol (substring str 0 i))))
+             (n (and i (string->number (substring str (+ i 1) (string-length str))))))
+        (unless (and mark (assq mark sections) n (exact-integer? n) (> n 0))
+          (error "song: a path step is MARK:BARS with a section's mark" str))
+        (cons mark n)))
+
+    ;; the conductor's section-relative bar: past the loop's end, wrap
+    ;; into the loop; a section without one plays through once
+    (define (path-order sections steps)
+      (apply append
+             (map (lambda (step)
+                    (let* ((bars (section-bars sections (car step)))
+                           (lp (section-loop sections (car step)))
+                           (start (section-start sections (car step))))
+                      (let loop ((i 0) (acc '()))
+                        (if (>= i (cdr step)) (reverse acc)
+                            (let ((bar (if (and lp (>= i (cdr lp)))
+                                           (+ (car lp) (modulo (- i (car lp)) (- (cdr lp) (car lp))))
+                                           i)))
+                              (when (>= bar bars)
+                                (error "song: the section has no loop and fewer bars" step))
+                              (loop (+ i 1) (cons (+ start bar) acc)))))))
+                  steps)))
+
+    (define (render-path t sections steps solo)
+      (let* ((pt (tune t order: (path-order sections steps) marks: '()))
+             (bar-seconds (/ (* 32 2.5 (tune-speed t)) (tune-tempo t)))
+             (p (open-tune-player pt SR inserts: (game-inserts)))
+             (frames (exact (round (* SR (+ 2.0 (* bar-seconds (length (tune-order pt)))))))))
+        (when solo (player-solo! p solo))
+        (let ((r (render-player p SR '() frames)))
+          (player-close! p)
+          r)))
+
+    (define (levels bv frames)
+      (let ((l (bv->channel bv frames 0)) (r (bv->channel bv frames 1)))
+        (values (max (peak l 0 frames) (peak r 0 frames))
+                (rms (bv->mid bv frames) 0 frames))))
+
+    (define (cmd-render s in out step-args)
+      (let* ((sections (song-sections s))
+             (steps (map (lambda (a) (parse-step sections a)) step-args))
+             (t (read-tune-file in))
+             (r (render-path t sections steps #f))
+             (bv (car r)) (frames (cdr r)))
+        (write-wav16 out bv frames SR 1.0)
+        (call-with-values (lambda () (levels bv frames))
+          (lambda (pk lv)
+            (say "song: rendered " in " -> " out ": " (fixed (/ frames (* 1.0 SR)) 2) " s, "
+                 (number->string (length (path-order sections steps))) " bars, sample peak " (dbfs pk)
+                 " dBFS, mid RMS " (dbfs lv) " dBFS")))
+        0))
+
+    (define (cmd-stems s in dir step-args)
+      (let* ((sections (song-sections s))
+             (steps (map (lambda (a) (parse-step sections a)) step-args))
+             (t (read-tune-file in)))
+        (for-each
+         (lambda (ch)
+           (let* ((r (render-path t sections steps ch)) (frames (cdr r)))
+             (call-with-values (lambda () (levels (car r) frames))
+               (lambda (pk lv) (say "ch" (number->string ch) "  peak " (dbfs pk) "  rms " (dbfs lv))))
+             (write-wav16 (string-append dir "/stem-ch" (number->string ch) ".wav") (car r) frames SR 1.0)))
+         '(1 2 3 4 5 6 7 8))
+        0))
+
+    (define (song-main args)
+      (cond
+        ((and (= (length args) 1) (equal? (car args) "list"))
+         (for-each (lambda (s) (say (symbol->string (car s)))) SONGS) 0)
+        ((and (= (length args) 3) (equal? (car args) "tune")) (cmd-tune (song-of (cadr args)) (caddr args)))
+        ((and (= (length args) 3) (equal? (car args) "cues")) (cmd-cues (song-of (cadr args)) (caddr args)))
+        ((and (>= (length args) 5) (equal? (car args) "render"))
+         (cmd-render (song-of (cadr args)) (caddr args) (cadddr args) (list-tail args 4)))
+        ((and (>= (length args) 5) (equal? (car args) "stems"))
+         (cmd-stems (song-of (cadr args)) (caddr args) (cadddr args) (list-tail args 4)))
+        (else
+         (say "usage: carrier song list | carrier song tune ID OUT.cts | carrier song cues ID OUT.sgl"
+              " | carrier song render ID IN.cts OUT.wav MARK:BARS ..."
+              " | carrier song stems ID IN.cts DIR MARK:BARS ...")
+         1)))))

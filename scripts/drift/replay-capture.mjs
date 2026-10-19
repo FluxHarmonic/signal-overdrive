@@ -33,7 +33,8 @@ try {
   fs.writeFileSync(path.join(RUN, "meta.json"), JSON.stringify(meta, null, 2) + "\n");
   fd = fs.openSync(path.join(RUN, "reference.log"), "w");
   const child = pool.launch(path.join(ROOT, "scripts/dev"),
-    [binary, "--music-reference", path.join(RUN, "intended.sgv"), path.join(RUN, "reference.pcm"), String(frames), String(rate)],
+    // the song the source capture recorded (none: Carrier, from before songs were per track)
+    [binary, ...(meta.song ? [`--song=${meta.song}`] : []), "--music-reference", path.join(RUN, "intended.sgv"), path.join(RUN, "reference.pcm"), String(frames), String(rate)],
     { env: { ...process.env, SIGIL_AUDIO_BACKEND: "null", SIGIL_APP_PLATFORM: "x11",
       DISPLAY: "", WAYLAND_DISPLAY: "", SIGIL_GC_STATS_FILE: path.join(RUN, "reference-gc.jsonl") },
       stdio: ["ignore", fd, fd] });

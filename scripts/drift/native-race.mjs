@@ -80,7 +80,8 @@ try {
   await sleep(300);
   if (monitor.exitCode !== null) throw new Error(`${SINK} monitor failed`);
   fd = fs.openSync(path.join(RUN, "game.log"), "w");
-  game = pool.launch(path.join(ROOT, "scripts/dev"), [BIN, "--start", "--autopilot", "--track=loop", "--musiclog", "--quit-after", "400"],
+  game = pool.launch(path.join(ROOT, "scripts/dev"), [BIN, "--start", "--autopilot", "--track=loop", "--musiclog", "--quit-after", "400",
+    ...(process.env.CONDUCTOR_SONG ? [`--song=${process.env.CONDUCTOR_SONG}`] : [])],
     { env, stdio: ["ignore", "pipe", "pipe"] });
   // Each output chunk with the wall time it arrived, to date startup steps.
   const timeline = fs.openSync(path.join(RUN, "output-timeline.jsonl"), "w");

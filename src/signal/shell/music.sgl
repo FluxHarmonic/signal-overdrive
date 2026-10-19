@@ -7,7 +7,7 @@
           (sigil time)
           (sigil audio sink)
           (motif tune)
-          (signal music score)
+          (signal music song)
           (signal music conductor)
           (signal music clock)
           (signal music transport)
@@ -29,6 +29,8 @@
     (define *opened-once* #f)     ; a stream has opened in this session
     (define *playback* #f)
     (define *tune* #f)
+    (define *tune-id* #f)         ; the race song *tune* is
+    (define *tunes* (quote ()))   ; ((id . tune) ...): each song parsed once
     (define *rate* 44100)
     (define *depth-ms* 250)
     (define *latency* (cond-expand (wasm 0.0) (else 0.035)))
@@ -201,8 +203,15 @@
 
     ;; The score, parsed ahead of the sound: on the web the start is a
     ;; gesture's work, and the frame after it pays for every millisecond.
+    ;; The current race song's: a race on another track's song parses that
+    ;; one (once), so call this when the race changes, ahead of its start.
     (define (music-prepare!)
-      (unless *tune* (set! *tune* (read-tune-string SCORE-TUNE-TEXT))))
+      (let ((id (song-id)))
+        (unless (eq? id *tune-id*)
+          (let ((cached (assq id *tunes*)))
+            (set! *tune* (if cached (cdr cached) (read-tune-string (song-tune-text))))
+            (unless cached (set! *tunes* (cons (cons id *tune*) *tunes*)))
+            (set! *tune-id* id)))))
 
     ;; The player built ahead of the session's first sound, #(playback rate
     ;; mode): on the web's start gate, once the context gives its rate.
@@ -220,7 +229,7 @@
         (let ((rate (audio-context-sample-rate ctx)))
           (set! *prepared*
             (vector (playback-open *tune* rate c MUSIC-INSERTS mode: *handoff-mode*)
-                    rate *handoff-mode*)))))
+                    rate *handoff-mode* *tune-id*)))))
     (define (drop-prepared!)
       (when *prepared*
         (playback-close! (vector-ref *prepared* 0))
@@ -228,7 +237,9 @@
     (define (start-playback c)
       (let ((p *prepared*))
         (set! *prepared* #f)
-        (if (and p (= (vector-ref p 1) *rate*) (eq? (vector-ref p 2) *handoff-mode*))
+        ;; a player prepared for another song (the race changed track) is dropped
+        (if (and p (= (vector-ref p 1) *rate*) (eq? (vector-ref p 2) *handoff-mode*)
+                 (eq? (vector-ref p 3) *tune-id*))
             (playback-seek-start! (vector-ref p 0) c)
             (begin
               (when p (playback-close! (vector-ref p 0)))

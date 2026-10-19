@@ -1,0 +1,357 @@
+;;; (song night-wire) - "Night Wire": the round-1 sketch grown into an area track
+;;;
+;;; The chase, 170 BPM, D Phrygian. A chip ostinato on a D pedal, in
+;;; groups of 3+3+2+3+3+2 sixteenths (Carrier's accents twice a bar, cutting
+;;; across the beat), leans on E-flat: Gibson's colour, the wire he owns.
+;;; Under it a two-step breakbeat and a bass that scoops up into E-flat;
+;;; over it the main theme's overdriven lead stabs out a riff in 2 2 3 3 4.
+;;;
+;;; The whole race stays inside Gibson's wire. The way out (the climb over
+;;; B-flat and C, the E natural, the held, bent-up high D) is heard only at
+;;; the uplink, as Carrier's whole melody is (P13): no E natural sounds in
+;;; the lead or the ostinato before it (the A major chords carry one only
+;;; as the dominant: the count-in, the riser, the fill).
+;;;
+;;; 170 BPM is not a tempo the game accepts yet (its score compiler wants
+;;; 140): the song is written for the day it takes a per-song clock.
+;;;
+;;;   mark     bars  loops     chords                       here
+;;;   calm      8    all 8     Dm Dm Bb Eb x2               the ostinato far off, the pad, a heartbeat kick
+;;;   grid      4    -         Dm Dm Dm A                   the carrier tone run hot, the count-in
+;;;   lap1     16    9 to 16   Dm Dm Bb Eb x4               the break; the riff from bar 5
+;;;   lap2      8    all 8     Dm Dm Bb Eb x2               the riff's second half, rising, open ticks
+;;;   hold      8    bar 8     Bb Bb Eb Eb Bb Bb Gm, A      the ostinato alone; the kit returns; riser
+;;;   fill      2    -         A A                          the snare roll, the bass climbing to D
+;;;   traced   16    9 to 16   Dm Dm Bb Eb x4               the drop: Gibson takes every fourth bar
+;;;   uplink    8    -         Dm Dm Bb C Dm Dm Dm Dm       the climb out of the wire, to the high D
+;;;   results   8    all 8     Dm Dm Bb Eb x2               the groove without the lead
+;;;
+;;;   (night-wire-text) (night-wire-cues-text) NIGHT-WIRE-SECTIONS NIGHT-WIRE-BPM
+
+(define-library (song night-wire)
+  (import (sigil core) (sigil string) (sigil list)
+          (theme notation)
+          (only (theme sketches) line)
+          (song kit))
+  (export night-wire-text night-wire-cues-text NIGHT-WIRE-SECTIONS NIGHT-WIRE-BPM)
+  (begin
+    (define NIGHT-WIRE-BPM 170)
+    (define NIGHT-WIRE-SECTIONS
+      '((calm 8 (0 . 8) #f) (grid 4 #f lap1) (lap1 16 (8 . 16) #f) (lap2 8 (0 . 8) #f)
+        (hold 8 (7 . 8) #f) (fill 2 #f traced) (traced 16 (8 . 16) #f)
+        (uplink 8 #f results) (results 8 (0 . 8) #f)))
+    (define (start mark) (section-start NIGHT-WIRE-SECTIONS mark))
+
+    (define I-HOT 14)
+    (define SIGNAL-PATCH
+      (string-append
+       "fm4-lead alg: 2 amp-attack: 0.003 amp-decay: 0.45 amp-release: 0.22 amp-sustain: 0.72 chorus-mix: 0 fb: 0.15 index: 1.7"
+       " op1: (1 1 0.002 0.35 0.75 0.15) op2: (2 0.55 0.002 0.3 0.35 0.15) op3: (2 0.35 0.002 0.12 0.2 0.1) op4: (3.5 0.45 0.001 0.04 0 0.05) unison: 1 vel-depth: 0.35"))
+    (define (bank)
+      (race-bank-text
+       (string-append
+        "    (instrument id: 14 name: \"overdrive\" patch: (saw-reese attack: 0.003 decay: 0.3 sustain: 0.85 release: 0.12 cutoff: 3400 resonance: 0.18 drive: 3 spread: 10 index: 0.001 index-motion: 0.0005 motion-rate: 0.3)"
+        " volume: 40 gain: 0.5 send: 0.2 pan: 0 layers: ((" SIGNAL-PATCH " octave: 0 volume: 0.3)))\n")))
+
+    ;; ------------------------------------------------------------
+    ;; The ostinato (channel 7): 16ths in groups of 3+3+2+3+3+2, each group
+    ;; starting on the D pedal
+    ;; ------------------------------------------------------------
+    (define WIRE-GROUPS
+      '((phrygian (D 4 A 4 D 5) (D 4 A 4 Eb 5) (D 4 C 5) (D 4 A 4 D 5) (D 4 A 4 F 5) (D 4 Eb 5))
+        (bb       (D 4 Bb 4 D 5) (D 4 Bb 4 F 5) (D 4 C 5) (D 4 Bb 4 D 5) (D 4 Bb 4 F 5) (D 4 Eb 5))
+        (eb       (D 4 Bb 4 Eb 5) (D 4 Bb 4 G 5) (D 4 Eb 5) (D 4 Bb 4 Eb 5) (D 4 G 4 Bb 4) (D 4 C 5))
+        (gm       (D 4 Bb 4 D 5) (D 4 Bb 4 G 5) (D 4 C 5) (D 4 Bb 4 D 5) (D 4 G 4 Bb 4) (D 4 C 5))
+        (c        (D 4 G 4 C 5) (D 4 G 4 E 5) (D 4 C 5) (D 4 G 4 C 5) (D 4 G 4 E 5) (D 4 D 5))
+        (air      (D 4 A 4 D 5) (D 4 A 4 E 5) (D 4 F 5) (D 4 A 4 D 5) (D 4 A 4 E 5) (D 4 C 5))
+        ;; over A major (the count-in, the fill): the riser's D A C sharp
+        (a        (D 4 A 4 Cs 5) (D 4 A 4 Cs 5) (D 4 A 4) (D 4 A 4 Cs 5) (D 4 A 4 Cs 5) (D 4 Cs 5))))
+    (define (pairs xs) (if (null? xs) '() (cons (midi (car xs) (cadr xs)) (pairs (cddr xs)))))
+
+    ;; groups: how many groups to play (6 for the whole bar)
+    (define (ostinato at kind accent soft groups)
+      (let loop ((gs (cdr (assq kind WIRE-GROUPS))) (pos 0) (n 0) (acc '()))
+        (if (or (null? gs) (>= n groups))
+            acc
+            (let* ((ps (pairs (car gs)))
+                   (evs (let inner ((ps ps) (i 0) (out '()))
+                          (if (null? ps) out
+                              (inner (cdr ps) (+ i 1)
+                                     (append out (note 7 (+ at pos i) 0.75 (car ps) I-ARP (if (= i 0) accent soft))))))))
+              (loop (cdr gs) (+ pos (length ps)) (+ n 1) (append acc evs))))))
+
+    ;; ------------------------------------------------------------
+    ;; The riff: 2 2 3 3 4 (two stabs, 3+3, a held note, a breath)
+    ;; ------------------------------------------------------------
+    (define RIFF
+      (list
+       '((0 2 D 5 46) (2 2 D 5 40) (4 3 F 5 44) (7 3 Eb 5 42) (10 4 D 5 46))
+       '((0 2 C 5 42) (2 2 D 5 40) (4 3 F 5 44) (7 3 G 5 42) (10 4 A 5 46 slide G 5 8))
+       '((0 2 D 5 46) (2 2 D 5 40) (4 3 F 5 44) (7 3 Eb 5 42) (10 4 D 5 46))
+       '((0 2 G 5 46) (2 2 G 5 40) (4 3 F 5 44) (7 3 Eb 5 42) (10 4 D 5 46))
+       '((0 2 D 5 46) (2 2 D 5 40) (4 3 F 5 44) (7 3 Eb 5 42) (10 4 D 5 46))
+       '((0 2 C 5 42) (2 2 D 5 40) (4 3 F 5 44) (7 3 A 5 42) (10 4 C 6 46 slide A 5 12))
+       '((0 2 D 6 46) (2 2 C 6 40) (4 3 Bb 5 44) (7 3 A 5 42) (10 4 F 5 44))
+       '((0 2 G 5 46) (2 2 F 5 40) (4 3 Eb 5 44) (7 3 D 5 42) (10 4 Eb 5 46))))
+    ;; the climb, the uplink's alone
+    (define CLIMB-BB '((0 2 D 5 46) (2 2 D 5 40) (4 3 F 5 44) (7 3 G 5 42) (10 4 A 5 46)))
+    (define CLIMB-C '((0 2 E 5 46) (2 2 E 5 40) (4 3 G 5 44) (7 3 A 5 42) (10 6 C 6 46)))
+    (define HIGH-D '((0 32 D 6 48 bend C 6 4)))
+    ;; the air: the riff's shape with E natural, falling home
+    (define HOME '((0 2 D 6 46) (2 2 C 6 40) (4 3 A 5 44) (7 3 E 5 42) (10 6 D 5 46)))
+    (define (riff at entries) (line 6 I-HOT at entries))
+
+    ;; ------------------------------------------------------------
+    ;; Bass and drums
+    ;; ------------------------------------------------------------
+    (define (wire-bass at letter vol)
+      (let ((r (bass-root letter)))
+        (append
+         (if (eq? letter 'Eb)
+             (bend 4 at 6 (bass-root 'D) r I-BASS (+ vol 6) 3)  ; scooped up from the D under it
+             (note 4 at 6 r I-BASS (+ vol 6)))
+         (note 4 (+ at 6) 2 (+ r 12) I-BASS (- vol 4))
+         (note 4 (+ at 10) 3 r I-BASS (+ vol 2))
+         (note 4 (+ at 13) 1 r I-BASS (- vol 6))
+         (note 4 (+ at 14) 2 (+ r 12) I-BASS (- vol 2)))))
+
+    (define BREAK-A-KICK '((0 46) (10 42)))
+    (define BREAK-B-KICK '((0 46) (6 26) (10 42)))
+    (define BREAK-A-SNARE '((4 44) (7 12) (12 46) (15 14)))
+    (define BREAK-B-SNARE '((4 44) (9 12) (11 10) (12 46)))
+    (define EIGHTHS '(0 2 4 6 8 10 12 14))
+    (define (break at b crash?)
+      (let ((a? (even? b)))
+        (append (kick at (if a? BREAK-A-KICK BREAK-B-KICK))
+                (snare at (let ((s (if a? BREAK-A-SNARE BREAK-B-SNARE)))
+                            (if crash? (filter (lambda (e) (>= (car e) 8)) s) s)))
+                (if a?
+                    (ticks-on at EIGHTHS '(2 6 10 14) 26 16)
+                    (append (ticks-on at '(0 2 4 8 10 12 13 14 15) '(2 10 14) 26 14) (open-tick at 6 28))))))
+
+    ;; ------------------------------------------------------------
+    ;; Harmony: (ostinato kind, chord, bass letter)
+    ;; ------------------------------------------------------------
+    (define (cycle b)
+      (case (modulo b 4)
+        ((0 1) '(phrygian (D . m) D))
+        ((2) '(bb (Bb . M) Bb))
+        (else '(eb (Eb . M) Eb))))
+    (define (h-kind h) (car h)) (define (h-chord h) (cadr h)) (define (h-bass h) (caddr h))
+
+    ;; one bar of the band: ostinato, bass, pad, drums
+    (define (band at b h vol crash?)
+      (append (ostinato at (h-kind h) (+ vol 2) (- vol 8) 6)
+              (wire-bass at (h-bass h) 40)
+              (pad at 16 (h-chord h) 30)
+              (break at b crash?)
+              (if crash? (crash at 38) '())))
+
+    ;; ------------------------------------------------------------
+    ;; Sections
+    ;; ------------------------------------------------------------
+    (define (calm-part s)
+      (cat (lambda (b)
+             (let* ((at (at-bar (+ s b))) (h (cycle b)))
+               (append (ostinato at (h-kind h) 30 20 6)
+                       (pad at 16 (h-chord h) 28)
+                       (note 4 at 16 (bass-root (h-bass h)) I-BASS 26)
+                       (if (even? b) (kick at '((0 28))) '()))))
+           (range 8)))
+
+    (define (grid-part s)
+      (let ((at (lambda (b) (at-bar (+ s b)))))
+        (append
+         (note 6 (at 0) 32 (midi 'D 5) I-HOT 32)
+         (cat (lambda (b) (ostinato (at b) (if (= b 3) 'a 'phrygian) (+ 34 (* 2 b)) (+ 24 (* 2 b)) 6)) (range 4))
+         (pad (at 0) 48 '(D . m) 26)
+         (note 4 (at 0) 16 (bass-root 'D) I-BASS 32) (note 4 (at 1) 16 (bass-root 'D) I-BASS 34)
+         (wire-bass (at 2) 'D 36)
+         (cat (lambda (i) (note 4 (+ (at 3) (* 2 i)) 1.5 (if (odd? i) (midi 'A 2) (midi 'A 1)) I-BASS (+ 36 i))) (range 7))
+         (note 4 (+ (at 3) 14) 2 (midi 'Cs 2) I-BASS 40)
+         (ticks-on (at 1) EIGHTHS '(2 6 10 14) 18 10) (ticks-on (at 2) EIGHTHS '(2 6 10 14) 22 12)
+         (ticks-on (at 3) (range 16) ACCENTS 26 12)
+         (kick (at 2) '((0 38) (10 34)))
+         (kick (at 3) '((0 42) (4 44) (8 46) (12 48)))
+         (snare (at 3) '((4 36) (8 40) (12 44)))
+         (stab (at 3) 4 2 '(A . M) 26) (stab (at 3) 8 2 '(A . M) 28) (stab (at 3) 12 2 '(A . M) 30))))
+
+    ;; lap1: the break from GO; the riff's first half from bar 5, twice
+    (define (lap1-part s)
+      (cat (lambda (b)
+             (let* ((at (at-bar (+ s b))) (h (cycle b)))
+               (append
+                (if (= b 15)
+                    (append (ostinato at (h-kind h) 42 32 6) (wire-bass at (h-bass h) 40) (pad at 16 (h-chord h) 30)
+                            (kick at BREAK-A-KICK)
+                            (snare at '((4 44) (8 30) (10 34) (12 38) (13 40) (14 42) (15 46)))
+                            (ticks-on at EIGHTHS '(2 6 10 14) 26 16))
+                    (band at b h (if (< b 4) 38 42) (memv b '(0 8))))
+                (if (>= b 4) (riff at (list-ref RIFF (modulo b 4))) '()))))
+           (range 16)))
+
+    ;; lap2: the riff's second half, rising to C and the high D, twice;
+    ;; the offbeats open
+    (define (lap2-part s)
+      (cat (lambda (b)
+             (let* ((at (at-bar (+ s b))) (h (cycle b)) (crash? (= b 0)))
+               (append
+                (ostinato at (h-kind h) 44 34 6)
+                (wire-bass at (h-bass h) 42)
+                (pad at 16 (h-chord h) 30)
+                (kick at (if (= b 7) '((0 46) (10 42) (14 34)) (if (even? b) BREAK-A-KICK BREAK-B-KICK)))
+                (snare at (cond (crash? '((12 46) (15 14)))
+                                ((= b 7) '((4 44) (12 40) (13 32) (14 38) (15 44)))
+                                ((even? b) BREAK-A-SNARE)
+                                (else BREAK-B-SNARE)))
+                (ticks-on at '(0 1 3 4 5 7 8 9 11 12 13 15) ACCENTS 28 14)
+                (cat (lambda (p) (open-tick at p 20)) '(2 6 10 14))
+                (if crash? (crash at 40) '())
+                (riff at (list-ref RIFF (+ 4 (modulo b 4)))))))
+           (range 8)))
+
+    ;; hold: the breakdown. The ostinato alone over B-flat and E-flat, a
+    ;; group at a time at first; the riff's head in fragments; the kit
+    ;; returns; bar 8, the riser, loops until the fill is aimed.
+    (define HOLD '((bb (Bb . M) Bb) (bb (Bb . M) Bb) (eb (Eb . M) Eb) (eb (Eb . M) Eb)
+                   (bb (Bb . M) Bb) (bb (Bb . M) Bb) (gm (G . m) G)))
+    (define (hold-part s)
+      (let ((at (lambda (b) (at-bar (+ s b)))))
+        (append
+         (cat (lambda (b)
+                (let ((h (list-ref HOLD b)))
+                  (append (ostinato (at b) (h-kind h) 36 26 (if (< b 2) 3 6))
+                          (pad (at b) 16 (h-chord h) 30)
+                          (if (< b 4) (note 4 (at b) 16 (bass-root (h-bass h)) I-BASS 32) (wire-bass (at b) (h-bass h) 38))
+                          (cond ((< b 2) '())
+                                ((< b 4) (ticks-on (at b) EIGHTHS '(0 8) 20 10))
+                                (else (break (at b) b #f)))
+                          (if (memv b '(2 3)) (kick (at b) '((0 38))) '())
+                          (if (memv b '(3 5)) (riff (at b) '((0 2 D 5 40) (2 2 D 5 36) (4 3 F 5 40) (7 3 Eb 5 38))) '()))))
+              (range 7))
+         (riser (at 7)))))
+
+    (define (riser at)
+      (let ((A1 (midi 'A 1)))
+        (append (pad at 16 '(A . M) 30)
+                (cat (lambda (k) (note 4 (+ at (* 2 k)) 1.5 (if (odd? k) (+ A1 12) A1) I-BASS (+ 38 k))) (range 8))
+                (ticks-on at (range 16) ACCENTS 28 14)
+                (kick at '((0 44) (4 40) (8 44) (12 42)))
+                (snare at '((0 22) (2 24) (4 27) (6 29) (8 32) (10 34) (12 37) (13 39) (14 42) (15 45)))
+                ;; the ostinato's groups on A, rising in level
+                (cat (lambda (g) (note 7 (+ at (car g)) 0.75 (cadr g) I-ARP (+ 28 (quotient (car g) 2))))
+                     (list (list 0 (midi 'D 4)) (list 1 (midi 'A 4)) (list 2 (midi 'Cs 5))
+                           (list 3 (midi 'D 4)) (list 4 (midi 'A 4)) (list 5 (midi 'Cs 5))
+                           (list 6 (midi 'D 4)) (list 7 (midi 'A 4))
+                           (list 8 (midi 'D 4)) (list 9 (midi 'A 4)) (list 10 (midi 'Cs 5))
+                           (list 11 (midi 'D 4)) (list 12 (midi 'A 4)) (list 13 (midi 'Cs 5))
+                           (list 14 (midi 'D 4)) (list 15 (midi 'Cs 5)))))))
+
+    (define (fill-part s)
+      (let ((at0 (at-bar s)) (at1 (at-bar (+ s 1))) (A1 (midi 'A 1)))
+        (append
+         (pad at0 16 '(A . M) 32)
+         (cat (lambda (k) (note 4 (+ at0 (* 2 k)) 1.5 (if (odd? k) (+ A1 12) A1) I-BASS 42)) (range 8))
+         (cat (lambda (i) (note 4 (+ at1 i) 1
+                                (list-ref (list A1 (midi 'Bb 1) (midi 'C 2) (midi 'Cs 2)) (quotient i 4))
+                                I-BASS (+ 40 (quotient i 2))))
+              (range 14))
+         (ticks-on at0 (range 16) ACCENTS 30 15) (ticks-on at1 (range 14) ACCENTS 30 15)
+         (kick at0 '((0 46) (4 42) (8 46) (12 44)))
+         (kick at1 '((0 46) (4 44) (8 46) (10 40) (12 46) (13 42)))
+         (snare at0 (map (lambda (i) (list i (+ 26 i))) (range 16)))
+         (cat (lambda (k) (note 2 (+ at1 (* 0.5 k)) 0.5 SNARE-PITCH I-SNARE (+ 32 (quotient (* 20 k) 27))))
+              (range 28))
+         (ostinato at0 'a 40 32 6)
+         (ostinato at1 'a 42 34 4)
+         (chirp at1 14 EB6 26))))
+
+    ;; traced: the drop. The whole riff, twice; on every fourth bar (E-flat)
+    ;; the lead drops out and Gibson plays his own answer
+    (define (traced-part s)
+      (cat (lambda (b)
+             (let* ((at (at-bar (+ s b))) (h (cycle b)) (k (modulo b 4)) (crash? (memv b '(0 8))))
+               (append
+                (if (= b 15)
+                    (append (ostinato at (h-kind h) 44 34 6) (wire-bass at (h-bass h) 42) (pad at 16 (h-chord h) 30)
+                            (kick at BREAK-B-KICK) (snare at '((4 44) (12 40) (13 32) (14 38) (15 44)))
+                            (ticks-on at (range 16) ACCENTS 30 15))
+                    (append (band at b h 44 crash?)
+                            (if (>= b 8) (cat (lambda (p) (open-tick at p 18)) '(3 11)) '())))
+                (if (= k 3)
+                    (steal at)
+                    (riff at (list-ref RIFF (if (< b 8) (modulo b 4) (+ 4 (modulo b 4))))))
+                (cond ((= b 0) (cat (lambda (p) (ice at (car p) 1 EB6 (cdr p))) '((2 . 10) (6 . 14) (10 . 18))))
+                      ((= k 1) (append (chirp at 11 EB6 22) (ice at 14 1 D6 20)))
+                      ((= k 2) (ice at 14 1 EB6 20))
+                      (else '())))))
+           (range 16)))
+
+    ;; uplink: the way out. Two bars of the riff, then the climb: B-flat,
+    ;; C with the E natural, the high D bent up into and held over the air,
+    ;; Gibson's lock-on cut off as it lands; then the air falling home.
+    (define UPLINK
+      '((phrygian (D . m) D) (phrygian (D . m) D) (bb (Bb . M) Bb) (c (C . M) C)
+        (air (D . m) D) (air (D . m) D) (air (D . m) D) (air (D . m) D)))
+    (define (uplink-part s)
+      (cat (lambda (b)
+             (let* ((at (at-bar (+ s b))) (h (list-ref UPLINK b)))
+               (append
+                (if (= b 7)
+                    (append (kick at '((0 44))) (crash at 34) (note 4 at 8 (bass-root 'D) I-BASS 42)
+                            (pad at 16 '(D . m) 32) (ostinato at 'air 40 30 1))
+                    (band at b h 44 (memv b '(0 4))))
+                (case b
+                  ((0) (riff at (list-ref RIFF 4)))
+                  ((1) (riff at (list-ref RIFF 5)))
+                  ((2) (riff at CLIMB-BB))
+                  ((3) (append (riff at CLIMB-C) (lock-on at)))
+                  ((4) (riff at HIGH-D))
+                  ((6) (riff at HOME))
+                  ((7) (riff at '((0 12 D 5 44))))
+                  (else '())))))
+           (range 8)))
+
+    (define (results-part s)
+      (cat (lambda (b)
+             (let* ((at (at-bar (+ s b))) (h (cycle b)))
+               (append (ostinato at (h-kind h) 36 26 6)
+                       (wire-bass at (h-bass h) 34)
+                       (pad at 16 (h-chord h) 28)
+                       (kick at BREAK-A-KICK)
+                       (snare at '((12 32)))
+                       (ticks-on at EIGHTHS '(2 6 10 14) 22 12))))
+           (range 8)))
+
+    (define (night-wire-events)
+      (append (calm-part (start 'calm)) (grid-part (start 'grid)) (lap1-part (start 'lap1))
+              (lap2-part (start 'lap2)) (hold-part (start 'hold)) (fill-part (start 'fill))
+              (traced-part (start 'traced)) (uplink-part (start 'uplink)) (results-part (start 'results))))
+
+    ;; the way out is the uplink's: no E natural in the lead or the ostinato before it
+    (define (check-air! events)
+      (let ((up (* 16 (start 'uplink))) (up-end (* 16 (+ (start 'uplink) 8))))
+        (for-each (lambda (e)
+                    (when (and (ev-midi e) (memv (ev-ch e) (quote (6 7))) (= 4 (modulo (ev-midi e) 12))
+                               (not (and (>= (ev-start e) up) (< (ev-start e) up-end))))
+                      (error "night-wire: an E natural before the uplink" (ev-start e))))
+                  events)))
+
+    (define (night-wire-text)
+      (let ((events (night-wire-events)))
+        (check-air! events)
+        (song-text "Night Wire" NIGHT-WIRE-SECTIONS events (race-bus-text) (bank) (quote tempo) NIGHT-WIRE-BPM)))
+
+    (define (chords-of mark)
+      (case mark
+        ((calm results lap2) (map (lambda (b) (h-chord (cycle b))) (range 8)))
+        ((lap1 traced) (map (lambda (b) (h-chord (cycle b))) (range 16)))
+        ((grid) '((D . m) (D . m) (D . m) (A . M)))
+        ((hold) (append (map h-chord HOLD) '((A . M))))
+        ((fill) '((A . M) (A . M)))
+        ((uplink) (map h-chord UPLINK))
+        (else (error "night-wire: no chords for" mark))))
+
+    ;; D Phrygian: the engine tops out at A3 (the fifth) and boosts to D4
+    (define (night-wire-cues-text)
+      (song-cues-text 'night-wire NIGHT-WIRE-SECTIONS chords-of "220.0" "293.664767917"))))

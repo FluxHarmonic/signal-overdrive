@@ -233,8 +233,9 @@ export function classifyCapture(arm, analysis, signature) {
 
 export function parseTrace(text) {
   const clocks = [], jumps = [];
+  let song = null;  // the race song the game played (its reset line names it)
   for (const line of text.split("\n")) {
-    if (/conductor reset .* mark grid/.test(line)) { clocks.length = 0; jumps.length = 0; }
+    if (/conductor reset .* mark grid/.test(line)) { clocks.length = 0; jumps.length = 0; song = line.match(/ song (\S+)/)?.[1] ?? null; }
     const jump = line.match(/conductor intended tick (\d+) bar (\d+) mark (\w+)/);
     if (jump) jumps.push({ tick: +jump[1], bar: +jump[2], mark: jump[3] });
     const clock = line.match(/conductor clock wall (\S+) song (\S+) audio (\S+) tick (\d+) phase (\w+)(.*)/);
@@ -244,7 +245,7 @@ export function parseTrace(text) {
       clocks.push({ wall: +clock[1], song: +clock[2], audio: clock[3] === "-" ? null : +clock[3], tick: +clock[4], phase: clock[5], metrics });
     }
   }
-  return { clocks, jumps };
+  return { clocks, jumps, song };
 }
 
 export function analyze(run) {

@@ -1,0 +1,523 @@
+;;; (song kit) - What every race song shares: the section contract, the
+;;; seams, the tune text, the cue sheet, and the parts of the race bank
+;;;
+;;; A race song is written as note events ((theme notation)'s `note`,
+;;; `bend`, `slide`) on the game's grid: 140 BPM, speed 3, meter (8 4),
+;;; eight channels in the race layout (1 kick, 2 snare, 3 ticks, 4 bass,
+;;; 5 pad and stabs, 6 lead, 7 arp or counter-line, 8 Gibson's ICE), one
+;;; pattern per bar, the nine marks, and no tracker transport. The game's
+;;; conductor loops each section and jumps between them at bar lines.
+;;; Positions and lengths are in sixteenths (a bar is 16).
+;;;
+;;; A section is (mark bars loop next): loop is (from . to), half open and
+;;; section-relative, or #f; next is the automatic exit or #f.
+;;;
+;;; Seams: every section's first row, and the first row of its loop, gives
+;;; every channel an onset or a release, so a section sounds the same
+;;; entered by a jump from any bar, by a loop, or in order. No note may
+;;; sound across one of those rows; song-text raises if one does.
+;;;
+;;;   (song-text name sections events bus bank ['tempo N] ['voices ((ch . inst) ...)])
+;;;                             -> the tune (.cts text); every instrument a
+;;;                             channel plays carries the channel's send and pan
+;;;   (clear-clashes ch against events) -> ch's notes cut or dropped where a
+;;;                             note on `against` sounds a semitone away
+;;;   (song-cues-text id sections chords-of top-hz boost-hz) -> the cue sheet
+;;;   (race-bank-text extra) -> Carrier's nine instruments, Gibson's ICE (10),
+;;;                             the crash (11), the pads (12, 13), then extra
+
+(define-library (song kit)
+  (import (sigil core) (sigil string) (sigil list)
+          (theme notation)
+          (only (carrier score) instruments-text CALL ANSWER))
+  (export section-start section-bars section-loop seam-rows check-p13!
+          song-text song-cues-text race-bank-text race-bus-text clear-clashes
+          ;; instruments of the race bank
+          I-KICK I-SNARE I-TICK I-TICK-OPEN I-BASS I-MINOR I-MAJOR I-LEAD I-ARP
+          I-ICE I-CRASH pad-inst
+          ;; helpers
+          range cat at-bar num minor? bass-root pad-root chord-tones
+          ACCENTS TICK-PITCH KICK-PITCH SNARE-PITCH
+          hits kick snare crash stab pad open-tick ticks-on carrier-bass-bar
+          phrase augment clip-phrase transpose-phrase delay-phrase
+          ice chirp steal EB6 D6 lock-on
+          half CALL ANSWER)
+  (begin
+    ;; ------------------------------------------------------------
+    ;; Sections
+    ;; ------------------------------------------------------------
+    (define (section-of sections mark)
+      (or (assq mark sections) (error "song: no section" mark)))
+    (define (section-bars sections mark) (cadr (section-of sections mark)))
+    (define (section-loop sections mark) (caddr (section-of sections mark)))
+
+    (define (section-start sections mark)
+      (let loop ((ss sections) (bar 0))
+        (cond ((null? ss) (error "song: no section" mark))
+              ((eq? (car (car ss)) mark) bar)
+              (else (loop (cdr ss) (+ bar (cadr (car ss))))))))
+
+    (define (total-bars sections) (apply + (map cadr sections)))
+
+    ;; rows where every channel must start or stop: each section's first
+    ;; row, and its loop's first row
+    (define (seam-rows sections)
+      (apply append
+             (map (lambda (s)
+                    (let ((start (section-start sections (car s))) (lp (caddr s)))
+                      (cons (* 32 start)
+                            (if (and lp (> (car lp) 0)) (list (* 32 (+ start (car lp)))) '()))))
+                  sections)))
+
+    ;; ------------------------------------------------------------
+    ;; The race bank: Carrier's nine instruments verbatim, then Gibson's
+    ;; ICE, the crash and the two pads, exactly as Carrier's race has them
+    ;; ------------------------------------------------------------
+    (define I-KICK 1) (define I-SNARE 2) (define I-TICK 3) (define I-TICK-OPEN 4)
+    (define I-BASS 5) (define I-MINOR 6) (define I-MAJOR 7) (define I-LEAD 8) (define I-ARP 9)
+    (define I-ICE 10) (define I-CRASH 11)
+    (define (pad-inst c) (if (minor? c) 12 13))
+
+    (define (num x) (number->string x))
+
+    (define (carrier-instruments)
+      (let* ((s (instruments-text)) (n (string-length s)))
+        (unless (string=? (substring s (- n 3) n) "))\n")
+          (error "song: Carrier's instrument list changed shape"))
+        (string-append (substring s 0 (- n 2)) "\n")))
+
+    (define (pad-patch third)
+      (string-append
+       "fm4-pad alg: 7 fb: 0.25 index: 1 vel-depth: 0.2"
+       " op1: (1 1 0.25 0.8 0.85 0.6) op2: (" third " 0.7 0.3 0.8 0.85 0.6)"
+       " op3: (1.4983071 0.7 0.3 0.8 0.85 0.6) op4: (2 0.2 0.3 0.8 0.7 0.6)"
+       " amp-attack: 0.3 amp-decay: 0.5 amp-sustain: 0.85 amp-release: 0.7"
+       " unison: 3 spread: 12 chorus-rate: 0.35 chorus-depth: 3 chorus-mix: 0.4"))
+
+    (define (pad-line id name third)
+      (string-append "    (instrument id: " (num id) " name: \"" name "\" patch: ("
+                     (pad-patch third) ") volume: 24 gain: 2 send: 0.16 pan: -0.3)\n"))
+
+    (define (race-bank-text extra)
+      (string-append
+       (carrier-instruments)
+       "    (instrument id: 10 name: \"ice\" patch: (fm4-bell alg: 4 fb: 0 index: 1.6 vel-depth: 0.5"
+       " op1: (1 1 0.001 0.28 0 0.1) op2: (3.17 0.6 0.001 0.08 0 0.05) op3: (1.4142136 0.35 0.001 0.16 0 0.08)"
+       " op4: (5.43 0.4 0.001 0.03 0 0.03) amp-attack: 0.001 amp-decay: 0.3 amp-sustain: 0 amp-release: 0.1)"
+       " volume: 48 gain: 1 send: 0.3 pan: -0.4)\n"
+       "    (instrument id: 11 name: \"crash\" patch: (chip-noise attack: 0.001 crush-bits: 12 cutoff: 11000 decay: 1.2 hp: 3500 osc-amp: 0.6 release: 0.4 sustain: 0) volume: 44 gain: 0.55 send: 0.06 pan: 0"
+       " layers: ((chip-hat crush-bits: 10 decay: 0.6 hp: 5000 metal: 0.8 noise: 0.2 octave: 0 volume: 0.35)))\n"
+       (pad-line 12 "pad-minor" "1.1892071") (pad-line 13 "pad-major" "1.259921")
+       extra
+       "  )\n"))
+
+    ;; Carrier's race bus: makeup -0.5 dB, so the loudest bars peak near
+    ;; -2 dBFS and the game's cues have room on top.
+    ;; A song whose loudness or peaks differ from Carrier's passes its own
+    ;; compressor settings to match Carrier's par race (about -14.8 LUFS,
+    ;; true peak -2.1 dBFS) on the same path, keyword style:
+    ;; (race-bus-text 'threshold -16 'makeup 2.8). Unset keys keep Carrier's.
+    (define (race-bus-text . opts)
+      (define (opt key default)
+        (let loop ((o opts))
+          (cond ((null? o) default)
+                ((eq? (car o) key) (cadr o))
+                (else (loop (cddr o))))))
+      (string-append "  (bus reverb: zitarev size: 0.8 damp: 0.55 mix: 0.3 comp: on threshold: " (num (opt 'threshold -12))
+                     " ratio: " (num (opt 'ratio 3)) " attack: " (num (opt 'attack 8))
+                     " release: " (num (opt 'release 110)) " makeup: " (num (opt 'makeup -0.5)) ")\n"))
+
+    ;; ------------------------------------------------------------
+    ;; Helpers
+    ;; ------------------------------------------------------------
+    (define (range n) (let loop ((i (- n 1)) (acc '())) (if (< i 0) acc (loop (- i 1) (cons i acc)))))
+    (define (cat f xs) (apply append (map f xs)))
+    (define (at-bar b) (* 16 b))
+
+    ;; chords are (letter . m) or (letter . M)
+    (define (minor? c) (eq? (cdr c) 'm))
+    ;; bass roots A1 to G2, as Carrier's
+    (define (bass-root letter) (let ((m (midi letter 2))) (if (> m (midi 'G 2)) (- m 12) m)))
+    ;; a pad's root, F3 to E4, so the triad stays under the lead
+    (define (pad-root letter) (let ((m (midi letter 4))) (if (>= m (midi 'F 4)) (- m 12) m)))
+    (define (chord-tones c base) (list base (+ base (if (minor? c) 3 4)) (+ base 7)))
+
+    (define ACCENTS '(0 3 6 8 11 14))
+    (define TICK-PITCH (midi 'C 8))
+    (define KICK-PITCH (midi 'D 2))
+    (define SNARE-PITCH (midi 'D 3))
+
+    ;; entries: ((pos vol) ...)
+    (define (hits ch inst m at entries)
+      (cat (lambda (e) (note ch (+ at (car e)) 1 m inst (cadr e))) entries))
+    (define (kick at entries) (hits 1 I-KICK KICK-PITCH at entries))
+    (define (snare at entries) (hits 2 I-SNARE SNARE-PITCH at entries))
+    ;; the crash rings out its release when the next snare takes the channel
+    (define (crash at vol) (note 2 at 12 SNARE-PITCH I-CRASH vol))
+    (define (open-tick at pos vol) (note 3 (+ at pos) 1 TICK-PITCH I-TICK-OPEN vol))
+    ;; clicks on the 16ths in `where`, accented on `accents`
+    (define (ticks-on at where accents accent soft)
+      (cat (lambda (i) (note 3 (+ at i) 0.5 TICK-PITCH I-TICK (if (memv i accents) accent soft))) where))
+
+    (define (stab at pos len c vol)
+      (note 5 (+ at pos) len (midi (car c) 4) (if (minor? c) I-MINOR I-MAJOR) vol))
+    (define (pad at len c vol)
+      (note 5 at len (pad-root (car c)) (pad-inst c) vol))
+
+    ;; Carrier's bass bar: 16ths on root r, octave jumps on the call's
+    ;; 3+3+2 accents, the last two 16ths leading to next-r (a semitone
+    ;; move leads in through the octave and the fifth)
+    ;; approach: the last 16th, when the default (a step from the next
+    ;; root) is wrong for the chord, as C natural is under A major
+    (define (carrier-bass-bar at r next-r loud . approach)
+      (let* ((same (= r next-r))
+             (semi (= 1 (abs (- next-r r))))
+             (n14 (if (or same semi) (+ r 12) r))
+             (n15 (cond ((pair? approach) (car approach))
+                        (same (+ r 10)) (semi (+ r 7)) ((> next-r r) (- next-r 2)) (else (+ next-r 2))))
+             (pitches (list r r r (+ r 12) r r (+ r 12) r r r r (+ r 12) r r n14 n15)))
+        (cat (lambda (i)
+               (note 4 (+ at i) 1 (list-ref pitches i) I-BASS
+                     (cond ((memv i '(0 8)) (+ loud 6)) ((memv i '(3 6 11 14)) (+ loud 3)) (else loud))))
+             (range 16))))
+
+    ;; A motif line is ((pos len letter octave vol) ...); phrase plays it on
+    ;; channel ch with instrument inst, up semitones, dvol louder
+    (define (phrase ch inst at notes up dvol)
+      (cat (lambda (n) (note ch (+ at (car n)) (cadr n) (+ up (midi (caddr n) (cadddr n)))
+                             inst (+ dvol (list-ref n 4))))
+           notes))
+    (define (augment notes k)
+      (map (lambda (n) (cons (* k (car n)) (cons (* k (cadr n)) (cddr n)))) notes))
+    ;; shorten any note that would sound past `end` (16ths from the phrase's start)
+    (define (clip-phrase notes end)
+      (filter (lambda (n) (> (cadr n) 0))
+              (map (lambda (n) (if (> (+ (car n) (cadr n)) end)
+                                   (cons (car n) (cons (- end (car n)) (cddr n)))
+                                   n))
+                   notes)))
+    (define (transpose-phrase notes letter-map)
+      (map (lambda (n) (let ((to (assq (caddr n) letter-map)))
+                         (if to (list (car n) (cadr n) (cdr to) (cadddr n) (list-ref n 4)) n)))
+           notes))
+    ;; the line `by` sixteenths later
+    (define (delay-phrase notes by)
+      (map (lambda (n) (cons (+ by (car n)) (cdr n))) notes))
+
+    ;; split a bar's events at its half: the first half's or the second's
+    (define (half es at first?)
+      (filter (lambda (e) (if first? (< (- (ev-start e) at) 8) (>= (- (ev-start e) at) 8))) es))
+
+    ;; ------------------------------------------------------------
+    ;; Gibson's ICE (channel 8), as Carrier's race has it
+    ;; ------------------------------------------------------------
+    (define EB6 (midi 'Eb 6)) (define D6 (midi 'D 6))
+    (define (ice at pos len m vol) (note 8 (+ at pos) len m I-ICE vol))
+    ;; a chirp: from a major third above, sliding down to m in a row
+    (define (chirp at pos m vol) (bend 8 (+ at pos) 1 (+ m 4) m I-ICE vol 32))
+    ;; his answer, in the answer's rhythm: E-flat, A, D rising to E-flat
+    (define STEAL '((0 3 Eb 6 30) (3 3 A 5 26) (6 2 D 6 28) (8 6 Eb 6 32)))
+    (define (steal at) (cat (lambda (n) (ice at (car n) (cadr n) (midi (caddr n) (cadddr n)) (list-ref n 4))) STEAL))
+    ;; the lock-on: 32nds of E-flat rising in level over the bar's second
+    ;; half, until the D stops them
+    (define (lock-on at)
+      (cat (lambda (j) (ice at (+ 8 (* 0.5 j)) 0.5 EB6 (+ 14 (quotient (* 3 j) 2)))) (range 16)))
+
+    ;; ------------------------------------------------------------
+    ;; Checks
+    ;; ------------------------------------------------------------
+    ;; a slide's target (tone portamento, 3xx) continues its note's voice
+    (define (slide-fx? fx) (and (> (string-length fx) 0) (char=? (string-ref fx 0) #\3)))
+    (define (ev-fx e) (vector-ref e 6))
+
+    ;; A note may not sound across a seam row: from its onset to its end,
+    ;; or to the next onset on its channel if that comes first.
+    (define (check-seams! sections events)
+      (let* ((seams (seam-rows sections))
+             (notes (filter ev-midi events))
+             (onsets (let ((v (make-vector 9 '())))
+                       (for-each (lambda (e)
+                                   (unless (slide-fx? (ev-fx e))
+                                     (vector-set! v (ev-ch e) (cons (row-of (ev-start e)) (vector-ref v (ev-ch e))))))
+                                 notes)
+                       v)))
+        (for-each
+         (lambda (e)
+           (let* ((s (row-of (ev-start e)))
+                  (end (max (+ s 1) (exact (floor (* 2 (+ (ev-start e) (ev-len e)))))))
+                  (later (filter (lambda (r) (> r s)) (vector-ref onsets (ev-ch e))))
+                  (eff (if (null? later) end (min end (apply min later)))))
+             (for-each (lambda (r)
+                         (when (and (< s r) (< r eff))
+                           (error "song: a note sounds across a seam (channel, onset row, seam row)"
+                                  (list (ev-ch e) s r))))
+                       seams)))
+         notes)))
+
+    ;; P13, the melody heard whole only at the uplink: no D (any octave) may
+    ;; begin on the lead or counter-line channels (6, 7) in the bar after an
+    ;; answer bar, nor in the first bar of any section that bar can jump to,
+    ;; except in the uplink. answer-bars: absolute bar numbers where an answer
+    ;; ends; reachable: marks a jump from them can land on.
+    (define (check-p13! sections events answer-bars reachable)
+      (let* ((uplink (section-start sections 'uplink))
+             (uplink-end (+ uplink (section-bars sections 'uplink)))
+             (d? (lambda (e) (and (ev-midi e) (= 2 (modulo (ev-midi e) 12)) (memv (ev-ch e) '(6 7)))))
+             (in-bar (lambda (b) (filter (lambda (e) (and (>= (ev-start e) (* 16 b)) (< (ev-start e) (* 16 (+ b 1))))) events)))
+             (bars (append (map (lambda (b) (+ b 1)) answer-bars)
+                           (map (lambda (m) (section-start sections m)) reachable))))
+        (for-each (lambda (b)
+                    (unless (and (>= b uplink) (< b uplink-end))
+                      (let ((bad (filter d? (in-bar b))))
+                        (unless (null? bad)
+                          (error "song: a D on the lead or counter-line right after an answer (P13)"
+                                 (list b (ev-ch (car bad)) (ev-start (car bad))))))))
+                  bars)))
+
+    ;; every channel with no cell on a seam row gets a release there; a
+    ;; slide or an effect-only cell there is an error (it would leave the
+    ;; voice sounding)
+    (define (clear-seams sections cells)
+      (let loop ((rows (seam-rows sections)) (acc cells))
+        (if (null? rows) acc
+            (loop (cdr rows)
+                  (let ch-loop ((ch 1) (acc acc))
+                    (if (> ch 8) acc
+                        (ch-loop (+ ch 1)
+                                 (let ((there (find (lambda (c) (and (= (car c) (car rows)) (= (cadr c) ch))) acc)))
+                                   (cond ((not there) (cons (list (car rows) ch "===" 0 0 "000") acc))
+                                         ((or (equal? (caddr there) "...") (slide-fx? (list-ref there 5)))
+                                          (error "song: a slide or effect-only cell on a seam row" there))
+                                         (else acc))))))))))
+
+    (define REQUIRED '(calm grid lap1 lap2 hold fill traced uplink results))
+
+    (define (check-sections! sections)
+      (unless (equal? (map car sections) REQUIRED)
+        (error "song: the sections must be the nine, in order" (map car sections)))
+      (for-each (lambda (s)
+                  (let ((bars (cadr s)) (lp (caddr s)) (next (cadddr s)))
+                    (when (and lp (not (and (<= 0 (car lp)) (< (car lp) (cdr lp)) (<= (cdr lp) bars))))
+                      (error "song: a bad loop" s))
+                    (when (and lp next) (error "song: a section both loops and exits" s))))
+                sections)
+      (unless (= 4 (section-bars sections 'grid)) (error "song: grid must be four bars"))
+      (unless (= 2 (section-bars sections 'fill)) (error "song: fill must be two bars"))
+      (for-each (lambda (m n) (unless (eq? (cadddr (section-of sections m)) n)
+                                (error "song: wrong automatic exit" m)))
+                '(grid fill uplink) '(lap1 traced results)))
+
+    ;; ------------------------------------------------------------
+    ;; Channel voices. A channel takes the send and pan of the first
+    ;; instrument it plays (motif's player and the game both), so a second
+    ;; instrument on the channel would play at someone else's values, and a
+    ;; render that starts elsewhere in the order would differ from the game.
+    ;; So every instrument a channel plays is given that channel's send and
+    ;; pan: where its own differ, the channel plays a copy (ids from 40)
+    ;; that carries them. The channel's reference is the first instrument
+    ;; it plays, or the one `voices` names: ((channel . instrument) ...).
+    ;; ------------------------------------------------------------
+    (define (e-inst e) (vector-ref e 4))   ; (theme notation) keeps ev-inst to itself
+    (define (bank-lines bank) (string-split bank "\n"))
+
+    ;; the characters of an instrument line at its own depth (inside
+    ;; "(instrument ...)", outside the patch and layers), with a mask
+    (define (top-level-tokens line)
+      (let loop ((i 0) (depth 0) (acc '()))
+        (if (>= i (string-length line))
+            (filter (lambda (s) (not (string-empty? s))) (string-split (list->string (reverse acc)) " "))
+            (let ((c (string-ref line i)))
+              (cond ((char=? c #\() (loop (+ i 1) (+ depth 1) (if (= depth 1) (cons #\space acc) acc)))
+                    ((char=? c #\)) (loop (+ i 1) (- depth 1) acc))
+                    ((= depth 1) (loop (+ i 1) depth (cons c acc)))
+                    (else (loop (+ i 1) depth acc)))))))
+    (define (token-after toks key default)
+      (let ((m (member key toks))) (if (and m (pair? (cdr m))) (cadr m) default)))
+
+    ;; id -> (line send pan), send and pan as numbers
+    (define (bank-instruments bank)
+      (filter-map (lambda (line)
+                    (and (string-contains? line "(instrument id: ")
+                         (let ((toks (top-level-tokens line)))
+                           (list (string->number (token-after toks "id:" #f)) line
+                                 (string->number (token-after toks "send:" "0"))
+                                 (string->number (token-after toks "pan:" "0"))))))
+                  (bank-lines bank)))
+
+    ;; the line with a new id and name and the given send and pan: the
+    ;; line's own send: and pan: (at its depth) dropped, the new ones last
+    (define (copy-line line id name send pan)
+      (let* ((n (string-length line))
+             (drop-at (lambda (i depth)
+                        (and (= depth 1)
+                             (let ((rest (substring line i n)))
+                               (or (string-starts-with? rest " send: ") (string-starts-with? rest " pan: "))))))
+             (body (let loop ((i 0) (depth 0) (acc '()))
+                     (cond ((>= i n) (list->string (reverse acc)))
+                           ((drop-at i depth)
+                            ;; skip " key: value"
+                            (let skip ((j (+ 1 (string-index (substring line (+ i 1) n) #\space) i 1)))
+                              (if (and (< j n) (not (memv (string-ref line j) '(#\space #\)))))
+                                  (skip (+ j 1))
+                                  (loop j depth acc))))
+                           (else (let ((c (string-ref line i)))
+                                   (loop (+ i 1)
+                                         (cond ((char=? c #\() (+ depth 1)) ((char=? c #\)) (- depth 1)) (else depth))
+                                         (cons c acc)))))))
+             (close (string-index-right body #\)))
+             (head (substring body 0 close))
+             (id-at (string-find head "(instrument id: "))
+             (name-at (string-find head " patch: ")))
+        (string-append (substring head 0 id-at)
+                       "(instrument id: " (num id) " name: \"" name "\""
+                       (substring head name-at (string-length head))
+                       " send: " (num send) " pan: " (num pan) ")")))
+
+    (define (channel-voices bank events voices)
+      (let* ((insts (bank-instruments bank))
+             (inst-of (lambda (id) (or (assv id insts) (error "song: no instrument in the bank" id))))
+             (played (filter (lambda (e) (and (number? (e-inst e)) (> (e-inst e) 0))) events))
+             (ref-of (lambda (ch)
+                       (or (let ((v (assv ch voices))) (and v (cdr v)))
+                           (let loop ((es played) (best #f))
+                             (cond ((null? es) (and best (e-inst best)))
+                                   ((and (= (ev-ch (car es)) ch) (or (not best) (< (ev-start (car es)) (ev-start best))))
+                                    (loop (cdr es) (car es)))
+                                   (else (loop (cdr es) best)))))))
+             (refs (map (lambda (ch) (cons ch (ref-of ch))) (range 9)))
+             (same? (lambda (a b) (and (= (caddr a) (caddr b)) (= (cadddr a) (cadddr b)))))
+             ;; (channel instrument) pairs that need a copy, in a fixed order
+             (pairs (let loop ((es played) (acc '()))
+                      (if (null? es)
+                          (list-sort (lambda (a b) (or (< (car a) (car b)) (and (= (car a) (car b)) (< (cadr a) (cadr b))))) acc)
+                          (let* ((e (car es)) (k (list (ev-ch e) (e-inst e))) (r (cdr (assv (ev-ch e) refs))))
+                            (loop (cdr es)
+                                  (if (or (member k acc) (same? (inst-of (e-inst e)) (inst-of r))) acc (cons k acc)))))))
+             (copies (let loop ((ps pairs) (id 40) (acc '()))
+                       (if (null? ps) (reverse acc)
+                           (loop (cdr ps) (+ id 1) (cons (cons (car ps) id) acc)))))
+             (copy-text (apply string-append
+                               (map (lambda (c)
+                                      (let* ((ch (car (car c))) (src (inst-of (cadr (car c))))
+                                             (r (inst-of (cdr (assv ch refs))))
+                                             (nm (token-after (top-level-tokens (cadr src)) "name:" "\"x\"")))
+                                        (string-append "    "
+                                                       (copy-line (string-trim (cadr src)) (cdr c)
+                                                                  (string-append (substring nm 1 (- (string-length nm) 1)) "-ch" (num ch))
+                                                                  (caddr r) (cadddr r))
+                                                       "\n")))
+                                    copies)))
+             (close-at (string-find-last bank "  )\n")))
+        (values (string-append (substring bank 0 close-at) copy-text (substring bank close-at (string-length bank)))
+                (map (lambda (e)
+                       (let ((c (and (number? (e-inst e)) (> (e-inst e) 0) (assoc (list (ev-ch e) (e-inst e)) copies))))
+                         (if c (let ((v (vector-copy e))) (vector-set! v 4 (cdr c)) v) e)))
+                     events))))
+
+    ;; ------------------------------------------------------------
+    ;; A line that follows another at a delay (a reflection, an echo) can
+    ;; land a semitone from the harmony that has moved on under it. On
+    ;; channel ch, each plain note a semitone (or a minor ninth) from a note
+    ;; sounding on the `against` channels is cut where that note starts, or
+    ;; dropped if it was already sounding (or the cut leaves under a 32nd).
+    ;; Notes carrying a slide are left as they are.
+    ;; ------------------------------------------------------------
+    (define (clear-clashes ch against events)
+      (let* ((plain? (lambda (e) (and (ev-midi e) (equal? (vector-ref e 6) "000")
+                                      (number? (e-inst e)) (> (e-inst e) 0))))
+             (others (filter (lambda (e) (and (plain? e) (memv (ev-ch e) against))) events))
+             (slides (map ev-start (filter (lambda (e) (and (= (ev-ch e) ch) (not (equal? (vector-ref e 6) "000")))) events)))
+             (end (lambda (e) (+ (ev-start e) (ev-len e))))
+             ;; a stab or pad is one note, its root; the instrument's
+             ;; layers sound the third and fifth
+             (tones (lambda (o) (case (e-inst o) ((6 12) '(0 3 7)) ((7 13) '(0 4 7)) (else '(0)))))
+             (clash? (lambda (a b)
+                       (find (lambda (t) (memv (modulo (- (ev-midi a) (+ (ev-midi b) t)) 12) '(1 11))) (tones b)))))
+        (filter-map
+         (lambda (e)
+           (if (not (and (= (ev-ch e) ch) (plain? e)
+                         (not (find (lambda (r) (and (> r (ev-start e)) (<= r (end e)))) slides))))
+               e
+               (let ((hits (filter (lambda (o) (and (clash? e o) (< (ev-start o) (end e)) (> (end o) (ev-start e)))) others)))
+                 (cond ((null? hits) e)
+                       ((find (lambda (o) (<= (ev-start o) (ev-start e))) hits) #f)
+                       (else (let ((len (- (apply min (map ev-start hits)) (ev-start e))))
+                               (and (>= len 0.5)
+                                    (let ((v (vector-copy e))) (vector-set! v 2 len) v))))))))
+         events)))
+
+    (define (string-find-last s sub)
+      (let loop ((i (- (string-length s) (string-length sub))))
+        (cond ((< i 0) (error "song: not found" sub))
+              ((string=? (substring s i (+ i (string-length sub))) sub) i)
+              (else (loop (- i 1))))))
+
+    ;; opts: 'tempo N (140 unless given: the game accepts only 140 today,
+    ;; its score compiler checks it, so a song at another tempo waits on a
+    ;; per-song clock) and 'voices ((channel . instrument) ...)
+    (define (song-text name sections events0 bus bank0 . opts)
+      (check-sections! sections)
+      (check-seams! sections events0)
+      (let*-values (((tempo) (let ((m (memq 'tempo opts))) (if m (cadr m) 140)))
+                    ((bank events) (channel-voices bank0 events0 (let ((m (memq 'voices opts))) (if m (cadr m) '())))))
+       (let* ((nbars (total-bars sections))
+             (end (* 32 nbars))
+             (cells (uniq-cells (clear-seams sections (events->cells events))))
+             (_ (for-each (lambda (c)
+                            (when (or (< (car c) 0) (> (car c) end)
+                                      (and (= (car c) end) (not (equal? (caddr c) "==="))))
+                              (error "song: a cell outside the bars" c)))
+                          cells))
+             ;; releases on the row past the last bar: the results loop's
+             ;; first row already releases every channel
+             (cells (filter (lambda (c) (< (car c) end)) cells))
+             (in-bar (lambda (b) (filter (lambda (c) (and (>= (car c) (* 32 b)) (< (car c) (* 32 (+ b 1))))) cells)))
+             (shift-bar (lambda (b cs) (map (lambda (c) (cons (- (car c) (* 32 b)) (cdr c))) cs))))
+        (string-append
+         "(tune version: 1 name: \"" name "\" tempo: " (num tempo) " speed: 3 channels: 8 meter: (8 4)\n"
+         bus
+         bank
+         "  (patterns\n"
+         (apply string-append (map (lambda (b) (pattern-text b 32 (shift-bar b (in-bar b)))) (range nbars)))
+         "  )\n"
+         "  (order" (apply string-append (map (lambda (b) (string-append " " (num b))) (range nbars))) ")\n"
+         "  (marks"
+         (apply string-append (map (lambda (s) (string-append " " (symbol->string (car s)) ": "
+                                                               (num (section-start sections (car s)))))
+                                   sections))
+         "))\n"))))
+
+    ;; ------------------------------------------------------------
+    ;; The cue sheet: the conductor's loops and automatic exits, the
+    ;; engine's two pitches, and the chord of every bar. chords-of: mark ->
+    ;; one chord per bar; a bar that changes chord halfway is a list of two.
+    ;; ------------------------------------------------------------
+    (define (chord-text c)
+      (if (pair? (car c))
+          (string-append "(" (chord-text (car c)) " " (chord-text (cadr c)) ")")
+          (string-append "(" (symbol->string (car c)) " . " (if (minor? c) "minor" "major") ")")))
+
+    (define (song-cues-text id sections chords-of top-hz boost-hz)
+      (for-each (lambda (s)
+                  (unless (= (length (chords-of (car s))) (cadr s))
+                    (error "song: a section's chords don't match its bars" (car s))))
+                sections)
+      (string-append
+       ";;; " (symbol->string id) "'s cue sheet, written by `carrier song cues`. Loops are\n"
+       ";;; half-open, section-relative bars; #f plays through. chords: one per\n;;; bar; a bar that changes chord halfway lists both.\n"
+       "((id . " (symbol->string id) ")\n"
+       " (engine-top-hz . " top-hz ")\n"
+       " (engine-boost-hz . " boost-hz ")\n"
+       " (sections . (\n"
+       (apply string-append
+              (map (lambda (s)
+                     (let ((lp (caddr s)) (next (cadddr s)))
+                       (string-append
+                        "   (" (symbol->string (car s))
+                        " (loop . " (if lp (string-append "(" (num (car lp)) " . " (num (cdr lp)) ")") "#f") ")"
+                        " (next . " (if next (symbol->string next) "#f") ")\n"
+                        "    (chords"
+                        (apply string-append (map (lambda (c) (string-append " " (chord-text c))) (chords-of (car s))))
+                        "))\n")))
+                   sections))
+       "  )))\n"))))

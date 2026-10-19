@@ -40,7 +40,7 @@
           (signal shell theme)
           (signal music conductor)
           (signal music clock)
-          (only (signal music song) SONG-BPM)
+          (only (signal music song) SONG-BPM song-id song-override!)
           (only (signal sfx) HIT-IMPACT))
 
   (export core-boot! core-frame! core-keys core-sticks core-pad core-param! core-touch!
@@ -392,6 +392,8 @@
       (set-store-app! GAME-NAME)
       (set-store-prefix! "signal-overdrive:")
       (set! *race* (race-new *tuning*))
+      ;; the race song its track binds, parsed now, not at the first gesture
+      (music-prepare!)
       (set! *intro* (intro-new *tuning* (eq? platform 'web)))
       ;; a boot is a new session, its title too: a start or a skip from an
       ;; earlier boot in the same process does not carry over
@@ -403,6 +405,18 @@
     ;; screenshots) or start (no title: the countdown at once); or ignored.
     (define *autopilot* #f)
     (define *start-now* #f)
+    ;; the song=ID asked for, applied once the development controls are on
+    (define *song-request* #f)
+    (define (song-request!)
+      (when *song-request*
+        (if (dev-keys?)
+            (begin
+              (song-override! *song-request*)
+              (set! *song-request* #f)
+              (set! *race* (race-new *tuning*))
+              (music-prepare!)
+              (say "song " (symbol->string (song-id))))
+            (say "song=" (symbol->string *song-request*) " waits for ?dev"))))
     (define (core-param! kv)
       (cond ((string=? kv "autopilot") (set! *autopilot* #t) (say "autopilot on"))
             ((string=? kv "start") (set! *start-now* #t) (intro-skip!) (title-skip!))
@@ -416,7 +430,8 @@
             ((string=? kv "showcase") (core-param! "fx-showcase=1"))
             ((string=? kv "fps") (set! *fps-on* #t) (say "fps readout on"))
             ((or (string=? kv "dev") (and (> (string-length kv) 3) (string=? (substring kv 0 4) "dev=")))
-             (set! *dev* #t) (say "dev keys on"))
+             (set! *dev* #t) (say "dev keys on")
+             (song-request!))
             ;; no HUD: clean captures, and the P15 gate's static frame
             ((string=? kv "nohud") (set! *no-hud* #t))
             ;; no machines or gate: the P15 gate's frame must not move, and the
@@ -451,6 +466,13 @@
             ;; worklet-sab; a worklet only: worklet-msg; else scriptprocessor)
             ((and (> (string-length kv) 11) (string=? (substring kv 0 11) "audio-mode="))
              (set! *audio-mode* (substring kv 11 (string-length kv))))
+            ;; ?song=ID: every track plays that race song (checks, auditions).
+            ;; A development control like the keys: on the web it needs ?dev,
+            ;; given before or after it. A player's race plays the song its
+            ;; track binds.
+            ((and (> (string-length kv) 5) (string=? (substring kv 0 5) "song="))
+             (set! *song-request* (string->symbol (substring kv 5 (string-length kv))))
+             (song-request!))
             ;; Development shortcut: registered names as well as indices.
             ((and (> (string-length kv) 6) (string=? (substring kv 0 6) "track=")
                   (memq (string->symbol (substring kv 6 (string-length kv))) TRACKS))
@@ -459,7 +481,7 @@
              (let ((t (tuning-parse! *tuning* kv)))
                (when t
                  (set! *tuning* t)
-                 (unless (fx-param? kv) (set! *race* (race-new *tuning*)))
+                 (unless (fx-param? kv) (set! *race* (race-new *tuning*)) (music-prepare!))
                  (say "tuning " kv))))))
 
     ;; "steer,throttle,brake,boost,drift" from the page (0/1 for the last two).
@@ -663,7 +685,8 @@
       (say "tuning " (symbol->string key) "=" (tuning-format-value (tuning-ref *tuning* key))
            " query ?" (tuning-query *tuning*))
       (when (memq key '(track laps rivals rival-pace))
-        (set! *race* (race-new *tuning*))))
+        (set! *race* (race-new *tuning*))
+        (music-prepare!)))
 
     ;; --- a frame ----------------------------------------------------------------------------
 
@@ -805,7 +828,8 @@
             (set! *music-trace-first* first)
             (set! *music-trace-log* '())
             (say "conductor reset wall " (number->string *frame-wall*)
-                 " mark " (symbol->string (conductor-section c))))
+                 " mark " (symbol->string (conductor-section c))
+                 " song " (symbol->string (song-id))))
           (for-each
             (lambda (entry)
               (unless (memq entry *music-trace-log*)
