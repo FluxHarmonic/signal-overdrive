@@ -72,10 +72,10 @@
       (assert-true (> (racer-best-lap p) (* 60 15)))
       (assert-true (< (racer-best-lap p) (* 60 25)))))
 
-  (test "on the loop too, the autopilot and every rival complete a lap"
+  (test "a retired track index clamps to the available handling track"
     (let* ((tu (handling-set (handling-set T 'track 1.0) 'laps 1.0))
            (r (run tu (started tu) (* 60 50))))
-      (assert-equal 'loop (track-name (race-track r)))
+      (assert-equal 'oval (track-name (race-track r)))
       (assert-equal 'finished (race-phase r))
       (for-each (lambda (x) (assert-true (racer-finished x))) (race-rivals r))))
 
@@ -161,7 +161,7 @@
               (assert-equal 0 walls)))))))
 
 (test-group "race: song progression"
-  (test "a full three-lap loop race visits every race section and the coda"
+  (test "a full three-lap race visits every race section and the coda"
     (let* ((tu (handling-set (handling-set T 'track 1.0) 'laps 3.0))
            (r (run tu (started tu) (* 60 130)))
            (log (reverse (conductor-log (race-song r)))))

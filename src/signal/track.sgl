@@ -18,8 +18,7 @@
 ;;; state but the track itself.
 
 (define-library (signal track)
-  (import (sigil core)
-          (sigil struct)
+  (import (sigil struct)
           (sigil math)
           (signal track oval-data)
           (signal track loop-data))
@@ -76,9 +75,11 @@
                n: n length: (vector-ref cum n) step: step samples: samples cumulative: cum
                boost: boost repair: repair)))
 
-    ;; The tracks, in the order of the track knob: 0 the oval (the wide test
-    ;; track), 1 the loop. Each built once, on first use.
-    (define TRACKS '(oval loop))
+    ;; The authoring pipeline retains the oval as a handling test. The
+    ;; prototype loop fails the 0.2 gates and is retired from selection;
+    ;; its data remains available through loop-track for probe regressions.
+    ;; Approved district tracks can be added here after their gates pass.
+    (define TRACKS '(oval))
     (define *built* '())
     (define (track-index-of name)
       (let loop ((ts TRACKS) (i 0)) (cond ((null? ts) 0) ((eq? (car ts) name) i) (else (loop (cdr ts) (+ i 1))))))

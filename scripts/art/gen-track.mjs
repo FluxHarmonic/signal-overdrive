@@ -2,7 +2,9 @@
 // 4096x4096 world, cut into 32x32 tiles, deduplicated into an atlas, and
 // described for the game.
 //
-//   node scripts/art/gen-track.mjs [--track oval|loop] [--preview]
+//   node scripts/art/gen-track.mjs [--track ID | --file tracks/ID.json]
+//     [--preview] [--seed N] [--output DIR]
+//   --draft requires an isolated --output directory and retains red reports.
 //
 // With no --track, every track in TRACKS. Per track NAME, writes:
 //   assets/signal/NAME-atlas.png   the unique tiles, 64 per row (2048 wide)
@@ -32,128 +34,52 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Canvas, C, ramp, bayerOn, BAYER4, rng } from "./lib.mjs";
+import { sampleDefinition, trackDefinition } from "../track/geometry.mjs";
+import { loadTrack } from "../track/format.mjs";
+import { geometryGates, tileGate } from "../track/gates.mjs";
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
+const SOURCE_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
+const option = name => {
+  const index = process.argv.indexOf(name);
+  if (index < 0) return null;
+  if (!process.argv[index + 1] || process.argv[index + 1].startsWith("--")) throw new Error(`missing ${name} value`);
+  return process.argv[index + 1];
+};
+const ROOT = option("--output") ? path.resolve(option("--output")) : SOURCE_ROOT;
+const DRAFT = process.argv.includes("--draft");
+if (DRAFT && ROOT === SOURCE_ROOT) throw new Error("--draft requires an isolated --output directory");
+const SEED = Number(option("--seed") ?? 0);
 const WORLD = 4096, TILE = 32, MAP = WORLD / TILE;
 const STEP = 16;              // centreline sample spacing, texels
 const BARRIER = 14;           // barrier band beyond the road edge
 const RUNOFF = 12;            // dithered run-off beyond the barrier
 const PREVIEW = process.argv.includes("--preview");
-const ONLY = (() => { const i = process.argv.indexOf("--track"); return i >= 0 ? process.argv[i + 1] : null; })();
+const ONLY = option("--track");
+const INPUT = option("--file");
+if (ONLY && INPUT) throw new Error("choose --track or --file");
 
-// A stadium: two straights joined by half circles, sampled as control
-// points for the spline (the same machinery as any other track). It runs
-// east along the bottom straight (y down), so it goes anticlockwise on the
-// map and its bends are left turns.
-function stadium(cx, cy, straight, radius, n) {
-  const pts = [];
-  const per = Math.PI * radius;
-  const total = 2 * straight + 2 * per;
-  for (let k = 0; k < n; k++) {
-    let s = (k / n) * total;
-    if (s < straight) { pts.push([cx - straight / 2 + s, cy + radius]); continue; }
-    s -= straight;
-    if (s < per) { const a = Math.PI / 2 - s / radius; pts.push([cx + straight / 2 + radius * Math.cos(a), cy + radius * Math.sin(a)]); continue; }
-    s -= per;
-    if (s < straight) { pts.push([cx + straight / 2 - s, cy - radius]); continue; }
-    s -= straight;
-    const a = -Math.PI / 2 - s / radius;
-    pts.push([cx - straight / 2 + radius * Math.cos(a), cy + radius * Math.sin(a)]);
-  }
-  return pts;
-}
-
-const TRACKS = {
-  // the test track: wide and gentle, two straights and two long bends
-  oval: {
-    hw: 92,
-    control: stadium(2048, 2048, 1900, 740, 40),
-    boost: [[0.10, -0.5, 0.1], [0.58, -0.1, 0.5]],
-    repair: [0.86, 0.98, -1.0, -0.45],
-    // ICE: a glitch patch on the top straight's left half (there is room to dodge it)
-    ice: [[0.60, 0.645, -0.95, -0.05]],
-    puddles: 60,
-  },
-  // the first track, widened: curves of every tightness and the hairpin
-  loop: {
-    hw: 78,
-    control: [
-      [700, 3560], [1500, 3580], [2300, 3560], [2950, 3480],
-      [3420, 3200], [3620, 2720], [3560, 2250],          // long right-hander, north
-      [3220, 1960], [3320, 1560], [3660, 1180],          // the S
-      [3640, 640], [3260, 380], [2780, 470],             // sweeping left over the top
-      [2520, 820], [2440, 1350], [2330, 1720],           // south toward the hairpin
-      [2120, 1860], [1920, 1720], [1880, 1350],          // the hairpin
-      [1860, 900], [1640, 540], [1180, 420],             // back north, then west
-      [720, 560], [470, 1000], [560, 1520],              // down the west side
-      [940, 1830], [1060, 2240], [760, 2620],            // the chicane
-      [440, 2980], [430, 3360],                          // the last bend onto the straight
-    ],
-    boost: [[0.050, -0.55, 0.05], [0.205, -0.10, 0.55], [0.560, -0.30, 0.30], [0.760, 0.00, 0.60]],
-    repair: [0.905, 0.985, -1.0, -0.42],
-    ice: [[0.33, 0.355, 0.0, 0.9], [0.70, 0.725, -0.9, 0.0]],
-    puddles: 70,
-  },
-};
-
-// ---- the spline -------------------------------------------------------------------------
-
-// Centripetal Catmull-Rom, closed.
-function catmull(p0, p1, p2, p3, t) {
-  const d = (a, b) => Math.pow(Math.hypot(b[0] - a[0], b[1] - a[1]), 0.5) || 1e-6;
-  const t0 = 0, t1 = t0 + d(p0, p1), t2 = t1 + d(p1, p2), t3 = t2 + d(p2, p3);
-  const u = t1 + (t2 - t1) * t;
-  const lerp = (a, b, ta, tb) => [0, 1].map((k) => ((tb - u) * a[k] + (u - ta) * b[k]) / (tb - ta));
-  const a1 = lerp(p0, p1, t0, t1), a2 = lerp(p1, p2, t1, t2), a3 = lerp(p2, p3, t2, t3);
-  const b1 = lerp(a1, a2, t0, t2), b2 = lerp(a2, a3, t1, t3);
-  return lerp(b1, b2, t1, t2);
-}
-
-// Resample at exactly STEP texels of arc (the last gap is whatever closes
-// the loop, within STEP).
-function resample(pts) {
-  const out = [pts[0]];
-  let carry = 0;
-  for (let i = 0; i < pts.length; i++) {
-    const a = pts[i], b = pts[(i + 1) % pts.length];
-    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    let s = STEP - carry;
-    while (s <= len) {
-      const t = s / len;
-      out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
-      s += STEP;
-    }
-    carry = len - (s - STEP);
-  }
-  const last = out[out.length - 1];
-  if (Math.hypot(last[0] - out[0][0], last[1] - out[0][1]) < STEP * 0.5) out.pop();
-  return out;
-}
+// Track sources live in tracks/; retired layouts remain regression fixtures.
+const TRACKS = Object.fromEntries(
+  (INPUT ? [path.resolve(INPUT)] : fs.readdirSync(path.join(SOURCE_ROOT, "tracks"))
+    .filter(file => file.endsWith(".json")).sort().map(file => path.join(SOURCE_ROOT, "tracks", file)))
+    .map(file => {
+      const source = loadTrack(file);
+      return [source.id, { ...trackDefinition(source, SEED), source }];
+    })
+);
 
 function build(name, def) {
-  const HW = def.hw;
-  const n = def.control.length;
-  const dense = [];
-  for (let i = 0; i < n; i++) {
-    const p = (k) => def.control[(i + k + n) % n];
-    for (let j = 0; j < 200; j++) dense.push(catmull(p(-1), p(0), p(1), p(2), j / 200));
-  }
-  const P = resample(dense);
-  const N = P.length;
-  const S = [0];
-  for (let i = 1; i <= N; i++) S.push(S[i - 1] + Math.hypot(P[i % N][0] - P[i - 1][0], P[i % N][1] - P[i - 1][1]));
-  const LENGTH = S[N];
-  const TAN = P.map((_, i) => {
-    const a = P[(i - 1 + N) % N], b = P[(i + 1) % N];
-    const l = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    return [(b[0] - a[0]) / l, (b[1] - a[1]) / l];
-  });
-  // curvature: + turning right on the map (clockwise), smoothed; the racing
-  // line sits toward the inside of each bend (+ offset is right of travel)
-  const CURV = P.map((_, i) => { const a = TAN[(i - 1 + N) % N], b = TAN[(i + 1) % N]; return (a[0] * b[1] - a[1] * b[0]) / (2 * STEP); });
-  const smooth = (arr, r) => arr.map((_, i) => { let s = 0; for (let k = -r; k <= r; k++) s += arr[(i + k + N) % N]; return s / (2 * r + 1); });
-  const CURV_S = smooth(smooth(CURV, 12), 12);
-  const LINE = smooth(CURV_S.map((k) => Math.max(-0.62, Math.min(0.62, k * 260))), 20);
+  const sampled = sampleDefinition(def);
+  const { P, N, S, LENGTH, TAN, CURV_S, LINE, HW } = sampled;
+  const gates = geometryGates(def.source, sampled);
+  const reportDir = path.join(ROOT, "build/track");
+  fs.mkdirSync(reportDir, { recursive: true });
+  const writeReport = () => fs.writeFileSync(path.join(reportDir, `${name}-generated.json`),
+    JSON.stringify({ id: name, seed: def.seed, selectedLayouts: def.selectedLayouts,
+      draft: DRAFT, gates }, null, 2) + "\n");
+  writeReport();
+  const failed = Object.entries(gates).filter(([, gate]) => !gate.pass).map(([key]) => key);
+  if (failed.length && !DRAFT) throw new Error(`${name}: gates failed: ${failed.join(", ")}; see ${reportDir}`);
 
   // ---- checks: the loop must be drivable --------------------------------------------
   const minR = Math.min(...CURV_S.map((k) => Math.abs(k) > 1e-9 ? 1 / Math.abs(k) : 1e9));
@@ -326,6 +252,9 @@ function build(name, def) {
     index[ty * MAP + tx] = id;
   }
   const PER_ROW = 64, ROWS = Math.ceil(order.length / PER_ROW);
+  gates.tiles = tileGate(order.length);
+  writeReport();
+  if (!gates.tiles.pass) throw new Error(`${name}: ${order.length} unique tiles exceed the 4096 tile budget`);
   if (ROWS * TILE > 2048) throw new Error(`${name}: ${order.length} tiles need an atlas ${ROWS * TILE} tall, over WebGL2's guaranteed 2048`);
   const atlas = new Canvas(PER_ROW * TILE, ROWS * TILE), avg = new Canvas(PER_ROW, ROWS);
   order.forEach((t, id) => {
@@ -377,7 +306,6 @@ function build(name, def) {
 ;;; half-width. Its textures are assets/signal/${name}-{atlas,map,avg}.png.
 
 (define-library (signal track ${name}-data)
-  (import (sigil core))
   (export ${name}-track-data)
   (begin
     (define CHUNKS
@@ -418,4 +346,5 @@ function glyph(zs, lane) {
   return digit[(4 - gy) * 3 + (2 - gx)] === "1";
 }
 
+if (ONLY && !TRACKS[ONLY]) throw new Error(`unknown track ${ONLY}`);
 for (const [name, def] of Object.entries(TRACKS)) if (!ONLY || ONLY === name) build(name, def);

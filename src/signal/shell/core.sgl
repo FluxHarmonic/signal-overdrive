@@ -451,7 +451,7 @@
             ;; worklet-sab; a worklet only: worklet-msg; else scriptprocessor)
             ((and (> (string-length kv) 11) (string=? (substring kv 0 11) "audio-mode="))
              (set! *audio-mode* (substring kv 11 (string-length kv))))
-            ;; ?track=oval|loop as well as ?track=0|1
+            ;; Development shortcut: registered names as well as indices.
             ((and (> (string-length kv) 6) (string=? (substring kv 0 6) "track=")
                   (memq (string->symbol (substring kv 6 (string-length kv))) TRACKS))
              (core-param! (string-append "track=" (number->string (track-index-of (string->symbol (substring kv 6 (string-length kv))))))))

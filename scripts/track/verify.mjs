@@ -1,0 +1,36 @@
+import fs from "node:fs";
+import path from "node:path";
+import assert from "node:assert/strict";
+import { DEFAULTS } from "./gates.mjs";
+
+const run = process.argv[2];
+if (!run) throw new Error("usage: verify.mjs <pipeline-output-directory>");
+const json = file => JSON.parse(fs.readFileSync(path.join(run, file), "utf8"));
+const status = file => Number(fs.readFileSync(path.join(run, file), "utf8").trim());
+const contract = json("song-contract.json");
+for (const [key, value] of Object.entries(contract.camera)) assert.equal(value, DEFAULTS[key], `runtime default ${key} drifted`);
+for (const result of json("current-gates.json")) {
+  for (const [name, gate] of Object.entries(result.gates)) assert.equal(gate.pass, true, `${result.id} ${name}`);
+}
+for (const id of ["oval", "quayside", "basin"]) {
+  assert.equal(status(`${id}-ai-status`), 0, `${id} AI process`);
+  assert.equal(status(`${id}-art-status`), 0, `${id} art process`);
+  const ai = json(`${id}-ai.json`);
+  assert.equal(ai.pass, true, `${id} AI gate`);
+  assert.equal(ai.threeLapsAllRacers, true);
+  assert.equal(ai.parGate, true);
+  assert.equal(ai.lapTicks.length, 3);
+  assert.ok(ai.landings.some(landing => landing.mark === "results"), "probe must include the coda exit");
+  const artifact = json(`art/build/track/${id}-generated.json`);
+  for (const [name, gate] of Object.entries(artifact.gates)) assert.equal(gate.pass, true, `${id} generated ${name}`);
+  assert.ok(artifact.gates.tiles.count > 0);
+}
+assert.equal(status("oval-stall-status"), 1, "stall must be a caught gate failure, not setup/timeout");
+assert.equal(json("oval-stall.json").threeLapsAllRacers, false);
+assert.equal(json("oval-stall.json").pass, false);
+assert.equal(status("too-short-ai-status"), 1);
+assert.equal(json("too-short-ai.json").threeLapsAllRacers, true);
+assert.equal(json("too-short-ai.json").parGate, false);
+assert.equal(json("too-short-ai.json").pass, false);
+assert.ok(json("preview/oval-report.json").actual.landings.some(landing => landing.mark === "results"));
+console.log("PASS: geometry, every seeded lane combination, actual AI/par/coda, tile counts, driven preview, stalled-AI and AI-par sabotage");
