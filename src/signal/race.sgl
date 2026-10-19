@@ -96,7 +96,7 @@
         ;; heading from the tangent: forward is (sin h, -cos h)
         (machine (make-machine (car p) (cadr p) heading) hint: (track-index-at t s) s: s)))
 
-    ;; The track the tuning names (the track knob: 0 the oval, 1 the loop).
+    ;; The track the tuning names, clamped to the current playable catalog.
     (define (tuning-track tuning)
       (let ((i (exact (round (race-tuning-ref tuning 'track)))))
         (track-named (list-ref TRACKS (max 0 (min (- (length TRACKS) 1) i))))))

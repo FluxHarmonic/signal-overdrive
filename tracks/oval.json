@@ -1,0 +1,32 @@
+{
+  "version":1,
+  "id":"oval",
+  "title":"Handling oval",
+  "district":"docklands",
+  "role":"test",
+  "world":{"width":5120,"height":5120},
+  "geometry": {
+    "type":"stadium", "center":[2048,2048], "straight":1900,
+    "radius":740, "points":40, "halfWidth":92
+  },
+  "zones": {
+    "boost":[[0.1,-0.5,0.1], [0.58,-0.1,0.5]],
+    "repair":[0.86,0.98,-1,-0.45],
+    "ice":[[0.6,0.645,-0.95,-0.05]]
+  },
+  "iceLayers":[],
+  "sections":[{"id":"oval", "from":0, "to":1, "label":"Handling fixture"}],
+  "song": {
+    "id":"carrier", "cues":"music/carrier/cues.sgl", "bpm":140,
+    "sections":[
+      {"mark":"lap1", "lap":1, "at":0},
+      {"mark":"lap2", "lap":2, "at":0},
+      {"mark":"hold", "lap":2, "at":0.5},
+      {"mark":"fill", "targetLap":3, "targetAt":0, "leadBars":2},
+      {"mark":"traced", "lap":3, "at":0},
+      {"mark":"uplink", "lap":4, "at":0}
+    ]
+  },
+  "musicZones":[],
+  "decoration":{"puddles":60}
+}

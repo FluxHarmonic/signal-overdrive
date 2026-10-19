@@ -104,8 +104,11 @@
 
     (define (show-track! name)
       (unless (eq? name *shown*)
-        (let ((e (or (assq name *tracks*) (car *tracks*))))
-          (mode7-set-world! (cadr e) (caddr e) (cadddr e) 32.0 64.0 128.0 3.2)
+        (let* ((e (or (assq name *tracks*) (car *tracks*)))
+               (t (track-named (car e))))
+          (mode7-set-world! (cadr e) (caddr e) (cadddr e) 32.0
+                            (/ (track-world-width t) 32.0)
+                            (/ (track-world-height t) 32.0) 3.2)
           (set! *shown* name))))
 
     ;; The post pass's palette and spread, when they change.

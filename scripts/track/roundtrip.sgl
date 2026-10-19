@@ -1,0 +1,42 @@
+;;; Verify that the data bridge drives exactly the samples/zones the painter
+;;; compiled, using its real generated runtime modules on the module path.
+(import (sigil io)
+        (signal track oval-data)
+        (signal track quayside-data)
+        (signal track basin-data))
+
+(define arguments
+  (let find ((remaining (cdr (command-line))))
+    (cond
+      ((null? remaining) '())
+      ((string=? (car remaining) "--") (cdr remaining))
+      (else (find (cdr remaining))))))
+
+(for-each
+  (lambda (file)
+    (let* ((data (call-with-input-file file read))
+           (name (car data))
+           (actual (case name
+                     ((oval) (oval-track-data))
+                     ((quayside) (quayside-track-data))
+                     ((basin) (basin-track-data))
+                     (else (error "unsupported roundtrip fixture" name))))
+           (chunks (list-ref data 6))
+           (samples (make-vector (apply + (map vector-length chunks)) 0.0)))
+      (let loop ((remaining chunks) (offset 0))
+        (unless (null? remaining)
+          (let ((chunk (car remaining)))
+            (let copy ((i 0))
+              (when (< i (vector-length chunk))
+                (vector-set! samples (+ offset i) (vector-ref chunk i))
+                (copy (+ i 1))))
+            (loop (cdr remaining) (+ offset (vector-length chunk))))))
+      (unless (equal? actual
+                      (list name samples (list-ref data 2) (list-ref data 3)
+                            (list-ref data 4) (list-ref data 5)
+                            (list-ref data 7) (list-ref data 8)))
+        (error "painted runtime differs from AI probe data" name))
+      (display "PASS runtime roundtrip: ")
+      (display name)
+      (newline)))
+  arguments)

@@ -108,7 +108,7 @@ The tests are in `test/`. Run one file with
 - `src/signal/mode7/` is the Mode 7 camera and renderer: a fragment shader
   that projects the tiled track toward the horizon.
 - `src/signal/handling.sgl` is one machine's handling, `track.sgl` the
-  tracks, `race.sgl` the grid, laps, rivals and the finish, and
+  track probes and catalog, `race.sgl` the grid, laps, rivals and the finish, and
   `scene.sgl` the frame: the Mode 7 pass, the palette and dither pass,
   and the HUD.
 - `src/signal/music/` and `music/` are the soundtrack. The songs are
@@ -116,6 +116,9 @@ The tests are in `test/`. Run one file with
   and `docs/CONDUCTOR.md` describes how the race and the song keep time.
 - `scripts/art/` holds the generators for every image in `assets/signal/`
   (Node, no dependencies).
+- `tracks/` holds track authoring data. [The authoring guide](docs/TRACKS.md)
+  covers the map/song preview and gates. The prototype loop is retired;
+  the oval remains a handling test while the new district tracks are authored.
 
 ### Development tools
 
@@ -136,7 +139,7 @@ so a player can't trip them by accident.
   that fires each trigger. F2 and F6 to F10 do the same from the keyboard.
   `docs/effects.html` describes the effects.
 - P switches the palette and / toggles the dither, in every build.
-- Other parameters: `?track=loop` (a second test track, with a hairpin),
+- Other parameters: `?track=oval` (the handling test track),
   `?start` (skip the title), `?card=0` (skip the card before it), `?mute`,
   `?autopilot`, and `?touch=zones|drag|stick`.
 

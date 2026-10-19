@@ -22,7 +22,7 @@
 ;;;
 ;;; Usage, inside a with-3d-pass on a 'depth target:
 ;;;   (mode7-init! w h)                      once, after gfx-setup
-;;;   (mode7-set-world! atlas map avg tile per-row map-tiles)
+;;;   (mode7-set-world! atlas map avg tile map-width map-height far-end)
 ;;;   (mode7-set-sky! sky layer-h rate-far rate-mid rate-near)
 ;;;   (mode7-set-look! alist)                fog, colours, the far fade
 ;;;   (mode7-draw-ground! cam)               a (signal mode7 camera) cam
@@ -34,8 +34,7 @@
 ;;; seed of a substratic-mode7 package.
 
 (define-library (signal mode7 render)
-  (import (sigil core)
-          (sigil graphics)
+  (import (sigil graphics)
           (signal mode7 camera))
 
   (export mode7-init! mode7-set-world! mode7-set-sky! mode7-set-look! mode7-draw-ground!
@@ -56,7 +55,7 @@ void main() {
     ;; cam: x y height heading. proj: focal cy pitch horizon. view: w h,
     ;; z the time in seconds. fog: start end (along the view, texels),
     ;; z on, w the far fade's start (texels per pixel). world: tile size,
-    ;; map size in tiles, atlas tiles per row, the far fade's end. sky:
+    ;; map width and height in tiles, the far fade's end. sky:
     ;; layer height, the three rates. Colours 0..1.
     ;; The effects hooks (all off while fx is zero, the default):
     ;;   fx[0]  x the horizon bend in rows (+ dips), y the tile scramble
@@ -219,11 +218,11 @@ void main() {
   float tile = world.x;
   vec2 tc = floor(g / tile);
   int idx = 0;
-  if (tc.x >= 0.0 && tc.y >= 0.0 && tc.x < world.y && tc.y < world.y) {
+  if (tc.x >= 0.0 && tc.y >= 0.0 && tc.x < world.y && tc.y < world.z) {
     vec4 m = texelFetch(tmap, ivec2(tc), 0);
     idx = int(m.r * 255.0 + 0.5) + 256 * int(m.g * 255.0 + 0.5);
   }
-  int per = int(world.z);
+  int per = textureSize(tavg, 0).x;
   // the glitch's scrambled tiles: a share of the tiles show another
   if (fx[0].y > 0.0 && hash2(tc + vec2(fx[0].z * 1.7, fx[0].z)) < fx[0].y * 0.3) {
     ivec2 ts = textureSize(tavg, 0);
@@ -393,17 +392,17 @@ void main() {
 
     (define (nearest! tex) (set-texture-sampling! tex 'nearest 'clamp) tex)
 
-    ;; tile: texels a side; per-row: tiles per atlas row; map-tiles: the
-    ;; index map's size in tiles (square).
-    (define (mode7-set-world! atlas tmap tavg tile per-row map-tiles far-end)
+    ;; tile: texels a side; map width/height: index-map dimensions in tiles.
+    ;; Atlas row count comes from the average texture's actual width.
+    (define (mode7-set-world! atlas tmap tavg tile map-width map-height far-end)
       (set! *atlas* (nearest! atlas))
       (set! *map* (nearest! tmap))
       (set! *avg* (nearest! tavg))
-      (set! *world-args* (list tile map-tiles per-row))
+      (set! *world-args* (list tile map-width map-height))
       (mode7-set-far! far-end))
 
     ;; Where the far fade reaches the tile's average: texels per pixel.
-    (define *world-args* '(32.0 128.0 64.0))
+    (define *world-args* '(32.0 160.0 160.0))
     (define (mode7-set-far! far-end)
       (set-pipeline-uniform! *ground* 'world
                              (v4 (car *world-args*) (cadr *world-args*) (caddr *world-args*) far-end)))
