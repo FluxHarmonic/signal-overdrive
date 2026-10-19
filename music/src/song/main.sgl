@@ -22,7 +22,7 @@
           (motif tune) (motif tune player)
           (carrier render) (carrier analysis)
           (only (race main) game-inserts)
-          (song kit) (song carrier-a) (song carrier-b) (song uplink) (song night-wire))
+          (song kit) (song carrier-a) (song carrier-b) (song carrier-c) (song uplink) (song night-wire))
   (export song-main)
   (begin
     (define (say . xs) (for-each display xs) (newline))
@@ -32,6 +32,7 @@
     (define SONGS
       (list (list 'carrier-a carrier-a-text carrier-a-cues-text CARRIER-A-SECTIONS)
             (list 'carrier-b carrier-b-text carrier-b-cues-text CARRIER-B-SECTIONS)
+            (list 'carrier-c carrier-c-text carrier-c-cues-text CARRIER-C-SECTIONS)
             (list 'uplink uplink-text uplink-cues-text UPLINK-SECTIONS)
             (list 'night-wire night-wire-text night-wire-cues-text NIGHT-WIRE-SECTIONS)))
     (define (song-of id)
