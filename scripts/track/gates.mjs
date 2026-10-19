@@ -1,4 +1,5 @@
-import { WORLD, BARRIER } from "./geometry.mjs";
+import { BARRIER } from "./geometry.mjs";
+import { worldSize } from "./format.mjs";
 
 // Default race camera at top speed, no transient boost/drop kick. Matches
 // (signal scene), (signal tuning) and the machine's wall-collision diameter.
@@ -125,14 +126,15 @@ export function geometryGates(source, g, c = DEFAULTS) {
     if (ds < clearance * 2) continue;
     separation = Math.min(separation, Math.hypot(g.P[i][0] - g.P[j][0], g.P[i][1] - g.P[j][1]));
   }
-  const margin = Math.min(...g.P.flatMap(([x, y]) => [x, y, WORLD - x, WORLD - y]));
+  const world = worldSize(source);
+  const margin = Math.min(...g.P.flatMap(([x, y]) => [x, y, world.width - x, world.height - y]));
   return {
     radius: { pass: minRadius >= g.HW * 1.6, minimum: minRadius, required: g.HW * 1.6 },
     trueRadius: { pass: g.TRUE_MIN_RADIUS >= g.HW * 1.6, minimum: g.TRUE_MIN_RADIUS,
       required: g.HW * 1.6, witness: g.TRUE_RADIUS_WITNESS,
       method: "unsmoothed circumradius of consecutive dense spline samples (200 samples/control interval)" },
     separation: { pass: separation >= clearance, minimum: separation, required: clearance },
-    world: { pass: margin >= g.HW + 200, margin, required: g.HW + 200 },
+    world: { pass: margin >= g.HW + 200, ...world, margin, required: g.HW + 200 },
     readability: readability(g, c),
     freeLane: freeLane(source, c),
   };

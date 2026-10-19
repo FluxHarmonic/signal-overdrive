@@ -27,7 +27,7 @@ export function runtimeData(source, seed = 0) {
   }
   return `(${source.id} ${source.role} ${numberText(STEP)}\n` +
     [zones.boost, zones.repair, zones.ice].map(zs => `(${zs.map(list).join(" ")})`).join("\n") +
-    `\n(${chunks.join("\n")}))\n`;
+    `\n(${chunks.join("\n")}) ${def.world.width} ${def.world.height})\n`;
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {

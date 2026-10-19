@@ -27,7 +27,9 @@
     },
     "world": {
       "pass": true,
-      "margin": 358.13929579013666,
+      "width": 5120,
+      "height": 5120,
+      "margin": 358.14078069115635,
       "required": 292
     },
     "readability": {
@@ -250,6 +252,10 @@
   "actual": {
     "id": "oval",
     "activeSong": "carrier",
+    "world": {
+      "width": 5120,
+      "height": 5120
+    },
     "pass": true,
     "threeLapsAllRacers": true,
     "parGate": true,
@@ -352,6 +358,10 @@
   },
   "combinedICE": {
     "id": "oval",
+    "world": {
+      "width": 5120,
+      "height": 5120
+    },
     "crossings": [
       {
         "lap": 1,

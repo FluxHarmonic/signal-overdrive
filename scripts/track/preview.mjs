@@ -1,7 +1,7 @@
 // Fast, file-only authoring preview; no server, browser or game loop required.
 import fs from "node:fs";
 import path from "node:path";
-import { loadTrack } from "./format.mjs";
+import { loadTrack, worldSize } from "./format.mjs";
 import { sampleDefinition, trackDefinition } from "./geometry.mjs";
 import { DEFAULTS, geometryGates, parGate, pointAt } from "./gates.mjs";
 
@@ -34,13 +34,17 @@ export function timeline(source, g, contract) {
 }
 
 export function previewSvg(source, g, song, gates, driven = null, combined = null) {
+  const world = worldSize(source);
+  const mapScale = Math.min(600 / world.width, 600 / world.height);
   const height = driven ? 1400 : 1100;
   const parts = [`<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="${height}" viewBox="0 0 1200 ${height}">`,
     '<style>text{font:16px monospace;fill:#e3e3ec}.small{font-size:13px}.title{font-size:28px}</style>',
     `<rect width="1200" height="${height}" fill="#151321"/>`,
     `<text class="title" x="32" y="44">${escape(source.title)} · ${escape(source.id)}</text>`,
     `<text x="32" y="76">${g.LENGTH.toFixed(1)} texels · ${song.lapSeconds.toFixed(2)} s at top speed · ${source.song.bpm} BPM</text>`,
-    '<g transform="translate(20 100) scale(.15)">'];
+    `<text class="small" x="32" y="100">World ${world.width} × ${world.height} texels</text>`,
+    `<g transform="translate(20 115) scale(${mapScale})">`,
+    `<rect width="${world.width}" height="${world.height}" fill="none" stroke="#333144" stroke-width="8"/>`];
   const polyline = (points, width, color, extra = "") => `<polyline points="${points.map(p => `${p[0].toFixed(2)},${p[1].toFixed(2)}`).join(" ")}" fill="none" stroke="${color}" stroke-width="${width}" ${extra}/>`;
   const range = (from, to, u = 0) => {
     const points = [];
@@ -127,6 +131,7 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   const driven = drivenPath ? JSON.parse(fs.readFileSync(drivenPath, "utf8")) : null;
   const combined = combinedPath ? JSON.parse(fs.readFileSync(combinedPath, "utf8")) : null;
   if (driven && (driven.id !== source.id || driven.activeSong !== contract.id)) throw new Error("AI report belongs to a different track or song");
+  if (driven && JSON.stringify(driven.world) !== JSON.stringify(worldSize(source))) throw new Error("AI world dimensions disagree with track");
   if (combined && (!driven || combined.id !== source.id
     || JSON.stringify(combined.crossings) !== JSON.stringify(driven.crossings))) throw new Error("combined ICE report does not match the actual track/lap timing");
   const g = sampleDefinition(trackDefinition(source));

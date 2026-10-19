@@ -4,6 +4,7 @@
   "title":"Handling oval",
   "district":"docklands",
   "role":"test",
+  "world":{"width":5120,"height":5120},
   "geometry": {
     "type":"stadium", "center":[2048,2048], "straight":1900,
     "radius":740, "points":40, "halfWidth":92

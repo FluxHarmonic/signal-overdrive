@@ -8,7 +8,6 @@
 ;;; half-width. Its textures are assets/signal/oval-{atlas,map,avg}.png.
 
 (define-library (signal track oval-data)
-  (import (sigil core))
   (export oval-track-data)
   (begin
     (define CHUNKS
@@ -608,9 +607,9 @@
                     (vector-set! v (+ k i) (vector-ref c i))
                     (copy (+ i 1))))
                 (loop (cdr cs) (+ k (vector-length c))))))))
-    ;; (name samples step boost repair ice)
+    ;; (name samples step boost repair ice world-width world-height)
     (define (oval-track-data)
       (list 'oval (join CHUNKS) 16.0
             '((844.827 944.827 -0.5 0.1) (4899.995 4999.995 -0.1 0.5))
             '((7265.51 8279.302 -1.0 -0.45))
-            '((5068.961 5449.133 -0.95 -0.05))))))
+            '((5068.961 5449.133 -0.95 -0.05)) 5120 5120))))

@@ -1,0 +1,104 @@
+{
+  "id": "loop",
+  "world": {
+    "width": 5120,
+    "height": 5120
+  },
+  "crossings": [
+    {
+      "lap": 1,
+      "tick": 467
+    },
+    {
+      "lap": 2,
+      "tick": 2142
+    },
+    {
+      "lap": 3,
+      "tick": 3766
+    },
+    {
+      "lap": 4,
+      "tick": 5385
+    }
+  ],
+  "pass": false,
+  "required": 27,
+  "narrowest": 7.799999999999998,
+  "checkedStates": 66,
+  "transitions": 0,
+  "witness": {
+    "tick": 3909,
+    "bar": 38,
+    "lap": 3,
+    "s": 0.33,
+    "layouts": [],
+    "tracerCenter": -0.5,
+    "tracerLive": true,
+    "active": [
+      [
+        0,
+        0.9
+      ],
+      [
+        -0.9358974358974359,
+        -0.0641025641025641
+      ]
+    ],
+    "activeOwners": [
+      "static/0"
+    ],
+    "transition": false
+  },
+  "firstFailure": {
+    "tick": 3909,
+    "bar": 38,
+    "lap": 3,
+    "s": 0.33,
+    "layouts": [],
+    "tracerCenter": -0.5641025641025641,
+    "tracerLive": true,
+    "active": [
+      [
+        0,
+        0.9
+      ],
+      [
+        -1,
+        -0.1282051282051282
+      ]
+    ],
+    "activeOwners": [
+      "static/0"
+    ],
+    "transition": false,
+    "width": 10
+  },
+  "firstTracerFirewallFailure": null,
+  "laps": [
+    {
+      "lap": 1,
+      "fromTick": 467,
+      "toTick": 2142,
+      "narrowest": 78,
+      "pass": true
+    },
+    {
+      "lap": 2,
+      "fromTick": 2142,
+      "toTick": 3766,
+      "narrowest": 78,
+      "pass": true
+    },
+    {
+      "lap": 3,
+      "fromTick": 3766,
+      "toTick": 5385,
+      "narrowest": 7.799999999999998,
+      "pass": false
+    }
+  ],
+  "timing": "actual simulation lap crossings; exact conductor bar ticks",
+  "policySource": "conservative unbound live-ICE contract (all bar phases)",
+  "runtimeParity": "automatic live ICE scheduling is not implemented in the current game; runtime integration must use this policy or export an equivalent exhaustive trace"
+}

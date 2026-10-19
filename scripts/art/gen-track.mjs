@@ -1,5 +1,5 @@
 // gen-track.mjs - a track: a closed spline painted texel by texel into a
-// 4096x4096 world, cut into 32x32 tiles, deduplicated into an atlas, and
+// per-track rectangular world, cut into 32x32 tiles, deduplicated into an atlas, and
 // described for the game.
 //
 //   node scripts/art/gen-track.mjs [--track ID | --file tracks/ID.json]
@@ -8,7 +8,7 @@
 //
 // With no --track, every track in TRACKS. Per track NAME, writes:
 //   assets/signal/NAME-atlas.png   the unique tiles, 64 per row (2048 wide)
-//   assets/signal/NAME-map.png     128x128, one texel per tile: R + 256*G is
+//   assets/signal/NAME-map.png     world.width/32 by world.height/32: R + 256*G is
 //                                 the tile's index in the atlas
 //   assets/signal/NAME-avg.png     the atlas at one texel per tile (each
 //                                 tile's average colour): what the ground
@@ -49,7 +49,7 @@ const ROOT = option("--output") ? path.resolve(option("--output")) : SOURCE_ROOT
 const DRAFT = process.argv.includes("--draft");
 if (DRAFT && ROOT === SOURCE_ROOT) throw new Error("--draft requires an isolated --output directory");
 const SEED = Number(option("--seed") ?? 0);
-const WORLD = 4096, TILE = 32, MAP = WORLD / TILE;
+const TILE = 32;
 const STEP = 16;              // centreline sample spacing, texels
 const BARRIER = 14;           // barrier band beyond the road edge
 const RUNOFF = 12;            // dithered run-off beyond the barrier
@@ -69,13 +69,18 @@ const TRACKS = Object.fromEntries(
 );
 
 function build(name, def) {
+  const { width: WIDTH, height: HEIGHT } = def.world;
+  const MAP_W = WIDTH / TILE, MAP_H = HEIGHT / TILE;
   const sampled = sampleDefinition(def);
   const { P, N, S, LENGTH, TAN, CURV_S, LINE, HW } = sampled;
   const gates = geometryGates(def.source, sampled);
   const reportDir = path.join(ROOT, "build/track");
   fs.mkdirSync(reportDir, { recursive: true });
   const writeReport = () => fs.writeFileSync(path.join(reportDir, `${name}-generated.json`),
-    JSON.stringify({ id: name, seed: def.seed, selectedLayouts: def.selectedLayouts,
+    JSON.stringify({ id: name, seed: def.seed, world: def.world,
+      canvasBytes: WIDTH * HEIGHT * 4, mapTiles: { width: MAP_W, height: MAP_H },
+      memory: { maxRSSKiB: process.resourceUsage().maxRSS, externalBytes: process.memoryUsage().external },
+      selectedLayouts: def.selectedLayouts,
       draft: DRAFT, gates }, null, 2) + "\n");
   writeReport();
   const failed = Object.entries(gates).filter(([, gate]) => !gate.pass).map(([key]) => key);
@@ -91,7 +96,7 @@ function build(name, def) {
     const d = Math.hypot(P[i][0] - P[j][0], P[i][1] - P[j][1]);
     if (d < clear) throw new Error(`${name}: samples ${i} and ${j} are ${d.toFixed(0)} apart (< ${clear})`);
   }
-  for (const [x, y] of P) if (x < HW + 200 || y < HW + 200 || x > WORLD - HW - 200 || y > WORLD - HW - 200)
+  for (const [x, y] of P) if (x < HW + 200 || y < HW + 200 || x > WIDTH - HW - 200 || y > HEIGHT - HW - 200)
     throw new Error(`${name}: the track leaves the world at ${x.toFixed(0)},${y.toFixed(0)}`);
   console.log(`${name}: ${N} samples, length ${LENGTH.toFixed(0)}, half-width ${HW}, tightest radius ${minR.toFixed(0)}`);
 
@@ -105,17 +110,17 @@ function build(name, def) {
   const inZone = (z, s, u) => { let ds = s - z[0]; if (ds < 0) ds += LENGTH; return ds <= z[1] - z[0] && u >= z[2] && u <= z[3]; };
 
   // ---- the nearest sample, fast ---------------------------------------------------------
-  const CELL = 128, GRID = WORLD / CELL;
-  const buckets = Array.from({ length: GRID * GRID }, () => []);
+  const CELL = 128, GRID_W = Math.ceil(WIDTH / CELL), GRID_H = Math.ceil(HEIGHT / CELL);
+  const buckets = Array.from({ length: GRID_W * GRID_H }, () => []);
   for (let i = 0; i < N; i++) {
     const gx = Math.floor(P[i][0] / CELL), gy = Math.floor(P[i][1] / CELL);
     for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
       const x = gx + dx, y = gy + dy;
-      if (x >= 0 && y >= 0 && x < GRID && y < GRID) buckets[y * GRID + x].push(i);
+      if (x >= 0 && y >= 0 && x < GRID_W && y < GRID_H) buckets[y * GRID_W + x].push(i);
     }
   }
   function locate(x, y) {
-    const b = buckets[Math.floor(y / CELL) * GRID + Math.floor(x / CELL)];
+    const b = buckets[Math.floor(y / CELL) * GRID_W + Math.floor(x / CELL)];
     if (!b || b.length === 0) return null;
     let best = -1, bd = Infinity;
     for (const i of b) { const d = (P[i][0] - x) ** 2 + (P[i][1] - y) ** 2; if (d < bd) { bd = d; best = i; } }
@@ -132,11 +137,11 @@ function build(name, def) {
   }
 
   // ---- paint ---------------------------------------------------------------------------
-  const world = new Canvas(WORLD, WORLD);
+  const world = new Canvas(WIDTH, HEIGHT);
   const R = rng(7);
   const PUDDLES = [];
   while (PUDDLES.length < def.puddles) {
-    const x = 150 + R() * (WORLD - 300), y = 150 + R() * (WORLD - 300);
+    const x = 150 + R() * (WIDTH - 300), y = 150 + R() * (HEIGHT - 300);
     const l = locate(x, y);
     if (l && Math.abs(l.d) < HW + BARRIER + 90) continue;
     PUDDLES.push({ x, y, rx: 26 + R() * 46, ry: 10 + R() * 18, hue: R() < 0.5 ? "pink" : "cyan" });
@@ -173,8 +178,8 @@ function build(name, def) {
   }
   const jitter = (x, y) => (BAYER4[((y & 3) << 2) | (x & 3)] + 0.5) / 16 - 0.5;
 
-  for (let y = 0; y < WORLD; y++) {
-    for (let x = 0; x < WORLD; x++) {
+  for (let y = 0; y < HEIGHT; y++) {
+    for (let x = 0; x < WIDTH; x++) {
       const l = locate(x + 0.5, y + 0.5);
       if (!l || Math.abs(l.d) > HW + BARRIER + RUNOFF + 2) { world.set(x, y, floor(x, y)); continue; }
       const s = l.s, u = l.d / HW;
@@ -234,7 +239,7 @@ function build(name, def) {
 
   // ---- tiles ------------------------------------------------------------------------------
   const tiles = new Map(), order = [];
-  const index = new Uint16Array(MAP * MAP);
+  const index = new Uint16Array(MAP_W * MAP_H);
   const keyOf = (cv, ox, oy, w) => {
     const rows = [];
     for (let j = 0; j < TILE; j++) rows.push(Buffer.from(cv.px.buffer, ((oy + j) * w + ox) * 4, TILE * 4).toString("base64"));
@@ -245,11 +250,11 @@ function build(name, def) {
   for (let j = 0; j < TILE; j++) for (let i = 0; i < TILE; i++)
     plain.set(i, j, i === 0 || j === 0 ? C.TEAL_DARK : i === 16 && j === 16 ? C.BAR_C : C.BG);
   tiles.set(keyOf(plain, 0, 0, TILE), 0); order.push({ canvas: plain });
-  for (let ty = 0; ty < MAP; ty++) for (let tx = 0; tx < MAP; tx++) {
-    const key = keyOf(world, tx * TILE, ty * TILE, WORLD);
+  for (let ty = 0; ty < MAP_H; ty++) for (let tx = 0; tx < MAP_W; tx++) {
+    const key = keyOf(world, tx * TILE, ty * TILE, WIDTH);
     let id = tiles.get(key);
     if (id === undefined) { id = order.length; tiles.set(key, id); order.push({ tx, ty }); }
-    index[ty * MAP + tx] = id;
+    index[ty * MAP_W + tx] = id;
   }
   const PER_ROW = 64, ROWS = Math.ceil(order.length / PER_ROW);
   gates.tiles = tileGate(order.length);
@@ -266,17 +271,17 @@ function build(name, def) {
     }
     avg.set(id % PER_ROW, Math.floor(id / PER_ROW), [Math.round(r / 1024), Math.round(g / 1024), Math.round(b / 1024)]);
   });
-  const map = new Canvas(MAP, MAP);
-  for (let k = 0; k < MAP * MAP; k++) map.set(k % MAP, Math.floor(k / MAP), [index[k] & 255, index[k] >> 8, 0]);
+  const map = new Canvas(MAP_W, MAP_H);
+  for (let k = 0; k < MAP_W * MAP_H; k++) map.set(k % MAP_W, Math.floor(k / MAP_W), [index[k] & 255, index[k] >> 8, 0]);
   fs.mkdirSync(path.join(ROOT, "assets/signal"), { recursive: true });
   atlas.save(path.join(ROOT, `assets/signal/${name}-atlas.png`));
   map.save(path.join(ROOT, `assets/signal/${name}-map.png`));
   avg.save(path.join(ROOT, `assets/signal/${name}-avg.png`));
-  console.log(`${name}: ${order.length} unique tiles of ${MAP * MAP} (atlas ${atlas.w}x${atlas.h})`);
+  console.log(`${name}: ${order.length} unique tiles of ${MAP_W}x${MAP_H} (atlas ${atlas.w}x${atlas.h})`);
 
   if (PREVIEW) {
     fs.mkdirSync(path.join(ROOT, "docs"), { recursive: true });
-    const k = 8, pv = new Canvas(WORLD / k, WORLD / k);
+    const k = 8, pv = new Canvas(WIDTH / k, HEIGHT / k);
     for (let y = 0; y < pv.h; y++) for (let x = 0; x < pv.w; x++) pv.set(x, y, world.get(x * k + 3, y * k + 3).slice(0, 3));
     for (let i = 0; i < N; i++) {
       const rx = -TAN[i][1], ry = TAN[i][0];
@@ -323,15 +328,16 @@ ${body}        ))
                     (vector-set! v (+ k i) (vector-ref c i))
                     (copy (+ i 1))))
                 (loop (cdr cs) (+ k (vector-length c))))))))
-    ;; (name samples step boost repair ice)
+    ;; (name samples step boost repair ice world-width world-height)
     (define (${name}-track-data)
       (list '${name} (join CHUNKS) ${f(STEP)}
             '(${ZONES.boost.map(zone).join(" ")})
             '(${ZONES.repair.map(zone).join(" ")})
-            '(${ZONES.ice.map(zone).join(" ")})))))
+            '(${ZONES.ice.map(zone).join(" ")}) ${WIDTH} ${HEIGHT}))))
 `;
   fs.mkdirSync(path.join(ROOT, "src/signal/track"), { recursive: true });
   fs.writeFileSync(path.join(ROOT, `src/signal/track/${name}-data.sgl`), src);
+  writeReport();
 }
 
 // 3x5 hex digits stamped along the repair lane, read along the direction of travel.

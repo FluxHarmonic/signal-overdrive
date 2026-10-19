@@ -1,5 +1,9 @@
 {
   "id": "basin",
+  "world": {
+    "width": 5120,
+    "height": 5120
+  },
   "crossings": [
     {
       "lap": 1,

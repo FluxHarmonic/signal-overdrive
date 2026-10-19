@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadTrack, validateTrack } from "./format.mjs";
+import { loadTrack, validateTrack, worldSize } from "./format.mjs";
 import { sampleDefinition, trackDefinition } from "./geometry.mjs";
 import { geometryGates, parGate, freeLane, tileGate, readability, projectGround } from "./gates.mjs";
 import { Canvas, C } from "../art/lib.mjs";
@@ -77,6 +77,30 @@ test("sabotage: non-neighbouring crossing fails separation", () => {
 test("sabotage: road outside world fails bounds", () => {
   const bad = { ...geometry, P: geometry.P.map(([x, y]) => [x + 4096, y]) };
   assert.equal(geometryGates(source, bad).world.pass, false);
+});
+
+test("per-track worlds default to5120 and validate independent tile-aligned dimensions", () => {
+  assert.deepEqual(worldSize(source), { width: 5120, height: 5120 });
+  for (const world of [{ width: 4096, height: 8192 }, { width: 4128, height: 5120 }]) {
+    const track = { ...source, world };
+    assert.equal(validateTrack(track), track);
+    assert.deepEqual(trackDefinition(track).world, world);
+  }
+  for (const world of [null, 5120, { size: 5120 }, { width: 4095 },
+    { width: 8193 }, { height: 4097 }, { height: 5120.5 }, { width: null }]) {
+    assert.throws(() => validateTrack({ ...source, world }), /world/);
+  }
+});
+
+test("world margins use each track's width and height, not a shared square bound", () => {
+  const oval = loadTrack("tracks/oval.json");
+  const base = sampleDefinition(trackDefinition(oval));
+  const east = { ...base, P: base.P.map(([x, y]) => [x + 2048, y]) };
+  assert.equal(geometryGates({ ...oval, world: { width: 6144, height: 4096 } }, east).world.pass, true);
+  assert.equal(geometryGates({ ...oval, world: { width: 5120, height: 4096 } }, east).world.pass, false);
+  const south = { ...base, P: base.P.map(([x, y]) => [y, x + 2048]) };
+  assert.equal(geometryGates({ ...oval, world: { width: 4096, height: 6144 } }, south).world.pass, true);
+  assert.equal(geometryGates({ ...oval, world: { width: 4096, height: 5120 } }, south).world.pass, false);
 });
 
 test("par timing: 20s and 40s laps fail, 25..35s pass; top speed cannot reject a valid par", () => {

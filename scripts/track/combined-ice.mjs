@@ -3,7 +3,7 @@
 // Current runtime has no automatic firewall scheduler; inferred schedules
 // below are deliberately conservative until an explicit policy is supplied.
 import fs from "node:fs";
-import { loadTrack } from "./format.mjs";
+import { loadTrack, worldSize } from "./format.mjs";
 import { sampleDefinition, trackDefinition } from "./geometry.mjs";
 
 const mod = (x, n) => ((x % n) + n) % n;
@@ -64,6 +64,9 @@ function inferredLayer(source, layer) {
 
 export function combinedIce(source, timing, policy = {}) {
   if (timing.id !== undefined && timing.id !== source.id) throw new Error("ICE timing belongs to another track");
+  const world = worldSize(source);
+  if (timing.world !== undefined && (timing.world?.width !== world.width
+    || timing.world?.height !== world.height)) throw new Error("ICE timing world dimensions disagree with track");
   for (const key of Object.keys(policy)) if (!["layers", "extraLayers", "tracer", "machineWidth"].includes(key)) throw new Error(`unknown ICE policy field ${key}`);
   const crossings = timing.crossings;
   if (!Array.isArray(crossings) || crossings.length !== 4
@@ -187,7 +190,7 @@ export function combinedIce(source, timing, policy = {}) {
       }
     }
   }
-  return { id: source.id, crossings, pass: narrowest >= 1.5 * machineWidth, required: 1.5 * machineWidth,
+  return { id: source.id, world: worldSize(source), crossings, pass: narrowest >= 1.5 * machineWidth, required: 1.5 * machineWidth,
     narrowest, checkedStates, transitions, witness, firstFailure, firstTracerFirewallFailure,
     laps: laps.map(entry => ({ ...entry, pass: entry.narrowest >= 1.5 * machineWidth })),
     timing: "actual simulation lap crossings; exact conductor bar ticks",

@@ -8,9 +8,22 @@ const keysOnly = (value, allowed, name) => {
   for (const key of Object.keys(value)) if (!allowed.includes(key)) fail(`unknown ${name} field ${key}`);
 };
 
+export function worldSize(source) {
+  const world = source.world === undefined ? {} : source.world;
+  keysOnly(world, ["width", "height"], "world");
+  const dimensions = { width: world.width === undefined ? 5120 : world.width,
+    height: world.height === undefined ? 5120 : world.height };
+  for (const [axis, value] of Object.entries(dimensions)) {
+    if (!Number.isInteger(value) || value < 4096 || value > 8192 || value % 32 !== 0) {
+      fail(`world ${axis} must be a multiple of 32 within 4096..8192`);
+    }
+  }
+  return dimensions;
+}
+
 export function validateTrack(t) {
   if (!t || typeof t !== "object" || Array.isArray(t)) fail("expected an object");
-  const fields = ["version", "id", "title", "district", "role", "geometry", "zones", "iceLayers", "song", "sections", "musicZones", "decoration"];
+  const fields = ["version", "id", "title", "district", "role", "world", "geometry", "zones", "iceLayers", "song", "sections", "musicZones", "decoration"];
   for (const key of Object.keys(t)) if (!fields.includes(key)) fail(`unknown field ${key}`);
   if (t.version !== 1) fail("expected version 1");
   if (typeof t.id !== "string" || !/^[a-z][a-z0-9-]*$/.test(t.id)) fail("invalid id");
@@ -18,6 +31,7 @@ export function validateTrack(t) {
     if (typeof t[key] !== "string" || !t[key].length) fail(`missing ${key}`);
   }
   if (!["race", "test"].includes(t.role)) fail("role must be race or test");
+  worldSize(t);
   const g = t.geometry;
   if (!g || !finite(g.halfWidth) || g.halfWidth < 78 || g.halfWidth > 92) fail("constant halfWidth must be 78..92; short squeezes need a format extension");
   if (g.type === "catmull-rom") {

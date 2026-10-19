@@ -12,12 +12,30 @@ See the generated [oval map and timeline](tracks/oval-preview.svg) and
 
 ## Format v1
 
-Coordinates are texels in a flat 4096×4096 world, y down. Geometry is a
+Coordinates are texels in a flat per-track world, y down. Optional
+`world: {width: 5120, height: 5120}` defaults each missing dimension to 5120.
+Each dimension must be an integer in 4096..8192 and a multiple of 32. Rectangular
+worlds are supported; width and height are independent. There is no implicit
+geometry scaling or recentering. Geometry is a
 closed centripetal Catmull–Rom spline; the first control point is the start
 line. `geometry.type` is `catmull-rom`, with `control: [[x,y], ...]` and
 `halfWidth: 78..92`. The handling oval uses the `stadium` shorthand with
 `center`, `straight`, `radius`, `points` and `halfWidth`. Constant widths
 only; terrain, crests and variable widths require a format extension.
+
+The world gate keeps every centreline sample at least half-width+200 from
+each corresponding edge. The painter allocates one width×height RGBA canvas
+(100 MiB at 5120², 256 MiB at 8192²), then emits a width/32 by height/32 tile map,
+a deduplicated atlas, averages and an optional 1/8 preview. It never saves or
+encodes a second full-world PNG. Run maximum-size generation as a bounded
+Phantom job with enough headroom for Node and the small atlas/preview buffers;
+the task's verification uses a 4 GiB process address-space limit. Generated
+track metadata carries both dimensions into `mode7-set-world!` whenever the
+selected track changes. Shader bounds test both axes independently; atlas
+columns come from its average texture. The 4096 unique-tile limit is unchanged.
+Phantom's full 8192² generation measured 386 MiB peak RSS, including its
+256 MiB canvas; the 4128×5152 rectangular probe measured 195 MiB. Both emitted
+tile maps with matching dimensions and passed generated-data roundtrips.
 
 Required identity fields: `version: 1`, `id`, `title`, `district`, `role`
 (`race` or `test`). Fractions below measure distance around the lap from
@@ -178,3 +196,6 @@ and proves real approximately20s/40s duration refusals. `check-followup`
 reuses an explicitly named prior atlas output plus fresh timing to verify
 that unsafe combined reports cannot satisfy final acceptance; it does not
 change a RED fixture to PASS. Native build and smoke use `check-final`.
+`sh scripts/track/check-world /tmp/world-check` exercises the current world
+extension, all 5120 fixtures, rectangular/8192 generation, source suites and
+native rendering; it expects and verifies the documented RED draft hazards.

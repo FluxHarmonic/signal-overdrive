@@ -1,5 +1,6 @@
 // Shared offline geometry: the exact 0.1 interpolation and sampling arithmetic.
-export const WORLD = 4096, STEP = 16, BARRIER = 14;
+import { worldSize } from "./format.mjs";
+export const STEP = 16, BARRIER = 14;
 
 // Circumradius of three consecutive local spline points. Unlike the racing
 // line curvature this is never smoothed. Dense samples are ~1–5 texels apart.
@@ -118,7 +119,7 @@ export function trackDefinition(source, seed = 0) {
     ice.push(...layout.zones);
     selectedLayouts.push(`${layer.id}/${layout.id}`);
   }
-  return { hw: g.halfWidth,
+  return { hw: g.halfWidth, world: worldSize(source),
     control: g.type === "stadium" ? stadium(...g.center, g.straight, g.radius, g.points) : g.control,
     ...source.zones, ice, seed, selectedLayouts,
     puddles: source.decoration.puddles };
