@@ -341,21 +341,166 @@
   "zones": {
     "boost": [
       [
-        0.05,
-        -0.5,
-        0.5
+        0.03,
+        -0.8,
+        -0.3
+      ],
+      [
+        0.03,
+        0.3,
+        0.8
+      ],
+      [
+        0.3,
+        -0.75,
+        -0.25
+      ],
+      [
+        0.3,
+        0.25,
+        0.75
+      ],
+      [
+        0.67,
+        -0.8,
+        -0.3
+      ],
+      [
+        0.67,
+        0.3,
+        0.8
+      ],
+      [
+        0.86,
+        -0.7,
+        -0.2
+      ],
+      [
+        0.86,
+        0.2,
+        0.7
       ]
     ],
     "repair": [
-      0.3,
-      0.35,
-      -1,
-      -0.45
+      0.08,
+      0.13,
+      0.45,
+      1
     ],
-    "ice": []
+    "ice": [
+      [
+        0.4,
+        0.42,
+        -0.9,
+        -0.1
+      ],
+      [
+        0.9,
+        0.92,
+        0.1,
+        0.9
+      ]
+    ]
   },
-  "iceLayers": [],
-  "sections": [],
+  "iceLayers": [
+    {
+      "id": "lighthouse",
+      "layouts": [
+        {
+          "id": "left",
+          "zones": [
+            [
+              0.22,
+              0.25,
+              -1,
+              0.2
+            ]
+          ]
+        },
+        {
+          "id": "right",
+          "zones": [
+            [
+              0.22,
+              0.25,
+              -0.2,
+              1
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "seawall",
+      "layouts": [
+        {
+          "id": "left",
+          "zones": [
+            [
+              0.75,
+              0.78,
+              -1,
+              0.2
+            ]
+          ]
+        },
+        {
+          "id": "centre",
+          "zones": [
+            [
+              0.75,
+              0.78,
+              -0.6,
+              0.6
+            ]
+          ]
+        },
+        {
+          "id": "right",
+          "zones": [
+            [
+              0.75,
+              0.78,
+              -0.2,
+              1
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "id": "mole",
+      "from": 0,
+      "to": 0.165,
+      "label": "The Mole"
+    },
+    {
+      "id": "lighthouse-bend",
+      "from": 0.165,
+      "to": 0.52,
+      "label": "Lighthouse Bend"
+    },
+    {
+      "id": "elbow",
+      "from": 0.52,
+      "to": 0.645,
+      "label": "The Elbow"
+    },
+    {
+      "id": "harbour-mouth",
+      "from": 0.645,
+      "to": 0.82,
+      "label": "Harbour Mouth"
+    },
+    {
+      "id": "seawall",
+      "from": 0.82,
+      "to": 1,
+      "label": "Seawall"
+    }
+  ],
   "song": {
     "id": "carrier",
     "cues": "music/carrier/cues.sgl",
@@ -394,7 +539,44 @@
       }
     ]
   },
-  "musicZones": [],
+  "musicZones": [
+    {
+      "id": "mole-drop",
+      "kind": "drop",
+      "from": 0,
+      "to": 0.02,
+      "sections": [
+        "traced"
+      ]
+    },
+    {
+      "id": "harbour-mouth-lights",
+      "kind": "searchlights",
+      "from": 0.52,
+      "to": 0.9,
+      "sections": [
+        "hold"
+      ]
+    },
+    {
+      "id": "lighthouse-firewall",
+      "kind": "firewall",
+      "from": 0.22,
+      "to": 0.25,
+      "sections": [
+        "traced"
+      ]
+    },
+    {
+      "id": "seawall-firewall",
+      "kind": "firewall",
+      "from": 0.75,
+      "to": 0.78,
+      "sections": [
+        "traced"
+      ]
+    }
+  ],
   "decoration": {
     "puddles": 60
   }
