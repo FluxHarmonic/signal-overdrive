@@ -1,0 +1,17 @@
+#!/bin/sh
+# Phantom-only joint acceptance using the actual candidate driving histories.
+set -eu
+cd "$(dirname "$0")/../.."
+track_run="$1"
+track_driving="$2"
+mkdir -p "$track_run"
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'track_code=$?; printf "RESULT: relocated combined ICE exit %s; inspect per-track reports\n" "$track_code" > "$track_run/RESULT"' EXIT
+for track_id in quayside basin; do
+  printf 'canonical all-seed/tier combined ICE: %s\n' "$track_id" > "$track_run/STAGE"
+  timeout 540 node scripts/track/combined-ice.mjs "tracks/$track_id.json" \
+    "$track_driving/$track_id-ai.json" "$track_run/$track_id-combined.json" \
+    > "$track_run/$track_id.log" 2>&1
+done
+printf 'finished\n' > "$track_run/STAGE"
