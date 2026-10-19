@@ -113,7 +113,11 @@
     (define (contains-zone? c stretch zone)
       (let* ((length (list-ref c 1))
              (span (- (list-ref stretch 2) (list-ref stretch 1)))
-             (offset (wrap (- (car zone) (list-ref stretch 1)) length)))
+             (offset (wrap (- (car zone) (list-ref stretch 1)) length))
+             ;; A computed endpoint a few ulps below the stretch start
+             ;; wraps to almost a full lap. Apply the same1e-8 containment
+             ;; tolerance at that edge as at the far edge.
+             (offset (if (>= offset (- length 1e-8)) 0.0 offset)))
         (or (>= span (- length 1e-8))
             (<= (+ offset (- (cadr zone) (car zone))) (+ span 1e-8)))))
 

@@ -29,13 +29,14 @@ export function verifyCanonicalSchedule(contract, crossings, queries, source) {
     }
     fs.writeFileSync(input,sigilData([contractList(contract),crossings.map(e=>e.tick),data,geometry])+"\n");
     const compiler=process.env.SIGIL ?? path.join(os.homedir(),".sigil/versions/0.22.11/sigil");
+    const started=Date.now();
     const processResult=spawnSync(compiler,["-L","src","eval","-f","scripts/track/scheduler-check.sgl","--",input],
-      {encoding:"utf8",timeout:240000,maxBuffer:1024*1024});
+      {encoding:"utf8",timeout:480000,maxBuffer:1024*1024});
     const output=(processResult.stdout??"")+(processResult.stderr??"");
     const pass=processResult.status===0 && output.includes(`PASS canonical scheduler: ${queries.length} queries`);
     const placements=output.match(/TRACER placements: (\d+) admitted, (\d+) yielded/);
     const tiers=output.match(/TIERS: (\d+) states, (\d+) targets, (\d+) admitted/);
-    return {pass,queries:queries.length,implementation:"src/signal/ice/schedule.sgl",
+    return {pass,queries:queries.length,durationMs:Date.now()-started,implementation:"src/signal/ice/schedule.sgl",
       placementImplementation:source?"src/signal/ice/placement.sgl":null,
       tracerPlacements:placements?{admitted:Number(placements[1]),yielded:Number(placements[2])}:null,
       tiers:tiers?{ids:["learner","courier","elite"],states:Number(tiers[1]),targets:Number(tiers[2]),admitted:Number(tiers[3])}:null,

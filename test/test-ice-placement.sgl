@@ -26,6 +26,19 @@
 
 (define WALL '("wall" "firewall" "left" (3000.0 3100.0 -1.0 0.2)))
 
+(test-group "dynamic strip containment at rounded stretch endpoints"
+  (define CONTRACT
+    '(1 12000.0 100.0 140 (27 960 300 460 34 600 6 1 1)
+        ((0 3000.001 6000.001 ())) () (#f 3 1)))
+  (test "roundoff below the near edge uses the existing containment tolerance"
+    (assert-true
+      (and (ice-zone-reservation CONTRACT '(0 #f #f #f) 0 0 200
+             '(3000.0009999999997 3920.001 -0.34 0.34)) #t)))
+  (test "a genuinely out-of-stretch strip still fails"
+    (assert-false
+      (ice-zone-reservation CONTRACT '(0 #f #f #f) 0 0 200
+        '(3000.0 3920.001 -0.34 0.34)))))
+
 (test-group "D37 shared placement"
   (test "straight, visible hazard and its free lane pass"
     (let ((t (flat-corridor)))

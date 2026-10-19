@@ -22,7 +22,8 @@
   (and geometry (make-track (list->vector (car geometry)) (cadr geometry) '() (caddr geometry))))
 (define admitted 0)
 (define yielded 0)
-(define placement-cache '())
+(define placement-cache #{})
+(define tier-profiles (map (lambda (tier) (ice-tier-contract contract tier)) TIERS))
 (define bad-placement? #f)
 (define tier-states 0)
 (define tier-targets 0)
@@ -32,12 +33,12 @@
   (if (not track-value)
       #t
       (let* ((key (list target-s u))
-             (cached (assoc key placement-cache)))
-        (if cached
-            (cdr cached)
+             (cached (dict-ref placement-cache key 'not-checked)))
+        (if (not (eq? cached 'not-checked))
+            cached
             (let ((placed? (and (ice-placed-tracer-slot track-value profile crossings
                                  seed tick target-s u '() '()) #t)))
-              (set! placement-cache (cons (cons key placed?) placement-cache))
+              (set! placement-cache (dict-set placement-cache key placed?))
               placed?)))))
 
 (for-each
@@ -71,6 +72,9 @@
                (else (error "unknown canonical schedule operation" operation))))
            (expected (list-ref query (cond (zones? 3) ((or corridor? placement?) 2) (else 5)))))
       (unless (or placement? (equal? actual expected))
+        (display "CANONICAL_DISAGREEMENT ")
+        (write (list query actual expected))
+        (newline)
         (error "canonical scheduler disagrees with diagnostic oracle" query actual expected))
       (when (and bad-placement? (not placement?))
         (error "authored ICE placement fails D37; see first witnesses above"))
@@ -78,9 +82,8 @@
       ;; state and critical tracer request is checked under all three tiers.
       (when (or zones? (string=? operation "tracer"))
         (for-each
-          (lambda (tier)
-            (let* ((profile (ice-tier-contract contract tier))
-                   (seed (cadr query))
+          (lambda (tier profile)
+            (let* ((seed (cadr query))
                    (tick (caddr query)))
               (if zones?
                   (begin
@@ -94,18 +97,12 @@
                     (set! tier-targets (+ tier-targets 1))
                     (when (and slot (placed-slot? profile seed tick target-s u))
                       (set! tier-admitted (+ tier-admitted 1)))))))
-          TIERS))
+          TIERS tier-profiles))
       (when (and track-value actual (string=? operation "tracer"))
         ;; Geometry depends on target/side, not the seed or song bar. Cache
         ;; only after the canonical ownership/corridor decision passed.
-        (let* ((key (list (list-ref query 3) (list-ref query 4)))
-               (cached (assoc key placement-cache))
-               (placed? (if cached (cdr cached)
-                            (and (ice-placed-tracer-slot track-value contract crossings
-                                    (cadr query) (caddr query)
-                                    (list-ref query 3) (list-ref query 4) '() '())
-                                 #t))))
-          (unless cached (set! placement-cache (cons (cons key placed?) placement-cache)))
+        (let ((placed? (placed-slot? contract (cadr query) (caddr query)
+                                    (list-ref query 3) (list-ref query 4))))
           (if placed?
               (set! admitted (+ admitted 1))
               (set! yielded (+ yielded 1)))))))
