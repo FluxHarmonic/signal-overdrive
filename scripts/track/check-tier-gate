@@ -1,0 +1,12 @@
+#!/bin/sh
+# Phantom-only, bounded by the detached caller. Never fetches dependencies.
+set -eu
+cd "$(dirname "$0")/../.."
+track_run="$1"
+mkdir -p "$track_run"
+trap 'track_code=$?; printf "RESULT: all-tier gate verification exit %s\n" "$track_code" > "$track_run/RESULT"' EXIT
+printf 'canonical all-tier cadence and oracle tamper\n' > "$track_run/STAGE"
+timeout 240 node --test scripts/track/scheduler-check.test.mjs > "$track_run/canonical.log" 2>&1
+printf 'combined D37 rule sabotages\n' > "$track_run/STAGE"
+timeout 240 node --test scripts/track/combined-ice.test.mjs > "$track_run/combined.log" 2>&1
+printf 'finished\n' > "$track_run/STAGE"

@@ -28,6 +28,16 @@
     (assert-false (member "NULL" (map racer-name (race-rivals (race-new OVAL-TUNING)))))
     (assert-false (member "VOID" (map racer-name (race-rivals (race-new OVAL-TUNING))))))
 
+  (test "a stale flow pace value cannot scale the selected tier twice"
+    (for-each
+      (lambda (tier)
+        (let* ((already-scaled (handling-set BASIN-TUNING 'rival-pace
+                                            (tier-value tier 'rival-pace)))
+               (r (race-new already-scaled tier: tier)))
+          (assert-equal (tier-value tier 'rival-pace)
+                        (racer-pace (car (race-rivals r))))))
+      TIERS))
+
   (test "time trial removes all rivals and both permanent and live ICE"
     (let ((r (race-new BASIN-TUNING tier: 'elite mode: 'time-trial seed: 37)))
       (assert-equal '() (race-rivals r))

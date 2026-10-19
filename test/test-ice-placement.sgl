@@ -1,0 +1,132 @@
+;;; Shared placement and generic dynamic ownership refusal scenarios.
+(import (sigil test)
+        (sigil math)
+        (signal track)
+        (signal handling)
+        (signal ice runtime)
+        (signal ice collision)
+        (signal rivals wake)
+        (signal ice schedule)
+        (signal ice placement))
+
+;; A long planar corridor for local placement tests; the artificial closing
+;; seam is deliberately used as an out-of-frame approach sabotage.
+(define (flat-corridor)
+  (let ((samples (make-vector 6000 0.0))
+        (cumulative (make-vector 1001 0.0)))
+    (let loop ((i 0))
+      (when (< i 1000)
+        (vector-set! samples (* i 6) (* i 16.0))
+        (vector-set! samples (+ (* i 6) 2) 1.0)
+        (vector-set! samples (+ (* i 6) 4) 100.0)
+        (vector-set! cumulative i (* i 16.0))
+        (loop (+ i 1))))
+    (vector-set! cumulative 1000 16000.0)
+    (track n: 1000 length: 16000.0 step: 16.0 samples: samples cumulative: cumulative)))
+
+(define WALL '("wall" "firewall" "left" (3000.0 3100.0 -1.0 0.2)))
+
+(test-group "D37 shared placement"
+  (test "straight, visible hazard and its free lane pass"
+    (let ((t (flat-corridor)))
+      (assert-true (ice-placement? t WALL))
+      (assert-true (ice-straight? t 3000.0 3100.0))))
+
+  (test "wrapped hidden approach fails with first-witness coordinates"
+    (let* ((t (flat-corridor))
+           (hidden '("wall" "firewall" "left" (100.0 200.0 -1.0 0.2)))
+           (failure (ice-placement-failure t hidden)))
+      (assert-equal 'out-of-frame (car failure))
+      (assert-equal 100.0 (cadr failure))))
+
+  (test "raw local curvature catches a lane-shift corner"
+    (let ((t (flat-corridor)))
+      (let loop ((i 180))
+        (when (< i 200)
+          (vector-set! (track-samples t) (+ (* i 6) 2) 0.0)
+          (vector-set! (track-samples t) (+ (* i 6) 3) 1.0)
+          (loop (+ i 1))))
+      (assert-equal 'corner (car (ice-placement-failure t WALL)))))
+
+  (test "a squeeze within300 texels refuses ICE"
+    (let ((t (flat-corridor)))
+      (vector-set! (track-samples t) (+ (* 210 6) 4) 58.0)
+      (assert-equal 'squeeze-clearance (car (ice-placement-failure t WALL)))))
+
+  (test "checksum lane overlap refuses even an otherwise visible zone"
+    (let ((t (track (flat-corridor) repair: '((2990.0 3110.0 -1.0 -0.6)))))
+      (assert-equal 'checksum-lane (car (ice-placement-failure t WALL))))))
+
+(test-group "D37 shared dynamic reservation"
+  (define OPEN
+    '(1 12000.0 100.0 140 (27 960 300 460 34 600 6 1 1)
+        ((0 0.0 12000.0 ())) () (#t 3 1)))
+  (define CROSSINGS '(0 100 200 #f))
+  (define TICK (ice-bar->tick OPEN 3))
+  (define UNTIL (ice-bar->tick OPEN 5))
+  (define ZONE '(3000.0 3160.0 -0.5 -0.16))
+
+  (test "short wake can reserve a free stretch; prior ownership refuses it"
+    (assert-true (ice-zone-reservation OPEN CROSSINGS 0 TICK UNTIL ZONE '() '()))
+    (assert-false (ice-zone-reservation OPEN CROSSINGS 0 TICK UNTIL ZONE
+                    (list (list TICK UNTIL 0)) '())))
+
+  (test "another announced dynamic hazard owns the whole physical stretch"
+    (assert-false
+      (ice-zone-reservation OPEN CROSSINGS 0 TICK UNTIL ZONE '()
+        '(("$tracer" "tracer" "target" (8000.0 8920.0 0.2 0.88)))))))
+
+(test-group "Void's admitted wake"
+  (define OPEN
+    '(1 16000.0 100.0 140 (27 960 300 460 34 600 6 1 1)
+        ((0 0.0 16000.0 ())) () (#f 3 1)))
+  (define (state t)
+    (ice-state (ice-new OPEN 'elite 0 t) crossings: '(0 #f #f #f)))
+
+  (test "full-bar warning, one bar live, then a reserved rest bar"
+    (let* ((t (flat-corridor))
+           (ice (state t))
+           (at (ice-bar->tick OPEN 8))
+           (wake (wake-step #f t ice 0 at #t 4000.0 0.0)))
+      (assert-true wake)
+      (assert-true (wake-warning? wake at))
+      (assert-false (wake-live? wake at))
+      (assert-equal (ice-bar->tick OPEN 9) (wake-arms wake))
+      (assert-true (wake-live? wake (ice-bar->tick OPEN 9)))
+      (assert-false (wake-live? wake (ice-bar->tick OPEN 10)))
+      (assert-equal (ice-bar->tick OPEN 11) (wake-reserved-until wake))
+      (assert-equal wake
+        (wake-step wake t ice 0 (ice-bar->tick OPEN 10) #t 5000.0 0.5))))
+
+  (test "hand-off clears a pending or live wake and cannot arm in Null's turn"
+    (let* ((t (flat-corridor))
+           (ice (state t))
+           (wake (wake-step #f t ice 0 (ice-bar->tick OPEN 14) #t 4000.0 0.0)))
+      (assert-true wake)
+      (assert-false (wake-step wake t ice 0 (ice-bar->tick OPEN 16) #f 4000.0 0.0))
+      (assert-false (wake-step #f t ice 0 (ice-bar->tick OPEN 15) #t 4000.0 0.0))))
+
+  (test "a pending tracer reservation suppresses a wake in the same stretch"
+    (let* ((t (flat-corridor))
+           (ice (ice-state (state t)
+                  reservations: (list (list (ice-bar->tick OPEN 9) (ice-bar->tick OPEN 11) 0)))))
+      (assert-false (wake-step #f t ice 0 (ice-bar->tick OPEN 8) #t 4000.0 0.0))))
+
+  (test "Void cannot cover the checksum lane"
+    (let* ((t (track (flat-corridor) repair: '((3800.0 4000.0 -0.4 0.4))))
+           (ice (state t)))
+      (assert-false (wake-step #f t ice 0 (ice-bar->tick OPEN 8) #t 4000.0 0.0))))
+
+  (test "dead air drains only during contact and exposes immediate mute state"
+    (let* ((t (flat-corridor))
+           (wake (wake-step #f t (state t) 0 (ice-bar->tick OPEN 8) #t 4000.0 0.0))
+           (m (machine s: 3900.0 d: 0.0))
+           (hit (ice-contact-step OPEN (list (wake-zone wake)) m '() 100.0 1.0 (/ 1.0 60.0)))
+           (off (ice-contact-step OPEN '() (ice-contact-machine hit) (ice-contact-locks hit)
+                                  100.0 1.0 (/ 1.0 60.0))))
+      (assert-true (ice-contact-dead-air hit))
+      (assert-true (< (abs (- (machine-integrity (ice-contact-machine hit))
+                             (- 100.0 (/ 10.0 60.0)))) 1e-9))
+      (assert-false (ice-contact-dead-air off))
+      (assert-equal (machine-integrity (ice-contact-machine hit))
+                    (machine-integrity (ice-contact-machine off))))))

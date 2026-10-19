@@ -1,7 +1,11 @@
 ;;; Acceptance executes the game's scheduler. Expected diagnostics cannot
 ;;; make a disagreement green. Input is data only, never evaluated code.
 (import (sigil io)
-        (signal ice schedule))
+        (signal ice schedule)
+        (signal ice placement)
+        (signal ice tier)
+        (signal tiers)
+        (signal track))
 
 (define arguments
   (let find ((remaining (cdr (command-line))))
@@ -13,29 +17,115 @@
 (define contract (car input))
 (define crossings (cadr input))
 (define queries (caddr input))
+(define geometry (list-ref input 3))
+(define track-value
+  (and geometry (make-track (list->vector (car geometry)) (cadr geometry) '() (caddr geometry))))
+(define admitted 0)
+(define yielded 0)
+(define placement-cache '())
+(define bad-placement? #f)
+(define tier-states 0)
+(define tier-targets 0)
+(define tier-admitted 0)
+
+(define (placed-slot? profile seed tick target-s u)
+  (if (not track-value)
+      #t
+      (let* ((key (list target-s u))
+             (cached (assoc key placement-cache)))
+        (if cached
+            (cdr cached)
+            (let ((placed? (and (ice-placed-tracer-slot track-value profile crossings
+                                 seed tick target-s u '() '()) #t)))
+              (set! placement-cache (cons (cons key placed?) placement-cache))
+              placed?)))))
 
 (for-each
   (lambda (query)
     (let* ((operation (car query))
            (zones? (string=? operation "zones"))
            (corridor? (string=? operation "corridor"))
+           (placement? (string=? operation "placement"))
            (actual
              (cond
                (zones?
                 (ice-zones-at contract crossings (cadr query) (caddr query)))
                (corridor?
                 (ice-corridor? contract (cadr query)))
+               (placement?
+                (unless track-value (error "placement gate needs actual track geometry"))
+                (let ((failure (ice-placement-failure track-value (cadr query))))
+                  (when failure
+                    ;; Sigil's error printer elides compound Details; write
+                    ;; the full witness first so coordinates survive logs.
+                    (display "PLACEMENT_FAILURE ")
+                    (write (list (cadr query) failure))
+                    (newline)
+                    (set! bad-placement? #t))
+                  (not failure)))
                ((string=? operation "tracer")
                 (and (ice-tracer-slot contract crossings
                        (cadr query) (caddr query)
                        (list-ref query 3) (list-ref query 4))
                      #t))
                (else (error "unknown canonical schedule operation" operation))))
-           (expected (list-ref query (cond (zones? 3) (corridor? 2) (else 5)))))
-      (unless (equal? actual expected)
-        (error "canonical scheduler disagrees with diagnostic oracle" query actual expected))))
+           (expected (list-ref query (cond (zones? 3) ((or corridor? placement?) 2) (else 5)))))
+      (unless (or placement? (equal? actual expected))
+        (error "canonical scheduler disagrees with diagnostic oracle" query actual expected))
+      (when (and bad-placement? (not placement?))
+        (error "authored ICE placement fails D37; see first witnesses above"))
+      ;; The gate executes the game's shared tier data too. Every seeded
+      ;; state and critical tracer request is checked under all three tiers.
+      (when (or zones? (string=? operation "tracer"))
+        (for-each
+          (lambda (tier)
+            (let* ((profile (ice-tier-contract contract tier))
+                   (seed (cadr query))
+                   (tick (caddr query)))
+              (if zones?
+                  (begin
+                    (unless (ice-corridor? profile (ice-zones-at profile crossings seed tick))
+                      (write (list 'tier-corridor-failure tier seed tick)) (newline)
+                      (error "tier schedule closes the free lane"))
+                    (set! tier-states (+ tier-states 1)))
+                  (let* ((target-s (list-ref query 3))
+                         (u (list-ref query 4))
+                         (slot (ice-tracer-slot profile crossings seed tick target-s u)))
+                    (set! tier-targets (+ tier-targets 1))
+                    (when (and slot (placed-slot? profile seed tick target-s u))
+                      (set! tier-admitted (+ tier-admitted 1)))))))
+          TIERS))
+      (when (and track-value actual (string=? operation "tracer"))
+        ;; Geometry depends on target/side, not the seed or song bar. Cache
+        ;; only after the canonical ownership/corridor decision passed.
+        (let* ((key (list (list-ref query 3) (list-ref query 4)))
+               (cached (assoc key placement-cache))
+               (placed? (if cached (cdr cached)
+                            (and (ice-placed-tracer-slot track-value contract crossings
+                                    (cadr query) (caddr query)
+                                    (list-ref query 3) (list-ref query 4) '() '())
+                                 #t))))
+          (unless cached (set! placement-cache (cons (cons key placed?) placement-cache)))
+          (if placed?
+              (set! admitted (+ admitted 1))
+              (set! yielded (+ yielded 1)))))))
   queries)
+(when bad-placement? (error "authored ICE placement fails D37; see first witnesses above"))
 (display "PASS canonical scheduler: ")
 (display (length queries))
 (display " queries")
+(newline)
+(display "TRACER placements: ")
+(display admitted)
+(display " admitted, ")
+(display yielded)
+(display " yielded")
+(newline)
+(display "TIERS: ")
+(display tier-states)
+(display " states, ")
+(display tier-targets)
+(display " targets, ")
+(display tier-admitted)
+(display " admitted")
 (newline)

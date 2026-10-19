@@ -5,6 +5,7 @@
   (import (sigil struct)
           (sigil math)
           (signal ice schedule)
+          (signal ice placement)
           (signal ice tier))
   (export ice-state ice-state? ice-new ice-step
           ice-state-contract ice-state-tick ice-state-crossings
@@ -26,6 +27,7 @@
 
     (define-struct ice-state
       (contract default: '())
+      (track default: #f)
       (tick default: -1)
       (crossings default: '(#f #f #f #f))
       (active default: '())
@@ -35,11 +37,11 @@
       (reservations default: '())
       (events default: '()))
 
-    (define (ice-new contract tier seed)
+    (define (ice-new contract tier seed . more)
       (ice-state contract: (if (null? contract)
                               '()
                               (ice-tier-contract contract tier))
-                 seed: seed))
+                 seed: seed track: (and (pair? more) (car more))))
 
     (define (live-only zones)
       (let loop ((zones zones))
@@ -76,13 +78,17 @@
           (else (cons (car remaining) (loop (cdr remaining)))))))
 
     ;; Capture the target's lane at announcement; braking cannot move it.
-    (define (announce state tick crossings target-s u reservations)
+    (define (announce state tick crossings target-s u reservations extra)
       (let* ((contract (ice-state-contract state))
              (bar (ice-tick->bar contract tick))
              (rules (list-ref contract 4))
              (strike (ice-bar->tick contract (+ bar (list-ref rules 7))))
-             (slot (ice-tracer-slot contract crossings (ice-state-seed state)
-                                   strike target-s u reservations)))
+             (t (ice-state-track state))
+             (slot (if t
+                       (ice-placed-tracer-slot t contract crossings (ice-state-seed state)
+                                               strike target-s u reservations extra)
+                       (ice-tracer-slot contract crossings (ice-state-seed state)
+                                        strike target-s u reservations extra))))
         (and slot
              (tracer strike: strike
                      until: (+ strike (list-ref rules 6))
@@ -95,8 +101,9 @@
 
     ;; Called once per fixed tick. Static road ICE stays with handling;
     ;; active/telegraphs here contain only automatic live hazards.
-    (define (ice-step state tick crossings target-s u)
-      (let ((contract (ice-state-contract state)))
+    (define (ice-step state tick crossings target-s u . more)
+      (let ((contract (ice-state-contract state))
+            (extra (if (pair? more) (car more) '())))
         (if (or (null? contract) (not (car crossings)) (list-ref crossings 3))
             (ice-state state tick: tick crossings: crossings
                        active: '() telegraphs: '() tracer: #f
@@ -108,7 +115,7 @@
                    (reservations (current-reservations
                                    (ice-state-reservations state) tick))
                    (new (and downbeat? (not old)
-                             (announce state tick crossings target-s u reservations)))
+                             (announce state tick crossings target-s u reservations extra)))
                    (trace (or old new))
                    (reservations
                      (if new

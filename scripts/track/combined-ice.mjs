@@ -206,26 +206,29 @@ export function combinedIce(source, timing, policy, observe = () => {}) {
         previous.set(layer.id,{bar,layout});
       }
       const start=firstBar(contract,crossings[contract.tracer.fromLap-1].tick)+r.telegraphBars;
-      if (!contract.tracer.enabled || tick!==barTick(contract,bar) || bar<start || mod(bar-start,contract.tracer.periodBars)) continue;
-      tracer.attempts++;
+      if (!contract.tracer.enabled || tick!==barTick(contract,bar) || bar<start) continue;
+      // Collect requests on every bar. A tier may change tracer cadence;
+      // checking only the base period would miss its shifted strike bars.
+      const eligible=mod(bar-start,contract.tracer.periodBars)===0;
+      if (eligible) tracer.attempts++;
       let legal=0;
       for (const stretch of contract.stretches) for (const center of longitudinalTargets(contract,stretch,zones)) {
         const reserve=tracerReservation(contract,crossings,seed,tick,center);
         if (!reserve.pass) {
-          observe({op:"tracer",seed,tick,targetS:mod(center-r.tracerAhead,contract.length),u:0,pass:false});
-          tracer.yieldedReservations++;
-          continue;
+          if (eligible) tracer.yieldedReservations++;
+          // A lower-density tier may release this stretch. Keep every
+          // critical lateral target in the canonical tier inventory too.
         }
         for (const u of lateralTargets(contract,zones)) {
           const slot=tracerAllowed(contract,crossings,seed,tick,mod(center-r.tracerAhead,contract.length),u);
           observe({op:"tracer",seed,tick,targetS:mod(center-r.tracerAhead,contract.length),u,pass:slot.pass});
-          if (!slot.pass) { tracer.yieldedNeighbours++; continue; }
+          if (!slot.pass) { if (eligible && reserve.pass) tracer.yieldedNeighbours++; continue; }
           legal++; tracer.legalTargets++;
           narrowest=Math.min(narrowest,slot.corridor.minimum,slot.corridor.sharedMinimum);
           laps[lap-1].narrowest=Math.min(laps[lap-1].narrowest,slot.corridor.minimum,slot.corridor.sharedMinimum);
         }
       }
-      if (!legal) tracer.waitBars++;
+      if (eligible && !legal) tracer.waitBars++;
     }
   }
   const failures=Object.entries(rules).filter(([,v]) => !v.pass).map(([rule,v]) => ({rule:Number(rule),...v.firstFailure}));
@@ -245,9 +248,12 @@ if (process.argv[1]===new URL(import.meta.url).pathname) {
   const source=loadTrack(trackFile), timing=JSON.parse(fs.readFileSync(timingFile));
   const queries=[];
   const result=combinedIce(source,timing,undefined,query=>queries.push(query));
+  const placementQueries=[];
+  for (const layer of liveContract(source).layers) for (const layout of layer.layouts)
+    for (const zone of layout.zones) placementQueries.push({op:"placement",owned:{owner:layer.id,kind:layer.kind,layout:layout.id,zone}});
   // Acceptance MUST execute the game's implementation. JS is an independent
   // diagnostic oracle only; unavailable runtime or any disagreement is RED.
-  result.canonical=verifyCanonicalSchedule(liveContract(source),timing.crossings,queries);
+  result.canonical=verifyCanonicalSchedule(liveContract(source),timing.crossings,[...placementQueries,...queries],source);
   result.pass=result.pass && result.canonical.pass;
   result.runtimeParity="acceptance executes (signal ice schedule), the game's implementation; diagnostic disagreement fails closed";
   fs.writeFileSync(output,JSON.stringify(result,null,2)+"\n");

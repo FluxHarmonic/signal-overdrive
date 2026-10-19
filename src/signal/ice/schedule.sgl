@@ -5,7 +5,8 @@
 ;;; Owned zones are (owner kind layout (from to left right)), arc texels.
 (define-library (signal ice schedule)
   (import (sigil math))
-  (export ice-bar->tick ice-tick->bar ice-zones-at ice-tracer-slot ice-corridor?)
+  (export ice-bar->tick ice-tick->bar ice-zones-at ice-tracer-slot ice-corridor?
+          ice-zone-reservation)
   (begin
     (define (rule c i) (list-ref (list-ref c 4) i))
     (define (wrap value length)
@@ -109,13 +110,12 @@
                                   (pairs (cdr others))))))
                      (loop (cdr remaining))))))))
 
-    (define (contains-strip? c stretch center)
+    (define (contains-zone? c stretch zone)
       (let* ((length (list-ref c 1))
              (span (- (list-ref stretch 2) (list-ref stretch 1)))
-             (offset (wrap (- center (list-ref stretch 1)) length)))
+             (offset (wrap (- (car zone) (list-ref stretch 1)) length)))
         (or (>= span (- length 1e-8))
-            (and (>= offset (- (rule c 3) 1e-8))
-                 (<= (+ offset (rule c 3)) (+ span 1e-8))))))
+            (<= (+ offset (- (cadr zone) (car zone))) (+ span 1e-8)))))
 
     (define (overlaps-stretch? c stretch zone)
       (let* ((length (list-ref c 1))
@@ -126,30 +126,26 @@
             (inside? c zone from)
             (inside? c zone to))))
 
-    ;; Returns #f (wait) or (stretch-id reserved-until centre telegraph-tick).
-    ;; Prior reservations are (strike-tick reserved-until stretch-id).
-    (define (ice-tracer-slot c crossings seed tick target-s u . more)
-      (let* ((settings (list-ref c 7))
-             (bar (ice-tick->bar c tick))
-             (crossing (list-ref crossings (- (cadr settings) 1)))
-             (start (and crossing (+ (first-bar c crossing) (rule c 7))))
-             (length (list-ref c 1))
-             (center (wrap (+ target-s (rule c 5)) length))
-             (until (+ (ice-bar->tick c (+ bar (rule c 8))) (rule c 6)))
-             (reservations (if (pair? more) (car more) '())))
-        (and (car settings)
-             crossing
+    ;; Common ownership/corridor admission for a tracer or Void's wake.
+    ;; until includes the hazard's life PLUS a bar. Extra zones are other
+    ;; dynamic hazards already announced or live; prior reservations cover
+    ;; their whole merged stretch, not just their visible footprint.
+    (define (ice-zone-reservation c crossings seed tick until zone . more)
+      (let ((reservations (if (pair? more) (car more) '()))
+            (extra (if (> (length more) 1) (cadr more) '()))
+            (live-until (if (> (length more) 2) (caddr more) until)))
+        (and (car crossings)
              (integer? seed)
              (>= seed 0)
-             (<= (abs u) (+ (- 1.0 (/ 9.0 (list-ref c 2))) 1e-8))
-             (= tick (ice-bar->tick c bar))
-             (>= bar start)
-             (= (modulo (- bar start) (caddr settings)) 0)
+             (> until tick)
+             (<= (car zone) (cadr zone))
+             (<= -1.0 (caddr zone)) (< (caddr zone) (cadddr zone))
+             (<= (cadddr zone) 1.0)
              (or (not (list-ref crossings 3)) (< tick (list-ref crossings 3)))
              (let find ((stretches (list-ref c 5)))
                (and (pair? stretches)
                     (let ((stretch (car stretches)))
-                      (if (not (contains-strip? c stretch center))
+                      (if (not (contains-zone? c stretch zone))
                           (find (cdr stretches))
                           (and
                             (let unknown ((layers (list-ref c 6)))
@@ -167,17 +163,44 @@
                                           (and (not (and (member (caar zones) (list-ref stretch 3))
                                                          (overlaps-stretch? c stretch (list-ref (car zones) 3))))
                                                (owners (cdr zones)))))
+                                    (or (>= at live-until)
+                                        (ice-corridor? c
+                                          (cons (list "$dynamic" "dynamic" "target" zone)
+                                                (append extra (ice-zones-at c crossings seed at)))))
                                     (reserve (ice-bar->tick c (+ (ice-tick->bar c at) 1))))))
+                            (let dynamic ((remaining extra))
+                              (or (null? remaining)
+                                  (and (not (overlaps-stretch? c stretch (list-ref (car remaining) 3)))
+                                       (dynamic (cdr remaining)))))
                             (let prior ((remaining reservations))
                               (or (null? remaining)
                                   (and (not (and (= (list-ref (car remaining) 2) (car stretch))
                                                  (< (caar remaining) until)
                                                  (< tick (cadar remaining))))
                                        (prior (cdr remaining)))))
-                            (ice-corridor? c
-                              (cons (list "$tracer" "tracer" "target"
-                                          (list (- center (rule c 3)) (+ center (rule c 3))
-                                                (max -1.0 (- u (/ (rule c 4) (list-ref c 2))))
-                                                (min 1.0 (+ u (/ (rule c 4) (list-ref c 2))))))
-                                    (ice-zones-at c crossings seed tick)))
-                            (list (car stretch) until center (ice-bar->tick c (- bar (rule c 7))))))))))))))
+                            (list (car stretch) until)))))))))
+
+    ;; Returns #f (wait) or (stretch-id reserved-until centre telegraph-tick).
+    ;; Prior reservations are (strike-tick reserved-until stretch-id).
+    (define (ice-tracer-slot c crossings seed tick target-s u . more)
+      (let* ((settings (list-ref c 7))
+             (bar (ice-tick->bar c tick))
+             (crossing (list-ref crossings (- (cadr settings) 1)))
+             (start (and crossing (+ (first-bar c crossing) (rule c 7))))
+             (center (wrap (+ target-s (rule c 5)) (list-ref c 1)))
+             (until (+ (ice-bar->tick c (+ bar (rule c 8))) (rule c 6)))
+             (reservations (if (pair? more) (car more) '()))
+             (extra (if (> (length more) 1) (cadr more) '()))
+             (zone (list (- center (rule c 3)) (+ center (rule c 3))
+                         (max -1.0 (- u (/ (rule c 4) (list-ref c 2))))
+                         (min 1.0 (+ u (/ (rule c 4) (list-ref c 2)))))))
+        (and (car settings) crossing
+             (<= (abs u) (+ (- 1.0 (/ 9.0 (list-ref c 2))) 1e-8))
+             (= tick (ice-bar->tick c bar))
+             (>= bar start)
+             (= (modulo (- bar start) (caddr settings)) 0)
+             (let ((slot (ice-zone-reservation c crossings seed tick until zone reservations extra
+                                              (+ tick (rule c 6)))))
+               (and slot
+                    (list (car slot) (cadr slot) center
+                          (ice-bar->tick c (- bar (rule c 7)))))))))))
