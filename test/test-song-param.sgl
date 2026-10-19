@@ -1,0 +1,31 @@
+;;; song=ID picks the race song for checks and auditions. It is a
+;;; development control: natively it always applies, and on the web only
+;;; with ?dev, which may come before or after it. Without ?dev a web race
+;;; plays the song its track binds.
+
+(import (sigil test)
+        (substratic store kv)
+        (signal music song)
+        (signal shell core))
+
+(set-store-root! "/tmp/signal-song-param-test-store")
+(core-param! "mute")
+
+(test-group "song=ID is a development control"
+  (test "natively it applies at once"
+    (core-boot! 'desktop)
+    (core-param! "song=carrier-a")
+    (assert-equal 'carrier-a (song-id))
+    (song-override! #f)
+    (core-boot! 'desktop)
+    (assert-equal 'carrier (song-id)))
+
+  (test "on the web it waits for ?dev, then applies"
+    (core-boot! 'web)
+    (core-param! "song=carrier-b")
+    (assert-equal 'carrier (song-id))
+    (core-boot! 'web)
+    (assert-equal 'carrier (song-id))
+    (core-param! "dev")
+    (assert-equal 'carrier-b (song-id))
+    (song-override! #f)))

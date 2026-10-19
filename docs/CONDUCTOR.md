@@ -68,11 +68,14 @@ selects its track's (`song-select-for-track!` in `race-new`) before it
 makes its conductor, and the sections, rows, onsets and tune text all
 read the current one. The shell parses each song's tune once
 (`music-prepare!` after every race rebuild) and drops a player prepared
-for another song. `?song=ID` (native `--song=ID`) makes every track play
-that song; the game's music log names the race song on its `conductor
-reset` line, and the drift gate renders its reference in that song.
+for another song. `--song=ID` natively, or `?song=ID` on the web with
+`?dev` (in either order), makes every track play that song, for checks
+and auditions; a player's race plays the song its track binds. The
+game's music log names the race song on its `conductor reset` line, and
+the drift gate renders its reference in that song.
 `test/test-songs.sgl` (`scripts/test-songs`) checks each song's data
-against a fresh compile, its section contract and seams, and selection.
+against a fresh compile, its section contract and seams, and selection;
+`test/test-song-param.sgl` checks that `song=` waits for `?dev` on the web.
 
 Carrier is the default race song: `music/carrier/race.cts` and its cue sheet
 `music/carrier/cues.sgl`, both written by the music package from
