@@ -56,8 +56,9 @@ Required real-browser observations:
    tab before selection: reopening must still run A and offer B.
 5. Sabotage controls: remove `sw.js` (offline/controller gate must fail), freeze
    A's worker while serving B (update gate must fail), and serve no newer version
-   (menu item must stay absent). Two-tab arm: a second racing tab blocks apply;
-   returning both windows to the main menu permits it.
+   (menu item must stay absent). The deterministic controls separately verify
+   that a second racing window vetoes the swap; no real two-window browser
+   result is claimed by this harness.
 
 Trusted HTTPS is necessary for phone service workers and installability.
 Loopback HTTP is suitable for headless Chrome. Plain HTTP at a VPN IP is not a
@@ -108,8 +109,8 @@ build/ELF/channel evidence. After extraction David's one command is:
 ```
 
 Replace `<sha12>` with the actual delivered artifact's stamp; record its exact
-path in the task log after copying. The current draft has not produced that
-artifact yet. Keep `bin/` and `gnu/` together.
+path, checksum and runtime acceptance in the task log after copying. Keep
+`bin/` and `gnu/` together.
 
 For smaller later downloads on ordinary distributions, investigate Substratic's
 existing portable executable path: `make-portable` patches only
