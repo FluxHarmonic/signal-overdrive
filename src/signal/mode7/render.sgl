@@ -39,7 +39,7 @@
 
   (export mode7-init! mode7-set-world! mode7-set-sky! mode7-set-look! mode7-draw-ground!
           mode7-draw-sprite! mode7-ready? mode7-set-far! mode7-sprite-style!
-          mode7-set-fx! mode7-set-lights! mode7-ground-look MODE7-LIGHTS)
+          mode7-set-fx! mode7-set-lights! mode7-ground-look MODE7-LIGHTS mode7-set-ahead!)
 
   (begin
     (define GROUND-VERTEX
@@ -76,7 +76,10 @@ void main() {
     ;;          ground, 256 splashes (off with reduced motion, as are the
     ;;          ripple's movement and the water's rolling bands)
     ;;   fx[7]  the rain's readability (0.2): x 1 for its debug view (splash
-    ;;          pixels marked in alpha), y the guard 0..1 (fewer, fainter rings)
+    ;;          pixels marked in alpha), y the guard 0..1 (fewer, fainter rings,
+    ;;          and none over the road ahead, as the post pass keeps its streaks)
+    ;; ahead[8]: the road ahead on the screen, (x y half-width-px valid) per
+    ;; point, the post pass's (signal scene rain-ahead), for the guard.
     ;; filt: the far ground's filter (0.2): x taps along the ray (0: fade to
     ;; the tile's average, as 0.1), y the stretch the taps resolve (the
     ;; along/across footprint ratio), z the mip level bias; see farGround.
@@ -102,6 +105,7 @@ uniform vec4 skylow;
 uniform vec4 lights[16];
 uniform vec4 fx[8];
 uniform vec4 filt;
+uniform vec4 ahead[8];
 uniform sampler2D atlas;
 uniform sampler2D tmap;
 uniform sampler2D tavg;
@@ -112,6 +116,24 @@ out vec4 frag_color;
 float hash2(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 bool flag(int b) { return (int(fx[3].z + 0.5) & b) != 0; }
 int code(float a) { return 255 - int(a * 255.0 + 0.5); }
+
+// 1 inside the road ahead on the screen (ahead[8]), 0 past its edge: the
+// post pass's roadAhead (signal lut), so a splash ring and a streak keep
+// out of the same band
+float roadAhead(vec2 q) {
+  float best = 0.0;
+  for (int i = 0; i < 7; i++) {
+    vec4 a = ahead[i];
+    vec4 b = ahead[i + 1];
+    if (a.w < 0.5 || b.w < 0.5) continue;
+    vec2 ab = b.xy - a.xy;
+    float t = clamp(dot(q - a.xy, ab) / max(dot(ab, ab), 0.0001), 0.0, 1.0);
+    float hw = mix(a.z, b.z, t) + 2.0;
+    float d = length(q - (a.xy + ab * t));
+    best = max(best, 1.0 - smoothstep(hw, hw * 1.25 + 2.0, d));
+  }
+  return best;
+}
 
 // The tile at map cell tc: its index in the atlas (0, the plain tile, off
 // the map), and the glitch's scramble (a share of the tiles show another).
@@ -388,8 +410,11 @@ void main() {
   if (flag(256) && fx[6].y > 0.0 && (water || wet > 0.3) && along < 900.0) {
     vec2 cell = floor(g / 20.0);
     float h = hash2(cell + vec2(3.3, 1.9));
-    // (the rain guard, fx[7].y: fewer and fainter, so the road reads through)
-    if (h < fx[6].y * 0.35 * mix(1.0, 0.55, fx[7].y)) {
+    // (the rain guard, fx[7].y: fewer and fainter, so the road reads
+    // through, and none over the road ahead: near the camera a ring is
+    // many pixels across, and they hid Breakwater's road, 7.34% of it)
+    float clear = fx[7].y > 0.0 ? mix(1.0, 1.0 - roadAhead(v_screen), fx[7].y) : 1.0;
+    if (h < fx[6].y * 0.35 * mix(1.0, 0.55, fx[7].y) * clear) {
       float ph = fract(fx[0].w * 1.7 + h * 13.0);
       vec2 ctr = (cell + 0.25 + 0.5 * vec2(hash2(cell + vec2(3.1, 0.0)), hash2(cell + vec2(7.7, 0.0)))) * 20.0;
       float ring = abs(length(g - ctr) - (1.0 + ph * 7.0));
@@ -494,6 +519,7 @@ void main() {
       (set-pipeline-uniform! *sprite* 'view (v4 w h 0 0))
       (mode7-set-look! '())
       (mode7-set-fx! (make-list 32 0.0))
+      (mode7-set-ahead! (make-list 32 0.0))
       (mode7-set-lights! '()))
 
     ;; The effects hooks: 32 floats, fx[0] to fx[7] (see GROUND-FRAGMENT).
@@ -501,6 +527,10 @@ void main() {
     (define (mode7-set-fx! floats)
       (set! *bend* (f32 (car floats)))
       (set-pipeline-uniform! *ground* 'fx (map f32 floats)))
+    ;; The road ahead for the rain's guard: 32 floats, ahead[8] (see
+    ;; GROUND-FRAGMENT); all zero, no road ahead.
+    (define (mode7-set-ahead! floats)
+      (set-pipeline-uniform! *ground* 'ahead (map f32 floats)))
 
     ;; What the ground was last given that a picture lying on it must
     ;; match: the fog (fog-start fog-end fog? far-start), its colour and

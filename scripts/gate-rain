@@ -13,17 +13,22 @@
 # them. Three arms a track, 20 frames each, 150 ms apart:
 #   guard   the rain as shipped (fx-rain-guard=1): every frame at most 7%
 #           (--max 7), its look-ahead band at least 40,000 px (--min-band:
-#           a missing band would pass any --max), and the rain there: a
-#           mean occlusion of at least 1% (--min-mean: a guard that culled
-#           the rain to nothing would pass any --max)
+#           a missing band would pass any --max), and the rain still
+#           falling: at least 500 rain pixels a frame outside the band, on
+#           average (--min-rain: a guard that culled the rain to nothing
+#           would pass any --max; the band itself the guard keeps clear,
+#           of streaks and of splash rings)
 #   plant   the first look's rain (fx-rain-guard=0), the sabotage arm for
 #           --max: the gate must see it, so it must go RED, for its rain
 #           alone (each frame the debug view, its band all there, its
 #           worst over 7%). Measured 2026-10-19 on the Intel UHD 630, 90
-#           frames: 7.14% to 12.32%; the guard's 2.85% to 6.13%, mean
-#           4.03% to 5.28% an arm.
+#           frames: 7.14% to 12.32%; the guard's 2.85% to 6.13%, its
+#           splash rings nearly all of it, until 2026-10-20 (Breakwater's
+#           new pads: 7.34%) when the guard kept the rings off the band
+#           too. Rain outside the band, the guard's: about 1,600 to 1,750
+#           px a frame.
 #   dry     the guard with the weather dry (fx-weather=0), the sabotage
-#           arm for --min-mean: RED, for the floor alone (every frame
+#           arm for --min-rain: RED, for the floor alone (every frame
 #           within --max and --min-band, in the debug view).
 # GREEN when every guard arm is GREEN and every plant and dry arm RED for
 # its own reason; RED otherwise. RAIN_OUT, if set, must be a new or empty
@@ -34,7 +39,7 @@ set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="${1:-$REPO/build/web}"
 OUT="${RAIN_OUT:-$(mktemp -d)}"
-MAX=7 MIN_BAND=40000 MIN_MEAN=1 N=20
+MAX=7 MIN_BAND=40000 MIN_RAIN=500 N=20
 [ -f "$BUILD/signal-overdrive.wasm" ] || { echo "SETUP: $BUILD has no web build"; exit 2; }
 if [ -n "${RAIN_OUT:-}" ] && [ -e "$OUT" ] && [ -n "$(ls -A "$OUT")" ]; then echo "SETUP: RAIN_OUT $OUT is not empty"; exit 2; fi
 mkdir -p "$OUT"
@@ -63,7 +68,7 @@ for t in quayside basin breakwater; do
     [ "$k" -ge $((N / 2)) ] || { echo "$t $a: SETUP: only $k distinct frames of $N (the race or the rain is frozen)"; exit 2; }
   done
   for a in guard plant dry; do
-    node "$REPO/scripts/rain-occlusion.mjs" --max $MAX --min-band $MIN_BAND --min-mean $MIN_MEAN "$d"/$a-*.png > "$d/$a.txt"
+    node "$REPO/scripts/rain-occlusion.mjs" --max $MAX --min-band $MIN_BAND --min-rain $MIN_RAIN "$d"/$a-*.png > "$d/$a.txt"
     echo $? > "$d/$a.rc"
   done
   g=$(cat "$d/guard.rc") p=$(cat "$d/plant.rc") y=$(cat "$d/dry.rc")

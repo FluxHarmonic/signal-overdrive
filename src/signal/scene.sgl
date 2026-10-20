@@ -247,6 +247,7 @@
     ;; and its debug view (scripts/rain-occlusion.mjs), from the tuning
     (define *rain-guard* 1.0)
     (define *rain-debug* #f)
+    (define *ahead-v* #f)
     ;; The road ahead on the screen, for the rain's guard: the centreline at
     ;; RAIN-AHEAD texels past the machine, each (x y half-width-px valid),
     ;; 32 floats; a point within 20 texels of the camera, or behind it, is
@@ -852,6 +853,10 @@
           (set! *rain-guard* (tuning-ref tuning 'fx-rain-guard))
           (set! *rain-debug* (> (tuning-ref tuning 'fx-rain-debug) 0.5))
           (fx-uniforms! r c st (cdr (assq 'fx-knob info)) (> (tuning-ref tuning 'fx-hold) 0.5))
+          ;; the road ahead, for the guard over both the ground's splash
+          ;; rings and the post pass's streaks (after fx-uniforms!: its dip)
+          (set! *ahead-v* (and (or (> *rain-guard* 0.0) *rain-debug*) (rain-ahead c (race-track r) (machine-s m))))
+          (mode7-set-ahead! (or *ahead-v* (make-list 32 0.0)))
           (set! *hud-interf* (* (if (> ((cdr (assq 'fx-knob info)) 'fx-interf) 0.0) 1.0 0.0) (fx-interf st)))
           (set! *hud-dropout* (and (> *hud-interf* 0.0) (fx-dropout st)))
           (set! *hud-frame* (quotient (fx-tick st) 2)))
@@ -881,8 +886,8 @@
           (set-pipeline-uniform! *lut-pipe* 'vp (list (* 0.5 VIEW-W) (+ (tuning-ref tuning 'horizon) *dip*) (or (info-get info 'fade) 0.0)
                                                       (if *calm* 1.0 0.0)))
           (set-pipeline-uniform! *lut-pipe* 'rain (list *rain-streaks* 0.28 *rain-guard* (if *rain-debug* 1.0 0.0)))
-          (when (or (> *rain-guard* 0.0) *rain-debug*)
-            (set-pipeline-uniform! *lut-pipe* 'ahead (rain-ahead c (race-track r) (machine-s m)))))
+          (when *ahead-v*
+            (set-pipeline-uniform! *lut-pipe* 'ahead *ahead-v*)))
         (when dither?
           (with-3d-pass *post* #f
             ;; fx-post-passes > 1 draws it again, to measure its GPU cost
