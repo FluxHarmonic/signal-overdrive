@@ -96,7 +96,7 @@
       (when *stream*
         (let ((g (env-gain heard)))
           (when (and (number? *env*) (>= g 1.0)) (set! *env* 'done))
-          (let ((g (* g (dip-gain))))
+          (let ((g (* g (dip-gain) (if *dead-air* 0.0 1.0))))
             (unless (eqv? g *volume*)
               (set-audio-stream-volume! *stream* g)
               (set! *volume* g))))))
@@ -110,6 +110,8 @@
     ;;   (music-fade-out! seconds)    CORRUPT: to nothing, and it stays
     ;;                                there until the next song starts
     (define *dip* #f)             ; (end-jiffy . level)
+    ;; Continuous contact mute. Samples keep flowing, preserving song time.
+    (define *dead-air* #f)
     (define *fade-out* #f)        ; (start-jiffy . seconds)
     (define (dip-gain)
       (let ((now (current-jiffy)) (per (* 1.0 (jiffies-per-second))))
@@ -492,11 +494,12 @@
 
     (define (music-frame! c paused?
                           (keys: (clock-fraction 0.0) (frame-jiffy #f)
-                                 (integrity #f) (boost 'keep)))
+                                 (integrity #f) (boost 'keep) (dead-air 'keep)))
       ;; a caller with no say (a focus change, F5) keeps what the last
       ;; frame passed: a resume primes its queue at the real damage
       (when integrity (set! *integrity* integrity))
       (unless (eq? boost 'keep) (set! *boost* boost))
+      (unless (eq? dead-air 'keep) (set! *dead-air* (and dead-air #t)))
       (let ((t0 (current-jiffy)))
         ;; A new song (a restart) lifts a CORRUPT fade-out; a resume keeps it.
         (when (and *first-log*

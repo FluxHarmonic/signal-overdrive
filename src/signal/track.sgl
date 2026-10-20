@@ -20,6 +20,7 @@
 (define-library (signal track)
   (import (sigil struct)
           (sigil math)
+          (signal ice schedule)
           (signal track oval-data)
           (signal track loop-data)
           (signal track quayside-data)
@@ -28,7 +29,9 @@
 
   (export track track? track-n track-length track-step track-samples track-cumulative
           track-boost track-repair track-ice track-world-width track-world-height track-district
+          track-ice-schedule
           make-track track-named loop-track TRACKS track-name track-index-of
+          track-live-ice-at track-tracer-slot
           track-x track-y track-tx track-ty track-hw track-line track-s
           probe probe? probe-s probe-d probe-hw probe-tx probe-ty probe-i
           track-probe track-point track-index-at wrap-s s-ahead
@@ -52,7 +55,8 @@
       (world-height default: 5120)
       ;; the track file's district (docklands ...), which picks the look:
       ;; (signal fx district); none for data generated before 0.2's look
-      (district default: 'none))
+      (district default: 'none)
+      (ice-schedule default: '()))
 
     (define-struct probe
       (s default: 0.0) (d default: 0.0) (hw default: 0.0)
@@ -67,7 +71,8 @@
     (define (track-line t i) (field t i 5))
     (define (track-s t i) (vector-ref (track-cumulative t) i))
 
-    ;; more: name, ICE patches, world width, world height, district (all optional).
+    ;; more: name, ICE patches, world width, world height, district,
+    ;; schedule (all optional).
     (define (make-track samples step boost repair . more)
       (let* ((n (quotient (vector-length samples) FIELDS))
              (cum (make-vector (+ n 1) 0.0)))
@@ -83,6 +88,7 @@
                world-width: (if (> (length more) 2) (list-ref more 2) 5120)
                world-height: (if (> (length more) 3) (list-ref more 3) 5120)
                district: (if (> (length more) 4) (list-ref more 4) 'none)
+               ice-schedule: (if (> (length more) 5) (list-ref more 5) '())
                n: n length: (vector-ref cum n) step: step samples: samples cumulative: cum
                boost: boost repair: repair)))
 
@@ -103,10 +109,19 @@
                                   (list-ref d 3) (list-ref d 4)
                                   (car d) (list-ref d 5)
                                   (list-ref d 6) (list-ref d 7)
-                                  (if (> (length d) 8) (list-ref d 8) 'none))))
+                                  (if (> (length d) 8) (list-ref d 8) 'none)
+                                  (if (> (length d) 9) (list-ref d 9) '()))))
               (set! *built* (cons (cons name t) *built*))
               t))))
     (define (loop-track) (track-named 'loop))
+
+    ;; Integration reads the generated schedule, never an independent policy.
+    ;; Crossings are lap1..finish ticks from the simulation/replay contract.
+    (define (track-live-ice-at t crossings seed tick)
+      (ice-zones-at (track-ice-schedule t) crossings seed tick))
+
+    (define (track-tracer-slot t crossings seed tick target-s u reservations)
+      (ice-tracer-slot (track-ice-schedule t) crossings seed tick target-s u reservations))
 
     (define (wrap-i t i) (modulo i (track-n t)))
     (define (wrap-s t s)

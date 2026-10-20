@@ -1,0 +1,35 @@
+;;; Read JSON-derived expectations as data and exercise the real runtime module.
+(import (sigil io)
+        (signal track))
+
+(define arguments
+  (let find ((remaining (cdr (command-line))))
+    (cond
+      ((null? remaining) '())
+      ((string=? (car remaining) "--") (cdr remaining))
+      (else (find (cdr remaining))))))
+(define cases (call-with-input-file (car arguments) read))
+(define checked 0)
+(for-each
+  (lambda (entry)
+    (let ((t (track ice-schedule: (car entry))) (crossings (cadr entry)))
+      (for-each
+        (lambda (query)
+          (let* ((seed (cadr query))
+                 (tick (caddr query))
+                 (zones? (string=? (car query) "zones"))
+                 (actual (if zones?
+                             (track-live-ice-at t crossings seed tick)
+                             (and (track-tracer-slot t crossings seed tick
+                                    (list-ref query 3) (list-ref query 4) (list-ref query 5))
+                                  #t)))
+                 (expected (list-ref query (if zones? 3 6))))
+            (unless (equal? actual expected)
+              (error "runtime schedule differs from approved authoring policy" query actual expected))
+            (set! checked (+ checked 1))))
+        (caddr entry))))
+  cases)
+(display "PASS runtime schedule parity: ")
+(display checked)
+(display " queries")
+(newline)

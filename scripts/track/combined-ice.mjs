@@ -1,209 +1,262 @@
-// Time-aware authoring proof. It checks potential live hazards at every
-// actual lap/bar boundary, not merely the one seed an autopilot encountered.
-// Current runtime has no automatic firewall scheduler; inferred schedules
-// below are deliberately conservative until an explicit policy is supplied.
+// Approved Neon Row section3 contract. No unbound external policy overrides.
 import fs from "node:fs";
+import { verifyCanonicalSchedule } from "./scheduler-check.mjs";
 import { loadTrack, worldSize } from "./format.mjs";
-import { sampleDefinition, trackDefinition } from "./geometry.mjs";
+import { liveContract, splitArc, arcsOverlap, mod, barAt, barTick, firstBar,
+  zonesAt, layerLive, layoutAt, tracerReservation } from "./schedule.mjs";
 
-const mod = (x, n) => ((x % n) + n) % n;
-
-function gap(intervals) {
-  let edge = -1, widest = 0;
-  for (const [left, right] of [...intervals].sort((a, b) => a[0] - b[0])) {
-    widest = Math.max(widest, left - edge);
+export function freeIntervals(intervals) {
+  let edge = -1;
+  const free = [];
+  for (const [left, right] of [...intervals].sort((a,b) => a[0]-b[0])) {
+    if (left > edge) free.push([edge, left]);
     edge = Math.max(edge, right);
   }
-  return Math.max(widest, 1 - edge);
+  if (edge < 1) free.push([edge, 1]);
+  return free;
+}
+const widest = intervals => Math.max(0, ...freeIntervals(intervals).map(([a,b]) => b-a));
+function distance(a, b, length) {
+  if (arcsOverlap(a, b, length)) return 0;
+  return Math.min(mod(b[0]-a[1], length), mod(a[0]-b[1], length));
 }
 
-function product(choices) {
-  let result = [{ ids: [], zones: [], owners: [], transition: false }];
-  for (const choice of choices) {
-    if (result.length * choice.length > 4096) throw new Error("combined ICE state product exceeds 4096");
-    result = result.flatMap(state => choice.map(option => ({
-      ids: [...state.ids, option.id], zones: [...state.zones, ...option.zones],
-      owners: [...state.owners, ...option.zones.map(zone => ({ zone, id: option.id }))],
-      transition: state.transition || Boolean(option.transition),
-    })));
+export function corridor(contract, zones) {
+  const length = contract.length, half = contract.halfWidth;
+  const ends = [...new Set([0, length, ...zones.flatMap(({zone}) => splitArc(zone[0],zone[1],length).flat())])].sort((a,b) => a-b);
+  // Closed footprints change only at endpoints. Every interior occupied set
+  // is a subset of an endpoint set; closest gaps between disjoint sets are
+  // also attained at endpoints. Include0/L to union the lap seam.
+  const probes = ends.map(s => [s,s]);
+  const slices = probes.map(([from,to]) => {
+    const s = (from+to)/2;
+    const active = zones.filter(({zone}) => arcsOverlap([s,s], zone, length));
+    return {from,to,s,intervals:active.map(z => z.zone.slice(2)),owners:[...new Set(active.map(z => z.owner))]};
+  }).filter(s => s.intervals.length);
+  let minimum = 2*half, first = null, neighbour = null;
+  for (const slice of slices) {
+    const width = widest(slice.intervals)*half;
+    if (width < minimum) { minimum=width; first={...slice,width}; }
   }
-  return result;
+  // Compare complete occupied cross-sections, not individual patches.
+  let sharedMinimum = 2*half;
+  for (let i=0; i<slices.length; i++) for (let j=i+1; j<slices.length; j++) {
+    const a=slices[i], b=slices[j];
+    const apart = distance([a.from,a.to],[b.from,b.to],length);
+    if (apart >= contract.rules.neighbour-1e-8) continue;
+    const width = widest([...a.intervals,...b.intervals])*half;
+    if (width < sharedMinimum) { sharedMinimum=width; neighbour={a,b,distance:apart,width}; }
+  }
+  return {pass:minimum+1e-8>=contract.rules.lane && sharedMinimum+1e-8>=contract.rules.lane,
+    minimum,sharedMinimum,first,neighbour};
 }
 
-function occupiedAt(z, s) {
-  return (z[0] <= s && s <= z[1]) || ((s === 0 || s === 1) && (z[0] === 0 || z[1] === 1));
-}
-
-function tracerCanReach(s, centers, halfLength) {
-  return centers.some(([a, b]) => [-1, 0, 1].some(offset =>
-    s + offset >= a - halfLength && s + offset <= b + halfLength));
-}
-
-// Exact piecewise-linear minimax for one adaptive tracer. Breakpoints occur
-// when either edge touches an occupied edge; between them the optimum is a
-// free interval's midpoint. This covers every legal lateral target, not a
-// handful of sampled lanes. Other tracer/drone patterns use finite layouts.
-function tracerCandidates(intervals, halfWidth, radius) {
-  const bounds = [-1, 1, ...intervals.flat()];
-  const lo = -1 + radius, hi = 1 - radius;
-  const candidates = [lo, hi];
-  for (const x of bounds) candidates.push(x - halfWidth, x + halfWidth);
-  for (const a of bounds) for (const b of bounds) if (a < b) candidates.push((a + b) / 2);
-  return [...new Set(candidates.map(x => Math.max(lo, Math.min(hi, x))))];
-}
-
-function inferredLayer(source, layer) {
-  const zone = source.musicZones.find(zone => zone.kind === "firewall"
-    && (zone.id === layer.id || zone.id === `${layer.id}-firewall`));
-  return { ...layer, kind: zone ? "firewall" : "seeded-static",
-    fromLap: zone ? (zone.sections.includes("lap2") ? 2 : 3) : 1,
-    // No authored cadence exists in v1: allow a change on ANY bar. This
-    // conservatively includes every phase of four/eight-bar phrases.
-    phraseBars: zone ? 1 : 0, upBars: 1, downBars: 0, phaseBars: 0 };
-}
-
-export function combinedIce(source, timing, policy = {}) {
-  if (timing.id !== undefined && timing.id !== source.id) throw new Error("ICE timing belongs to another track");
+function validateTiming(source, timing) {
+  if (timing.id!==undefined && timing.id!==source.id) throw new Error("ICE timing belongs to another track");
   const world = worldSize(source);
-  if (timing.world !== undefined && (timing.world?.width !== world.width
-    || timing.world?.height !== world.height)) throw new Error("ICE timing world dimensions disagree with track");
-  for (const key of Object.keys(policy)) if (!["layers", "extraLayers", "tracer", "machineWidth"].includes(key)) throw new Error(`unknown ICE policy field ${key}`);
+  if (timing.world!==undefined && (timing.world?.width!==world.width || timing.world?.height!==world.height)) throw new Error("ICE timing world dimensions disagree with track");
   const crossings = timing.crossings;
-  if (!Array.isArray(crossings) || crossings.length !== 4
-    || crossings.some((entry, i) => entry.lap !== i + 1 || !Number.isInteger(entry.tick) || entry.tick < 0
-      || (i && entry.tick <= crossings[i - 1].tick))) throw new Error("combined ICE needs actual ordered lap 1..4 crossing ticks");
-  const finish = crossings[3].tick;
-  const bpm = source.song.bpm;
-  const barTick = bar => Math.ceil(bar * 32 * 60 * 5 * 3 / (bpm * 2) - 1e-9);
-  const barAt = tick => Math.floor(tick * bpm * 2 / (32 * 60 * 5 * 3));
-  const firstBar = tick => {
-    const guess = barAt(tick);
-    return barTick(guess) < tick ? guess + 1 : guess;
-  };
-  const lapAt = tick => crossings.filter(entry => entry.tick <= tick).length;
-  for (const override of Object.values(policy.layers ?? {})) {
-    for (const key of Object.keys(override)) if (!["kind", "fromLap", "phraseBars", "upBars", "downBars", "phaseBars"].includes(key)) {
-      throw new Error(`unknown layer schedule field ${key}; authored layouts cannot be replaced by timing policy`);
-    }
-  }
-  const layers = source.iceLayers.map(layer => ({ ...inferredLayer(source, layer), ...(policy.layers?.[layer.id] ?? {}) }));
-  layers.push(...(policy.extraLayers ?? []));
-  if (policy.layers && Object.keys(policy.layers).some(id => !source.iceLayers.some(layer => layer.id === id))) throw new Error("policy references unknown ICE layer");
-  for (const layer of layers) {
-    if (typeof layer.id !== "string" || !layer.id.length
-      || !["firewall", "drone", "tracer", "seeded-static"].includes(layer.kind)
-      || !Array.isArray(layer.layouts) || !layer.layouts.length
-      || !Number.isInteger(layer.fromLap) || layer.fromLap < 1 || layer.fromLap > 3
-      || !Number.isInteger(layer.phraseBars) || layer.phraseBars < 0
-      || !Number.isInteger(layer.upBars) || layer.upBars < 1
-      || !Number.isInteger(layer.downBars) || layer.downBars < 0
-      || !Number.isInteger(layer.phaseBars)) throw new Error(`incomplete timed ICE layer ${layer.id}`);
-    for (const layout of layer.layouts) for (const z of layout.zones) {
-      if (z.length !== 4 || !z.every(Number.isFinite) || z[0] < 0 || z[0] >= z[1]
-        || z[1] > 1 || z[2] < -1 || z[2] >= z[3] || z[3] > 1) throw new Error("invalid timed ICE zone");
-    }
-  }
-  for (const key of Object.keys(policy.tracer ?? {})) {
-    if (!["enabled", "fromLap", "halfWidth", "halfLength", "liveTicks", "periodBars", "centers"].includes(key)) throw new Error(`unknown tracer policy field ${key}`);
-  }
-  const tracer = { enabled: source.role === "race", fromLap: 3, halfWidth: 34,
-    halfLength: 460, liveTicks: 6, periodBars: 1, centers: [[0, 1]], ...(policy.tracer ?? {}) };
-  if (typeof tracer.enabled !== "boolean" || !Number.isInteger(tracer.fromLap) || tracer.fromLap < 1 || tracer.fromLap > 3
-    || !Number.isFinite(tracer.halfWidth) || tracer.halfWidth <= 0
-    || !Number.isFinite(tracer.halfLength) || tracer.halfLength <= 0
-    || !Number.isInteger(tracer.liveTicks) || tracer.liveTicks < 1 || tracer.liveTicks > Math.floor(barTick(1))
-    || !Number.isInteger(tracer.periodBars) || tracer.periodBars < 1
-    || !Array.isArray(tracer.centers) || tracer.centers.some(z => z.length !== 2
-      || !z.every(Number.isFinite) || z[0] < 0 || z[0] >= z[1] || z[1] > 1)) throw new Error("invalid adaptive tracer policy");
-  const tracerStart = firstBar(crossings[tracer.fromLap - 1].tick) + 1; // a full telegraph bar
-  const boundaries = new Set([crossings[0].tick, ...crossings.map(entry => entry.tick)]);
-  for (let bar = 0; barTick(bar) <= finish; bar++) {
-    boundaries.add(barTick(bar));
-    if (bar >= tracerStart && mod(bar - tracerStart, tracer.periodBars) === 0) boundaries.add(barTick(bar) + tracer.liveTicks);
-  }
-  const length = sampleDefinition(trackDefinition(source)).LENGTH;
-  const half = source.geometry.halfWidth;
-  const machineWidth = policy.machineWidth ?? 18;
-  if (!Number.isFinite(machineWidth) || machineWidth <= 0 || machineWidth >= 2 * half) throw new Error("invalid machine width");
-  let narrowest = 2 * half, witness = null, firstFailure = null;
-  let firstTracerFirewallFailure = null, checkedStates = 0, transitions = 0;
-  const laps = crossings.slice(0, 3).map((entry, i) => ({ lap: entry.lap,
-    fromTick: entry.tick, toTick: crossings[i + 1].tick, narrowest: 2 * half }));
-  const active = (layer, tick) => tick >= crossings[layer.fromLap - 1].tick && tick < finish
-    && mod(barAt(tick) + layer.phaseBars, layer.upBars + layer.downBars) < layer.upBars;
-  for (const tick of [...boundaries].sort((a, b) => a - b)) {
-    if (tick < crossings[0].tick || tick >= finish) continue;
-    const bar = barAt(tick), lap = lapAt(tick);
-    const choices = layers.map(layer => {
-      const now = active(layer, tick), before = active(layer, tick - 1);
-      if (!now && !before) return [{ id: `${layer.id}/down`, zones: [] }];
-      // Preserve ending hazards at a transition so two different kinds
-      // cannot silently exchange disjoint free lanes at the same boundary.
-      if (!now) return layer.layouts.map(layout => ({ id: `${layer.kind}:${layer.id}/${layout.id}/ending`, zones: layout.zones, transition: true }));
-      const rotating = layer.phraseBars > 0 && tick === barTick(bar)
-        && mod(bar + layer.phaseBars, layer.phraseBars) === 0 && before;
-      if (!rotating) return layer.layouts.map(layout => ({ id: `${layer.kind}:${layer.id}/${layout.id}`, zones: layout.zones }));
-      transitions++;
-      // Even an instantaneous swap needs a common free corridor. Without a
-      // down interval, opposite free lanes cannot be treated independently.
-      return layer.layouts.flatMap(before => layer.layouts.map(after => ({
-        id: `${layer.kind}:${layer.id}/${before.id}->${after.id}`,
-        zones: [...before.zones, ...after.zones],
-        transition: before.id !== after.id,
-      })));
-    });
-    const tracerActive = at => {
-      const b = barAt(at);
-      return tracer.enabled && b >= tracerStart && mod(b - tracerStart, tracer.periodBars) === 0
-        && at < barTick(b) + tracer.liveTicks && at >= crossings[tracer.fromLap - 1].tick;
-    };
-    const tracerLive = tracerActive(tick) || tracerActive(tick - 1);
-    for (const state of product(choices)) {
-      checkedStates++;
-      const zones = [...source.zones.ice, ...state.zones];
-      const sweptEnds = tracer.centers.flatMap(([a, b]) => [mod(a - tracer.halfLength / length, 1), mod(b + tracer.halfLength / length, 1)]);
-      const ends = [...new Set([0, 1, ...zones.flatMap(z => z.slice(0, 2)), ...sweptEnds])].sort((a, b) => a - b);
-      const probes = [...ends, ...ends.slice(1).map((end, i) => (end + ends[i]) / 2)];
-      for (const s of probes) {
-        const intervals = zones.filter(z => occupiedAt(z, s)).map(z => z.slice(2));
-        const activeOwners = [...source.zones.ice.flatMap((z, i) => occupiedAt(z, s) ? [`static/${i}`] : []),
-          ...state.owners.filter(owner => occupiedAt(owner.zone, s)).map(owner => owner.id)];
-        const beforeTracer = gap(intervals) * half;
-        const centers = tracerLive && tracerCanReach(s, tracer.centers, tracer.halfLength / length)
-          ? tracerCandidates(intervals, tracer.halfWidth / half, machineWidth / 2 / half) : [null];
-        for (const center of centers) {
-          const union = center === null ? intervals : [...intervals, [Math.max(-1, center - tracer.halfWidth / half), Math.min(1, center + tracer.halfWidth / half)]];
-          const width = gap(union) * half;
-          const event = { tick, bar, lap, s, layouts: state.ids, tracerCenter: center,
-            tracerLive, active: union, activeOwners, transition: state.transition };
-          if (!firstFailure && width < 1.5 * machineWidth) firstFailure = { ...event, width };
-          if (!firstTracerFirewallFailure && center !== null && beforeTracer >= 1.5 * machineWidth
-            && width < 1.5 * machineWidth && activeOwners.some(id => id.startsWith("firewall:"))) {
-            firstTracerFirewallFailure = { ...event, beforeTracer, width };
-          }
-          laps[lap - 1].narrowest = Math.min(laps[lap - 1].narrowest, width);
-          if (width < narrowest) {
-            narrowest = width;
-            witness = event;
-          }
-        }
+  if (!Array.isArray(crossings) || crossings.length!==4 || crossings.some((e,i) => e.lap!==i+1
+    || !Number.isInteger(e.tick) || e.tick<0 || (i && e.tick<=crossings[i-1].tick))) throw new Error("combined ICE needs actual ordered lap 1..4 crossing ticks");
+}
+
+function sideChange(contract, oldLayout, newLayout) {
+  return oldLayout.zones.some(a => newLayout.zones.some(b => {
+    if (!arcsOverlap(a,b,contract.length)) return false;
+    const oldSide=Math.sign(a[2]+a[3]), newSide=Math.sign(b[2]+b[3]);
+    return oldSide*newSide<0 || widest([a.slice(2),b.slice(2)])*contract.halfWidth+1e-8<contract.rules.lane;
+  }));
+}
+
+function lateralTargets(contract, zones) {
+  const half=contract.rules.tracerHalfWidth/contract.halfWidth;
+  const radius=9/contract.halfWidth, lo=-1+radius, hi=1-radius;
+  const bounds=[-1,1,...zones.flatMap(z => z.zone.slice(2))];
+  const points=[lo,hi];
+  for (const x of bounds) points.push(x-half,x+half);
+  for (const a of bounds) for (const b of bounds) if (a<b) points.push((a+b)/2);
+  return [...new Set(points.map(x => Math.max(lo,Math.min(hi,x))))];
+}
+
+function longitudinalTargets(contract, stretch, zones) {
+  const half=contract.rules.tracerHalfLength;
+  if (stretch.to-stretch.from<2*half) return [];
+  const lo=stretch.from+half, hi=stretch.to-half, points=[lo,hi];
+  // Every occupancy and960-neighbour breakpoint, plus intervening cells.
+  for (const item of zones) for (const end of item.zone.slice(0,2)) {
+    for (const delta of [-half,half,-half-contract.rules.neighbour,half+contract.rules.neighbour]) {
+      for (const wrap of [-1,0,1,2]) {
+        const p=end+delta+wrap*contract.length;
+        if (p>lo && p<hi) points.push(p);
       }
     }
   }
-  return { id: source.id, world: worldSize(source), crossings, pass: narrowest >= 1.5 * machineWidth, required: 1.5 * machineWidth,
-    narrowest, checkedStates, transitions, witness, firstFailure, firstTracerFirewallFailure,
-    laps: laps.map(entry => ({ ...entry, pass: entry.narrowest >= 1.5 * machineWidth })),
-    timing: "actual simulation lap crossings; exact conductor bar ticks",
-    policySource: Object.keys(policy).length ? "explicit authoring policy" : "conservative unbound live-ICE contract (all bar phases)",
-    runtimeParity: "automatic live ICE scheduling is not implemented in the current game; runtime integration must use this policy or export an equivalent exhaustive trace" };
+  points.sort((a,b) => a-b);
+  return [...new Set([...points,...points.slice(1).map((p,i) => (p+points[i])/2)])].map(p => mod(p,contract.length));
 }
 
-if (process.argv[1] === new URL(import.meta.url).pathname) {
-  const [trackFile, timingFile, output, policyFile] = process.argv.slice(2);
-  if (!trackFile || !timingFile || !output) throw new Error("usage: combined-ice.mjs track.json ai.json output.json [policy.json]");
-  const result = combinedIce(loadTrack(trackFile), JSON.parse(fs.readFileSync(timingFile)),
-    policyFile ? JSON.parse(fs.readFileSync(policyFile)) : {});
-  fs.writeFileSync(output, JSON.stringify(result, null, 2) + "\n");
+export function tracerFootprint(contract, center, u) {
+  const r=contract.rules;
+  return {owner:"$tracer",kind:"tracer",layout:"target",
+    zone:[center-r.tracerHalfLength,center+r.tracerHalfLength,
+      Math.max(-1,u-r.tracerHalfWidth/contract.halfWidth),Math.min(1,u+r.tracerHalfWidth/contract.halfWidth)]};
+}
+
+export function tracerAllowed(contract, crossings, seed, tick, targetS, u, reservations=[]) {
+  const r=contract.rules, bar=barAt(contract,tick);
+  if (!Number.isInteger(seed) || seed<0 || !Number.isFinite(targetS) || !Number.isFinite(u)
+    || Math.abs(u)>1-9/contract.halfWidth+1e-8) return {pass:false,reason:"invalid-tracer-target"};
+  if (!Number.isFinite(crossings[contract.tracer.fromLap-1]?.tick)) return {pass:false,reason:"tracer-lap-not-started"};
+  const start=firstBar(contract,crossings[contract.tracer.fromLap-1].tick)+r.telegraphBars;
+  if (!contract.tracer.enabled || tick!==barTick(contract,bar) || bar<start
+    || mod(bar-start,contract.tracer.periodBars)
+    || (Number.isFinite(crossings[3]?.tick) && tick>=crossings[3].tick)) return {pass:false,reason:"tracer-not-eligible-downbeat"};
+  const center=mod(targetS+r.tracerAhead,contract.length);
+  const reservation=tracerReservation(contract,crossings,seed,tick,center,reservations);
+  if (!reservation.pass) return {...reservation,center};
+  const result=corridor(contract,[...zonesAt(contract,crossings,seed,tick),tracerFootprint(contract,center,u)]);
+  if (!result.pass) return {pass:false,reason:"tracer-neighbour-or-lane",center,corridor:result};
+  return {...reservation,center,telegraphTick:barTick(contract,bar-r.telegraphBars),corridor:result};
+}
+
+export function auditTracerEvents(contract, crossings, events) {
+  const failures=[], reservations=[];
+  for (const event of [...events].sort((a,b) => a.tick-b.tick)) {
+    if (!["tick","until","telegraphTick","targetS","u","center","halfLength","halfWidth"].every(k => Number.isFinite(event[k]))) {
+      failures.push({rule:1,reason:"malformed-runtime-event",event});
+      continue;
+    }
+    const r=contract.rules, bar=barAt(contract,event.tick);
+    const expectedCenter=mod(event.targetS+r.tracerAhead,contract.length);
+    const planned=tracerAllowed(contract,crossings,event.seed??0,event.tick,event.targetS,event.u,reservations);
+    let rule=null, reason=null;
+    if (event.tick!==barTick(contract,bar) || !Number.isInteger(event.telegraphTick)
+      || event.telegraphTick>barTick(contract,bar-r.telegraphBars)) { rule=1; reason="telegraph-shorter-than-bar"; }
+    else if (Math.abs(event.center-expectedCenter)>1e-6 || event.until!==event.tick+r.tracerLifeTicks
+      || event.halfLength!==r.tracerHalfLength || event.halfWidth!==r.tracerHalfWidth) { rule=3; reason="wrong-whole-strip-or-life"; }
+    else if (!planned.pass) { rule=planned.reason==="tracer-neighbour-or-lane"?5:3; reason=planned.reason; }
+    if (rule) failures.push({rule,reason,event,planned});
+    else reservations.push({tick:event.tick,until:planned.until,stretch:planned.stretch});
+  }
+  return {pass:!failures.length,failures};
+}
+
+export function combinedIce(source, timing, policy, observe = () => {}) {
+  if (policy!==undefined && Object.keys(policy).length) throw new Error("live ICE schedule belongs in track data; external policy overrides are forbidden");
+  validateTiming(source,timing);
+  const contract=liveContract(source), crossings=timing.crossings, r=contract.rules;
+  const rules=Object.fromEntries([1,2,3,4,5,6].map(id => [id,{pass:true,firstFailure:null}]));
+  const fail=(id,witness) => { if (rules[id].pass) rules[id]={pass:false,firstFailure:witness}; };
+  let combinations=1;
+  for (const layer of contract.layers) combinations*=layer.layouts.length;
+  if (combinations>4096) throw new Error("combined ICE seed product exceeds4096");
+  const firstTick=crossings[0].tick, finish=crossings[3].tick;
+  const times=new Set(crossings.slice(0,3).map(e => e.tick));
+  for (let b=barAt(contract,firstTick); barTick(contract,b)<finish; b++) if (barTick(contract,b)>=firstTick) times.add(barTick(contract,b));
+  const ordered=[...times].sort((a,b) => a-b);
+  const laps=crossings.slice(0,3).map((e,i) => ({lap:i+1,fromTick:e.tick,toTick:crossings[i+1].tick,narrowest:2*contract.halfWidth}));
+  let narrowest=2*contract.halfWidth, checkedStates=0, ownershipProofs=0;
+  const tracer={attempts:0,legalTargets:0,yieldedReservations:0,yieldedNeighbours:0,waitBars:0};
+  const repair=[source.zones.repair[0]*contract.length,source.zones.repair[1]*contract.length,...source.zones.repair.slice(2)];
+  for (const layer of contract.layers) for (const layout of layer.layouts) {
+    if (!["firewall","drone"].includes(layer.kind)) continue;
+    const limit=layer.kind==="firewall"?.6:.4;
+    const ends=[...new Set(layout.zones.flatMap(z => z.slice(0,2)))].sort((a,b) => a-b);
+    const probes=[...ends,...ends.slice(1).map((s,i) => (s+ends[i])/2)];
+    for (const s of probes) {
+      const intervals=layout.zones.filter(z => arcsOverlap([s,s],z,contract.length)).map(z => z.slice(2));
+      const covered=2-freeIntervals(intervals).reduce((n,[a,b]) => n+b-a,0);
+      if (covered>2*limit+1e-8) fail(6,{reason:"cover-limit",owner:layer.id,layout:layout.id,at:s,coveredFraction:covered/2,maximum:limit});
+    }
+    for (const zone of layout.zones) if (arcsOverlap(zone,repair,contract.length)
+      && Math.max(zone[2],repair[2])<=Math.min(zone[3],repair[3])) fail(6,{reason:"checksum-lane",owner:layer.id,layout:layout.id,zone});
+  }
+  for (let seed=0; seed<combinations; seed++) {
+    const previous=new Map();
+    for (const tick of ordered) {
+      const bar=barAt(contract,tick), lap=crossings.filter(e => e.tick<=tick).length;
+      const zones=zonesAt(contract,crossings,seed,tick), base=corridor(contract,zones);
+      observe({op:"zones",seed,tick,zones});
+      observe({op:"corridor",zones,pass:base.pass});
+      checkedStates++;
+      narrowest=Math.min(narrowest,base.minimum,base.sharedMinimum);
+      laps[lap-1].narrowest=Math.min(laps[lap-1].narrowest,base.minimum,base.sharedMinimum);
+      const context={seed,tick,bar,lap};
+      if (base.minimum+1e-8<r.lane) fail(1,{...context,reason:"combined-lane",...base.first});
+      if (base.sharedMinimum+1e-8<r.lane) fail(5,{...context,reason:"neighbours-without-common-lane",...base.neighbour});
+      for (const stretch of contract.stretches) {
+        const owners=[...new Set(zones.filter(z => stretch.owners.includes(z.owner)
+          && arcsOverlap([stretch.from,stretch.to],z.zone,contract.length)).map(z => z.owner))];
+        if (owners.length>1) {
+          ownershipProofs++;
+          // Rule2's explicit exception requires universal combined proof.
+          if (!base.pass) fail(2,{...context,reason:"multiple-owners-without-combined-proof",stretch:stretch.id,owners,corridor:base});
+        }
+      }
+      let digits=seed;
+      for (const layer of contract.layers) {
+        const digit=digits%layer.layouts.length; digits=Math.floor(digits/layer.layouts.length);
+        if (layer.kind==="seeded-static" || !layerLive(contract,layer,crossings,tick)) continue;
+        const layout=layoutAt(layer,bar,digit);
+        if (!layout.zones.length) continue;
+        const old=previous.get(layer.id);
+        if (old && old.bar!==bar && sideChange(contract,old.layout,layout) && bar-old.bar<2) {
+          fail(4,{...context,reason:"opposite-side-swap-without-full-rest",owner:layer.id,from:old.layout.id,to:layout.id,lastLiveBar:old.bar});
+        }
+        previous.set(layer.id,{bar,layout});
+      }
+      const start=firstBar(contract,crossings[contract.tracer.fromLap-1].tick)+r.telegraphBars;
+      if (!contract.tracer.enabled || tick!==barTick(contract,bar) || bar<start) continue;
+      // Collect requests on every bar. A tier may change tracer cadence;
+      // checking only the base period would miss its shifted strike bars.
+      const eligible=mod(bar-start,contract.tracer.periodBars)===0;
+      if (eligible) tracer.attempts++;
+      let legal=0;
+      for (const stretch of contract.stretches) for (const center of longitudinalTargets(contract,stretch,zones)) {
+        const reserve=tracerReservation(contract,crossings,seed,tick,center);
+        if (!reserve.pass) {
+          if (eligible) tracer.yieldedReservations++;
+          // A lower-density tier may release this stretch. Keep every
+          // critical lateral target in the canonical tier inventory too.
+        }
+        for (const u of lateralTargets(contract,zones)) {
+          const slot=tracerAllowed(contract,crossings,seed,tick,mod(center-r.tracerAhead,contract.length),u);
+          observe({op:"tracer",seed,tick,targetS:mod(center-r.tracerAhead,contract.length),u,pass:slot.pass});
+          if (!slot.pass) { if (eligible && reserve.pass) tracer.yieldedNeighbours++; continue; }
+          legal++; tracer.legalTargets++;
+          narrowest=Math.min(narrowest,slot.corridor.minimum,slot.corridor.sharedMinimum);
+          laps[lap-1].narrowest=Math.min(laps[lap-1].narrowest,slot.corridor.minimum,slot.corridor.sharedMinimum);
+        }
+      }
+      if (eligible && !legal) tracer.waitBars++;
+    }
+  }
+  const failures=Object.entries(rules).filter(([,v]) => !v.pass).map(([rule,v]) => ({rule:Number(rule),...v.firstFailure}));
+  return {id:source.id,world:worldSize(source),crossings,pass:!failures.length,required:r.lane,
+    narrowest,combinations,checkedStates,ownershipProofs,rules,tracer,
+    narrowestScope:"finite layout/critical tracer witnesses; every admitted tracer target also passes the exact continuous corridor guard",
+    stretches:contract.stretches,firstFailure:failures[0]??null,
+    laps:laps.map(l => ({...l,pass:l.narrowest+1e-8>=r.lane})),
+    timing:"actual lap crossings and exact conductor bar ticks",
+    policySource:"approved Neon Row bible section3, track-authored cadence",
+    runtimeParity:"same compiled schedule data; pure runtime queries verified separately; visual/collision activation remains integration work"};
+}
+
+if (process.argv[1]===new URL(import.meta.url).pathname) {
+  const [trackFile,timingFile,output,policyFile]=process.argv.slice(2);
+  if (!trackFile||!timingFile||!output||policyFile) throw new Error("usage: combined-ice.mjs track.json ai.json output.json (schedule is track data)");
+  const source=loadTrack(trackFile), timing=JSON.parse(fs.readFileSync(timingFile));
+  const queries=[];
+  const result=combinedIce(source,timing,undefined,query=>queries.push(query));
+  const placementQueries=[];
+  for (const layer of liveContract(source).layers) for (const layout of layer.layouts)
+    for (const zone of layout.zones) placementQueries.push({op:"placement",owned:{owner:layer.id,kind:layer.kind,layout:layout.id,zone}});
+  // Acceptance MUST execute the game's implementation. JS is an independent
+  // diagnostic oracle only; unavailable runtime or any disagreement is RED.
+  result.canonical=verifyCanonicalSchedule(liveContract(source),timing.crossings,[...placementQueries,...queries],source);
+  result.pass=result.pass && result.canonical.pass;
+  result.runtimeParity="acceptance executes (signal ice schedule), the game's implementation; diagnostic disagreement fails closed";
+  fs.writeFileSync(output,JSON.stringify(result,null,2)+"\n");
   console.log(JSON.stringify(result));
-  if (!result.pass) process.exitCode = 1;
+  if (!result.pass) process.exitCode=1;
 }

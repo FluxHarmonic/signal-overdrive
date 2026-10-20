@@ -1,0 +1,34 @@
+#!/bin/sh
+# Phantom-only private review artifact. No publish, deploy, tag or release.
+set -eu
+cd "$(dirname "$0")/../.."
+track_source="$(pwd)"
+track_run="$1"
+track_commit="$2"
+mkdir -p "$track_run"
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'track_code=$?; printf "RESULT: isolated native review artifact exit %s; inspect smoke and provenance\n" "$track_code" > "$track_run/RESULT"' EXIT
+printf 'copy completed native bundle and current assets into isolated review tree\n' > "$track_run/STAGE"
+track_review="$track_run/review"
+mkdir -p "$track_review/build/release/bin" "$track_review/scripts"
+cp build/release/bin/signal-overdrive "$track_review/build/release/bin/"
+cp -a assets "$track_review/"
+cp manifest.scm "$track_review/"
+cp LICENSE "$track_review/"
+cp scripts/dev "$track_review/scripts/"
+printf '%s\n' "$track_commit" > "$track_review/SOURCE_COMMIT"
+printf '%s\n' 'Private native review build, not a release.' \
+  'From this directory run: scripts/dev build/release/bin/signal-overdrive --dev --track=basin' \
+  'Registered tracks: breakwater, quayside, basin, oval. Default tier: COURIER.' \
+  'Requires the existing Guix manifest environment. No browser or server.' \
+  'Source/proof provenance is in SOURCE_COMMIT and the task Session Log.' \
+  > "$track_review/README.txt"
+cd "$track_review"
+sha256sum build/release/bin/signal-overdrive > SHA256SUMS
+printf 'smoke isolated copied native artifact on private Xvfb\n' > "$track_run/STAGE"
+node "$track_source/scripts/track/native-world.mjs" "$track_run/native" > "$track_run/native.log" 2>&1
+cd "$track_run"
+tar -czf signal-native-review.tar.gz review
+sha256sum signal-native-review.tar.gz > signal-native-review.tar.gz.sha256
+printf 'finished; isolated private review archive ready, no publication\n' > "$track_run/STAGE"

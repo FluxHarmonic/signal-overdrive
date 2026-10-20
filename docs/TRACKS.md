@@ -48,17 +48,17 @@ the line. Lateral coordinates are half-width units: −1 left, +1 right.
 | `zones.ice` | `[[from, to, left, right], ...]`; static ICE |
 | `iceLayers` | `[{id, layouts: [{id, zones: [...]}, ...]}, ...]` |
 | `sections` | `[{id, from, to, label}, ...]`; map annotations |
-| `musicZones` | `[{id, kind, from, to, sections: [mark,...]}, ...]`; `drop`, `searchlights`, `firewall` |
+| `musicZones` | `[{id, kind, from, to, sections: [mark,...]}, ...]`; `drop`, `searchlights`, `firewall`, `drone` |
 | `decoration` | `{puddles: 70}`; deterministic paint seed remains 7 |
 
 Intervals have `0 <= from < to <= 1`. Split intervals that cross the line.
-Every seeded layout combines with the static ICE and one layout from each
-other layer. The free-lane gate checks the full Cartesian product, including
-touching endpoints. The product is capped at 4096; larger inputs fail.
+Permanent seeded layouts combine with static road ICE. Their lane gate checks
+the full Cartesian product, including touching endpoints. Live layers use the
+approved time-aware gate below. The product is capped at 4096; larger inputs fail.
 Offline `--seed N` selects the layouts by mixed-radix index, in layer order;
-seeds 0 through product−1 cover every combination. The same selection paints
-the ICE and produces the runtime collision zones. Runtime reseeding and
-live firewalls/tracers are separate gameplay features.
+seeds 0 through product−1 cover every combination. Permanent selections paint
+the ICE and produce permanent collision zones. Live firewall/drone layouts are
+exported in the schedule, without being baked into permanent ICE or art.
 
 `song` binds `{id, cues: "music/<song-id>/cues.sgl", bpm, sections}`. The
 section targets are the existing conductor contract, in this order:
@@ -161,41 +161,109 @@ node scripts/track/combined-ice.mjs tracks/oval.json build/track/oval-ai.json \
   build/track/oval-combined.json
 ```
 
-An optional fourth argument supplies a policy JSON file. `layers` maps an
-existing layer ID to `{kind, fromLap, phraseBars, upBars, downBars, phaseBars}`;
-`kind` is `firewall`, `drone`, `tracer` or `seeded-static`. `extraLayers`
-adds finite drone/tracer layout sets with the same schedule fields.
-The adaptive `tracer` policy has `enabled`, `fromLap`, `halfWidth`,
-`halfLength`, `periodBars`, `liveTicks`, and allowed longitudinal `centers`.
-The gate covers every legal lateral tracer target analytically, combined
-with every seeded layout of every other kind, at actual lap/bar boundaries.
+The schedule lives in each `iceLayers[]` entry, beside `id` and `layouts`:
 
-Without a bound live-runtime policy, race tracks use a conservative model:
-tracers from lap 3, a full bar of telegraph, 34-texel half-width and
-460-texel half-length; firewall layouts may change on any bar with no rest.
-This deliberately includes unknown phrase phases. Firewall activation is
-inferred from its music zone's lap2/traced binding. It is an authoring
-counterexample search, not a claim that live scheduling exists in runtime.
-The present game's tracer path is a developer-triggered visual effect;
-automatic gameplay firewalls and drones remain separate integration work.
-That integration must share this policy or export equivalent exhaustive
-timed footprints; a one-seed replay is insufficient.
+```json
+{"id":"wall", "kind":"firewall", "fromLap":3, "phraseBars":4,
+ "upBars":1, "downBars":1, "phaseBars":0,
+ "layouts":[{"id":"left", "zones":[[0.4,0.435,-1,0.2]]}]}
+```
 
-At a layout/cadence boundary, the union includes ending and starting
-hazards. Opposite free lanes cannot silently exchange sides without a
-common corridor. A full down bar allows a reset, but the combined state
-must still include other live hazards. Reports retain the first closure's
-tick, bar, lap, location, active intervals and all participating layouts.
+Kinds are `firewall`, `drone` (the design's swarm), and `seeded-static`.
+Live cadence is `(bar + phaseBars) mod (upBars + downBars) < upBars`.
+Phrase layout index is `(seedDigit + floor((bar + phaseBars)/phraseBars))
+mod layoutCount`; `phraseBars:0` fixes it. Seed digits use the same mixed-radix
+order as generation. Static layers keep their selected layout throughout.
+Live layers first rise on an eligible downbeat after a full telegraph bar
+following `fromLap`'s observed crossing. Missing legacy firewall cadence is
+zero-rest diagnostic data, not an approved implicit fix. External policy
+overrides are rejected. Top-level `tracer` may set `enabled`, `fromLap` and
+`periodBars`; footprint dimensions and safety limits are fixed.
 
-The e5213c0 Quayside and Basin snapshots retain RED measured evidence in
-`test/fixtures/tracks/evidence/`. Both pass par (31.550s and31.383s), but
-fail a zero-rest layout change and a separate tracer/firewall overlap.
-These files are counterexamples for integration, not approved track assets.
-`sh scripts/track/check-par /tmp/par-check` measures loop and both snapshots
-and proves real approximately20s/40s duration refusals. `check-followup`
-reuses an explicitly named prior atlas output plus fresh timing to verify
-that unsafe combined reports cannot satisfy final acceptance; it does not
-change a RED fixture to PASS. Native build and smoke use `check-final`.
-`sh scripts/track/check-world /tmp/world-check` exercises the current world
-extension, all 5120 fixtures, rectangular/8192 generation, source suites and
-native rendering; it expects and verifies the documented RED draft hazards.
+The approved Neon Row bible §3 rules are enforced together:
+
+- Every point and change keeps a reachable 27-texel lane and a full bar of
+  telegraph. Hazards closer than 960 texels share a 27-texel corridor; this
+  comparison uses complete occupied cross-sections and wraps over the line.
+- Each physical straight or same-direction sweeper carrying ICE reserves
+  its whole run plus 300 texels at each end. Overlapping stretches merge,
+  including across the start line. Untouched run portions can host tracers.
+  Static ICE owns its stretch throughout the race. A second owner needs the
+  bible's explicit exception: universal combined proof for every seeded
+  layout and tracer target. Otherwise the gate rejects the conflict.
+- Tracers use a 920×68 strip centred 600 texels ahead of the target, after
+  a full telegraph bar. The whole strip must fit one stretch free for its
+  six-tick life plus a bar. Prior tracer reservations also count. If no legal
+  target remains, it waits for the next eligible bar. Neighbour-unsafe targets
+  are rejected by an exact continuous corridor guard, at every lateral target.
+- Opposite-side swaps require a full down bar, including swarm side swaps.
+  A safe same-side continuation does not force an extra rest.
+- Firewall coverage is at most 60%, drone coverage at most 40%, and neither
+  may overlap the checksum/repair lane. Rivals do not count as ICE closures.
+
+`track-ice-schedule` holds generated quoted data. Runtime consumers
+`track-live-ice-at` and `track-tracer-slot` read that data through
+`(signal ice schedule)`, using simulation ticks, seed and lap-crossing history.
+Crossing history has four entries (lap1 through finish), with `#f` for not yet
+observed crossings; no future lap/finish oracle is needed. An unknown future
+owner cannot establish a free tracer reservation, so the planner yields.
+The gate uses complete actual crossing history from the AI/replay report.
+Runtime placement results include stretch ID, reservation end, strip centre
+and telegraph tick. `(signal ice runtime)` advances the same scheduler in the
+race, publishes warnings before strikes, and retains life-plus-bar reservations.
+`(signal ice placement)` supplies the shared local-curvature, checksum and
+1900-texel visibility admission. Future crests/terrain need an occlusion test.
+The combined CLI executes these actual Sigil modules; disagreement with its
+independent JavaScript diagnostic oracle is a failure. It also checks all three
+shared tier contracts, including tracer bars shifted by tier telegraph/cadence.
+
+`(signal tiers)` owns LEARNER/COURIER/ELITE pace and ICE density as data.
+Their rival pace is 0.92/0.97/1.02. Live-layer density retains every third,
+second or first authored UP opportunity, counted separately for each layer
+with its phase. Counting absolute song bars would erase odd-phase layers at
+COURIER; the phase sabotage requires both firewall and swarm to survive every
+tier. Density never activates an authored down bar or changes a footprint.
+`race-new` takes `tier:`, `mode:` (`run` or `time-trial`) and `seed:` keywords;
+flow passes these selections and must not scale rival pace itself. Time trial
+removes rivals and ICE. Finale rivals Null and Void alternate eight-bar turns.
+Null announces lane changes a beat ahead. Void's reserved, telegraphed wake
+counts in the corridor guard, clears at handoff, and mutes music only on contact
+while playback time advances. Rival bodies are excluded from the ICE gate.
+Curved active/warning meshes and dedicated pair sprites are wired into the
+scene; source/native/audio/draw tests remain separate from track acceptance.
+The handling oval has no authored automatic live hazards.
+
+Run `check-pair-wake` for the shared placement, runtime, race and canonical
+oracle regressions. `check-density-cup` drives all three cup tracks at every
+tier, reporting actual lap crossings, PAR and per-kind hazard/paired-rival
+observations. `check-density-histories` then audits those crossing reports
+with the canonical scheduler across seeds and shared tier profiles. Keep
+each individual status: an overall timeout never establishes acceptance.
+
+On Phantom, `check-native-direct` checks the real queued audio mute and
+visible curved meshes for every ICE kind. `check-native-scene` uses the
+existing standard native runner to capture complete shell/race scenes with
+current assets, normal camera and HUD. It fast-forwards genuine simulation
+ticks to choose frames; it does not measure frame times or audio pacing.
+The swarm's scheduled-state capture may be offscreen when this driver's
+pass misses its live cadence; the separate mesh proof establishes visible
+swarm geometry. Missing or stale captures and frame/shader errors fail the
+wrapper even if a native frame coroutine swallows an exception.
+`check-native-review` copies a completed native bundle, assets, license and
+Guix launcher into a private review tree, smokes that isolated copy and
+creates a checksummed archive. It performs no publication or deployment.
+
+The generated/probe data roundtrip includes the full schedule; cross-language
+parity checks exercise the actual runtime adapters over seeds, cadence/phrase
+boundaries, partial history, wrapped strips, targets and reservations. Separate
+observed-event sabotage bypasses the planner to prove illegal tracers fail.
+
+`test/fixtures/tracks/scheduled/` contains explicit-rest Quayside/Basin
+candidates with unchanged geometry. Original snapshots remain diagnostic
+evidence. `check-schedule` runs the policy/parity and actual timing audit;
+`check-final` runs painting, full gate/parity checks, source suites and native
+smokes. `check-combined` audits original unscheduled drafts and returns RED.
+`check-followup` requires fresh current-pipeline artifacts and proves the
+legacy refusal independently of exit status. `check-par` includes real
+approximately20s/40s duration sabotages. `check-world` additionally exercises
+rectangular/8192 generation; retired-loop geometry stays RED.

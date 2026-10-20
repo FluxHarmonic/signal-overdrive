@@ -1,0 +1,15 @@
+#!/bin/sh
+# Phantom-only targeted simulation checkpoint, no build/device/fetch/server.
+set -eu
+cd "$(dirname "$0")/../.."
+track_run="$1"
+mkdir -p "$track_run"
+trap 'track_code=$?; printf "RESULT: live race simulation exit %s; inspect STAGE and logs\n" "$track_code" > "$track_run/RESULT"' EXIT
+track_sigil="$HOME/.sigil/versions/0.22.11/sigil"
+for track_suite in ice-runtime ice-race race; do
+  printf 'simulation suite: %s\n' "$track_suite" > "$track_run/STAGE"
+  timeout 180 "$track_sigil" -L src -L .sigil/deps/sigil-test/src \
+    eval "(begin (load \"test/test-$track_suite.sgl\") (unless (run-tests) (error \"live race checks failed\")))" \
+    > "$track_run/$track_suite.log" 2>&1
+done
+printf 'finished\n' > "$track_run/STAGE"

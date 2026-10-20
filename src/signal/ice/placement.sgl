@@ -1,0 +1,123 @@
+;;; D37 placement, shared by runtime admission and the authoring gate.
+;;; Curvature averages raw tangent curvature over +/-10 samples, matching the
+;;; local zones.mjs reference. Flat v1 roads have no terrain occluders; any
+;;; future crest/terrain format must add an explicit line-of-sight test.
+(define-library (signal ice placement)
+  (import (sigil math)
+          (signal track)
+          (signal ice schedule)
+          (signal mode7 camera))
+  (export ice-placement? ice-placement-failure ice-straight? ice-local-curvature
+          ice-placed-tracer-slot)
+  (begin
+    (define (index t i) (modulo i (track-n t)))
+
+    (define (ice-local-curvature t i)
+      (let loop ((offset -10) (sum 0.0))
+        (if (> offset 10)
+            (/ sum 21.0)
+            (let ((a (index t (- (+ i offset) 1)))
+                  (b (index t (+ i offset 1))))
+              (loop (+ offset 1)
+                    (+ sum (/ (- (* (track-tx t a) (track-ty t b))
+                                   (* (track-ty t a) (track-tx t b)))
+                                (* 2.0 (track-step t)))))))))
+
+    ;; Return the first failing arc sample, including both exact endpoints.
+    (define (first-failure t from to predicate)
+      (cond
+        ((not (predicate (track-index-at t from))) from)
+        ((not (predicate (track-index-at t to))) to)
+        (else
+          (let ((start (track-index-at t from)) (span (- to from)))
+            (let loop ((count 0))
+              (and (< count (track-n t))
+                   (let* ((i (index t (+ start count)))
+                          (s (track-s t i)))
+                     (if (and (<= (wrap-s t (- s from)) span)
+                              (not (predicate i)))
+                         s
+                         (loop (+ count 1))))))))))
+
+    (define (ice-straight? t from to)
+      (not (first-failure t from to
+             (lambda (i) (< (abs (ice-local-curvature t i)) (/ 1.0 5000.0))))))
+
+    (define (checksum-overlap? t zone)
+      (let loop ((remaining (track-repair t)))
+        (and (pair? remaining)
+             (let* ((repair (car remaining))
+                    (a (wrap-s t (- (car zone) (car repair))))
+                    (b (wrap-s t (- (car repair) (car zone))))
+                    (arcs? (or (<= a (- (cadr repair) (car repair)))
+                               (<= b (- (cadr zone) (car zone))))))
+               (or (and arcs?
+                        (<= (max (caddr zone) (caddr repair))
+                            (min (cadddr zone) (cadddr repair))))
+                   (loop (cdr remaining)))))))
+
+    (define (frame-failure t from laterals)
+      (let* ((observer (track-point t (- from 1900.0) 0.0))
+             (tx (caddr observer))
+             (ty (cadddr observer))
+             (heading (atan tx (- ty)))
+             (camera (make-cam (- (car observer) (* tx 104.0))
+                               (- (cadr observer) (* ty 104.0))
+                               40.0 heading 0.16 1.33 80.0 480 270)))
+        (let loop ((remaining laterals))
+          (and (pair? remaining)
+               (let* ((u (car remaining))
+                      (point (track-point t from u))
+                      (along (+ (* (- (car point) (car observer)) tx)
+                                (* (- (cadr point) (cadr observer)) ty)
+                                104.0))
+                      (p (camera-project camera (car point) (cadr point) 0.0 4.0)))
+                 (if (and p (< along 2800.0)
+                          (<= 0.0 (projected-x p)) (< (projected-x p) 480.0)
+                          (<= 0.0 (projected-y p)) (< (projected-y p) 270.0))
+                     (loop (cdr remaining))
+                     (list 'out-of-frame from u (car point) (cadr point)
+                           (and p (projected-x p)) (and p (projected-y p)))))))))
+
+    ;; #f means PASS; a witness includes the reason and first arc coordinate.
+    ;; owned is (owner kind layout (from to left right)), in arc texels.
+    (define (ice-placement-failure t owned)
+      (let* ((zone (list-ref owned 3))
+             (from (car zone))
+             (to (cadr zone))
+             (left (caddr zone))
+             (right (cadddr zone))
+             (half (track-hw t (track-index-at t from)))
+             (corner (first-failure t from to
+                       (lambda (i) (< (abs (ice-local-curvature t i)) (/ 1.0 1300.0)))))
+             ;; v1 is constant-width. Fail closed around any unmodelled squeeze.
+             (squeeze (first-failure t (- from 300.0) (+ to 300.0)
+                        (lambda (i) (< (abs (- (track-hw t i) half)) 0.001)))))
+        (cond
+          ((or (< to from) (> (- to from) (track-length t)))
+           (list 'invalid-footprint from to))
+          (corner (list 'corner corner))
+          (squeeze (list 'squeeze-clearance squeeze))
+          ((checksum-overlap? t zone) (list 'checksum-lane from))
+          ((< (* half (max (+ 1.0 left) (- 1.0 right))) 27.0)
+           (list 'free-lane from))
+          (else
+            (frame-failure t from
+              (append (list left right)
+                      (if (> left -1.0) (list (* 0.5 (+ -1.0 left))) '())
+                      (if (< right 1.0) (list (* 0.5 (+ 1.0 right))) '())))))))
+
+    (define (ice-placement? t owned)
+      (not (ice-placement-failure t owned)))
+
+    ;; Both gate and game call this full admission, including placement.
+    (define (ice-placed-tracer-slot t contract crossings seed tick target-s u reservations extra)
+      (let ((slot (ice-tracer-slot contract crossings seed tick target-s u reservations extra)))
+        (and slot
+             (let* ((rules (list-ref contract 4))
+                    (center (caddr slot))
+                    (half (/ (list-ref rules 4) (list-ref contract 2)))
+                    (owned (list "$tracer" "tracer" "target"
+                             (list (- center (list-ref rules 3)) (+ center (list-ref rules 3))
+                                   (max -1.0 (- u half)) (min 1.0 (+ u half))))))
+               (and (ice-placement? t owned) slot)))))))

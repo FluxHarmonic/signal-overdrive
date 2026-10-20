@@ -1,0 +1,19 @@
+#!/bin/sh
+# Phantom-only remaining actual tier histories; each also checks all profiles.
+set -eu
+cd "$(dirname "$0")/../.."
+track_run="$1"
+track_driving="$2"
+mkdir -p "$track_run"
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'track_code=$?; printf "RESULT: remaining cup actual histories exit %s; inspect individual reports\n" "$track_code" > "$track_run/RESULT"' EXIT
+for track_id in quayside basin; do
+  for track_tier in learner elite; do
+    printf 'canonical seeded/tier gate at actual %s %s history\n' "$track_id" "$track_tier" > "$track_run/STAGE"
+    timeout 540 node scripts/track/combined-ice.mjs "tracks/$track_id.json" \
+      "$track_driving/$track_id-$track_tier-ai.json" "$track_run/$track_id-$track_tier-combined.json" \
+      > "$track_run/$track_id-$track_tier.log" 2>&1
+  done
+done
+printf 'finished\n' > "$track_run/STAGE"

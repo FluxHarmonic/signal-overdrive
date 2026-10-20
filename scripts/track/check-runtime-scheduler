@@ -1,0 +1,24 @@
+#!/bin/sh
+# Phantom-only single-CPU checkpoint, invoked inside a bounded detached helper.
+set -eu
+cd "$(dirname "$0")/../.."
+track_run="$1"
+track_timing="$2"
+mkdir -p "$track_run"
+trap 'track_code=$?; printf "RESULT: canonical runtime scheduler exit %s; inspect STAGE and logs\n" "$track_code" > "$track_run/RESULT"' EXIT
+track_sigil="$HOME/.sigil/versions/0.22.11/sigil"
+printf 'automatic state, pair turns and tier boundaries\n' > "$track_run/STAGE"
+timeout 120 "$track_sigil" -L src -L .sigil/deps/sigil-test/src \
+  eval '(begin (load "test/test-ice-runtime.sgl") (unless (run-tests) (error "runtime scheduler tests failed")))' \
+  > "$track_run/runtime.log" 2>&1
+printf 'rule sabotages and canonical-oracle tamper sabotage\n' > "$track_run/STAGE"
+node --test scripts/track/gates.test.mjs scripts/track/combined-ice.test.mjs \
+  scripts/track/schedule.test.mjs scripts/track/scheduler-check.test.mjs \
+  > "$track_run/tests.log" 2>&1
+for track_id in quayside basin; do
+  printf 'canonical game implementation in combined gate: %s\n' "$track_id" > "$track_run/STAGE"
+  node scripts/track/combined-ice.mjs "test/fixtures/tracks/scheduled/$track_id.json" \
+    "$track_timing/$track_id-ai.json" "$track_run/$track_id-combined.json" \
+    > "$track_run/$track_id-combined.log" 2>&1
+done
+printf 'finished\n' > "$track_run/STAGE"

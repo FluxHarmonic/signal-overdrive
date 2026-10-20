@@ -1,13 +1,17 @@
 ;;; Headless 60 Hz authoring gate over the game's own race/handling/conductor.
 ;;; No graphics, device or clock. Input is read as data, never evaluated.
 (import (sigil io)
+        (sigil fs)
         (sigil math)
         (sigil process)
         (signal track)
         (signal handling)
         (signal race)
+        (signal ice runtime)
+        (signal tiers)
         (signal tuning)
         (signal music conductor)
+        (signal music song)
         (signal music score))
 
 (define arguments
@@ -32,9 +36,20 @@
 (define track-value
   (make-track samples (list-ref data 2) (list-ref data 3)
               (list-ref data 4) (car data) (list-ref data 5)
-              (list-ref data 7) (list-ref data 8)))
-(define tuning (tuning-defaults))
+              (list-ref data 7) (list-ref data 8) (list-ref data 9) (list-ref data 10)))
+(define tuning (tuning-set (tuning-defaults) 'track (track-index-of (car data))))
 (define sabotage? (and (> (length arguments) 1) (string=? (cadr arguments) "stall")))
+(define tier
+  (let find ((remaining (cdr arguments)))
+    (cond
+      ((null? remaining) 'courier)
+      ((member (car remaining) '("learner" "courier" "elite"))
+       (string->symbol (car remaining)))
+      (else (find (cdr remaining))))))
+(tier-parameters tier)
+(define progress-file
+  (string-append (car arguments) "." (symbol->string tier) ".progress"))
+(write-file-string progress-file "input loaded; constructing actual race\n")
 
 (define (grid-machine row col)
   (let* ((s (wrap-s track-value (- -36.0 (* row 44.0))))
@@ -43,11 +58,13 @@
     (machine (make-machine (car p) (cadr p) heading)
              s: s hint: (track-index-at track-value s))))
 
-(define template (race-start tuning (race-new tuning)))
+(define template (race-start tuning (race-new tuning tier: tier)))
 (define slots '((0 . 0) (0 . 1) (1 . 0) (2 . 0) (2 . 1)))
 (define initial
   (race template
         track: track-value
+        ice: (ice-new (track-ice-schedule track-value) tier 0 track-value)
+        wake: #f
         player: (racer (race-player template) machine: (grid-machine 1 1))
         rivals: (map (lambda (r slot)
                        (racer r machine: (grid-machine (car slot) (cdr slot))))
@@ -56,6 +73,12 @@
 (define landings '())
 (define lap-times '())
 (define crossings '())
+(define live-ticks 0)
+(define warning-ticks 0)
+(define hazard-ticks '(("firewall" . 0) ("drone" . 0) ("tracer" . 0) ("wake" . 0)))
+(define null-attack-ticks 0)
+(define void-attack-ticks 0)
+(define null-warning-ticks 0)
 (define (all-finished? r)
   (and (racer-finished (race-player r))
        (let loop ((remaining (race-rivals r)))
@@ -64,6 +87,11 @@
 
 (define final
   (let loop ((r initial) (i 0))
+    (when (= (modulo i 600) 0)
+      (write-file-string progress-file
+        (string-append "simulation tick " (number->string i)
+                       "; race phase " (symbol->string (race-phase r))
+                       "; player lap " (number->string (racer-lap (race-player r))) "\n")))
     (if (or (>= i (* 60 180))
             (and (all-finished? r)
                  (eq? (conductor-section (race-song r)) 'results)))
@@ -75,6 +103,27 @@
                (next (race-step tuning r controls #f))
                (after (race-player next))
                (m (racer-machine after)))
+          (when (pair? (ice-state-active (race-ice next)))
+            (set! live-ticks (+ live-ticks 1)))
+          (when (pair? (ice-state-telegraphs (race-ice next)))
+            (set! warning-ticks (+ warning-ticks 1)))
+          (let ((kinds (map cadr (ice-state-active (race-ice next)))))
+            (set! hazard-ticks
+              (map (lambda (entry)
+                     (if (member (car entry) kinds)
+                         (cons (car entry) (+ (cdr entry) 1)) entry))
+                   hazard-ticks)))
+          (for-each
+            (lambda (rival)
+              (when (race-rival-attacking? next rival)
+                (cond
+                  ((string=? (racer-name rival) "NULL")
+                   (set! null-attack-ticks (+ null-attack-ticks 1)))
+                  ((string=? (racer-name rival) "VOID")
+                   (set! void-attack-ticks (+ void-attack-ticks 1)))))
+              (when (race-null-flare? next rival)
+                (set! null-warning-ticks (+ null-warning-ticks 1))))
+            (race-rivals next))
           (when (or (> (racer-lap after) (racer-lap before))
                     (and (not (racer-finished before)) (racer-finished after)))
             (set! crossings
@@ -105,8 +154,30 @@
 
 (display "{\"id\":\"")
 (display (car data))
-(display "\",\"activeSong\":\"")
-(display SCORE-ID)
+(display "\",\"tier\":\"")
+(display tier)
+(display "\",\"scheduler\":\"signal/ice/runtime; actual input-track contract")
+(display "\",\"liveIceTicks\":")
+(write live-ticks)
+(display ",\"warningTicks\":")
+(write warning-ticks)
+(display ",\"hazardTicks\":{")
+(let emit-hazards ((rest hazard-ticks) (first? #t))
+  (unless (null? rest)
+    (unless first? (display ","))
+    (write (caar rest)) (display ":") (write (cdar rest))
+    (emit-hazards (cdr rest) #f)))
+(display "},\"nullAttackTicks\":") (write null-attack-ticks)
+(display ",\"voidAttackTicks\":") (write void-attack-ticks)
+(display ",\"nullWarningTicks\":") (write null-warning-ticks)
+(display ",\"rivalNames\":[")
+(let loop ((remaining (race-rivals initial)) (first? #t))
+  (unless (null? remaining)
+    (unless first? (display ","))
+    (write (racer-name (car remaining)))
+    (loop (cdr remaining) #f)))
+(display "],\"activeSong\":\"")
+(display (song-id))
 (display "\",\"world\":{\"width\":")
 (write (track-world-width track-value))
 (display ",\"height\":")

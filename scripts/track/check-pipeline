@@ -17,11 +17,14 @@ track_eval() (
     eval -f "$track_root/scripts/track/$track_script" -- "$@"
 )
 printf 'gate and sabotage tests\n' > "$track_run/STAGE"
-node --test scripts/track/gates.test.mjs scripts/track/combined-ice.test.mjs > "$track_run/tests.log" 2>&1
+node --test scripts/track/gates.test.mjs scripts/track/combined-ice.test.mjs scripts/track/schedule.test.mjs > "$track_run/tests.log" 2>&1
+printf 'runtime schedule parity\n' > "$track_run/STAGE"
+node scripts/track/schedule-parity.mjs "$track_run/parity.sgv" > "$track_run/parity-generation.log"
+"$track_sigil" -L src eval -f scripts/track/schedule-parity.sgl -- "$track_run/parity.sgv" > "$track_run/parity.log" 2>&1
 printf 'geometry reports\n' > "$track_run/STAGE"
 track_code=0
 node scripts/track/report.mjs "$track_run/current-gates.json" tracks/oval.json \
-  test/fixtures/tracks/reshaped/quayside.json test/fixtures/tracks/reshaped/basin.json \
+  test/fixtures/tracks/scheduled/quayside.json test/fixtures/tracks/scheduled/basin.json \
   > "$track_run/current-gates.log" 2>&1 || track_code="$?"
 printf '%s\n' "$track_code" > "$track_run/current-gates-status"
 printf 'song contract and preview\n' > "$track_run/STAGE"
@@ -29,7 +32,7 @@ printf 'song contract and preview\n' > "$track_run/STAGE"
   > "$track_run/song-contract.json" 2> "$track_run/song-contract.log"
 node scripts/track/preview.mjs tracks/oval.json "$track_run/song-contract.json" "$track_run/preview" \
   > "$track_run/oval-preview.log" 2>&1
-for track_file in tracks/oval.json test/fixtures/tracks/reshaped/quayside.json test/fixtures/tracks/reshaped/basin.json; do
+for track_file in tracks/oval.json test/fixtures/tracks/scheduled/quayside.json test/fixtures/tracks/scheduled/basin.json; do
   track_id="$(basename "$track_file" .json)"
   printf 'strict paint/atlas gate: %s\n' "$track_id" > "$track_run/STAGE"
   track_code=0

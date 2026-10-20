@@ -1,0 +1,20 @@
+#!/bin/sh
+# Phantom-only bounded foundation check; no device, server or dependency fetch.
+set -eu
+cd "$(dirname "$0")/../.."
+track_run="$1"
+track_cached="$2"
+mkdir -p "$track_run"
+trap 'track_code=$?; printf "RESULT: runtime foundation exit %s; inspect STAGE and logs\n" "$track_code" > "$track_run/RESULT"' EXIT
+track_sigil="$HOME/.sigil/versions/0.22.11/sigil"
+printf 'tier and rival turn boundaries\n' > "$track_run/STAGE"
+timeout 120 "$track_sigil" -L src -L .sigil/deps/sigil-test/src \
+  eval '(begin (load "test/test-ice-runtime.sgl") (unless (run-tests) (error "runtime foundation tests failed")))' \
+  > "$track_run/foundation.log" 2>&1
+printf 'runtime schedule adapter regression\n' > "$track_run/STAGE"
+node scripts/track/schedule-parity.mjs "$track_run/parity.sgv" > "$track_run/parity-generation.log"
+timeout 240 "$track_sigil" -L src eval -f scripts/track/schedule-parity.sgl -- "$track_run/parity.sgv" \
+  > "$track_run/parity.log" 2>&1
+printf 'legacy unsafe-schedule acceptance refusal\n' > "$track_run/STAGE"
+sh scripts/track/check-followup "$track_run/legacy" "$track_cached" "$track_cached"
+printf 'finished\n' > "$track_run/STAGE"

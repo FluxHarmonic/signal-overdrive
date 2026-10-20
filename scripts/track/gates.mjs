@@ -1,5 +1,5 @@
 import { BARRIER } from "./geometry.mjs";
-import { worldSize } from "./format.mjs";
+import { worldSize, scheduleLayer } from "./format.mjs";
 
 // Default race camera at top speed, no transient boost/drop kick. Matches
 // (signal scene), (signal tuning) and the machine's wall-collision diameter.
@@ -89,6 +89,7 @@ function widestGap(intervals) {
 export function freeLane(source, c = DEFAULTS) {
   let combinations = [{ ids: [], zones: source.zones.ice }];
   for (const layer of source.iceLayers) {
+    if (scheduleLayer(source, layer).kind !== "seeded-static") continue;
     if (combinations.length * layer.layouts.length > 4096) {
       throw new Error("ICE layout product exceeds 4096; split the authoring fixture");
     }
@@ -114,7 +115,7 @@ export function freeLane(source, c = DEFAULTS) {
   }
   return { pass: narrowest >= 1.5 * c.machineWidth, combinations: combinations.length,
     required: 1.5 * c.machineWidth, narrowest, witness,
-    scope: "static and authored seed layers only; complete acceptance also requires the time-aware combined ICE gate" };
+    scope: "permanent road ICE and seeded-static layers only; live hazards require the combined schedule gate" };
 }
 
 export function geometryGates(source, g, c = DEFAULTS) {

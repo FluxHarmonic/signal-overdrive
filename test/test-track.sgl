@@ -86,4 +86,15 @@
       (assert-equal 5120 (track-world-height o))
       (assert-equal 8192 (track-world-width r))
       (assert-equal 4096 (track-world-height r))
-      (assert-equal 5120 (track-world-width (straight-track))))))
+      (assert-equal 5120 (track-world-width (straight-track)))))
+
+  (test "generated runtime reads its schedule and leaves live tracer activation disabled on the oval"
+    (let* ((o (track-named 'oval))
+           (schedule (track-ice-schedule o))
+           (crossings '(500 2300 4100 #f)))
+      (assert-equal 1 (car schedule))
+      (assert-equal 27 (car (list-ref schedule 4)))
+      (assert-equal (track-ice o)
+                    (map (lambda (owned) (list-ref owned 3))
+                         (track-live-ice-at o crossings 0 4400)))
+      (assert-false (track-tracer-slot o crossings 0 4400 3000.0 0.0 '())))))

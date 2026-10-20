@@ -1,0 +1,30 @@
+#!/bin/sh
+# Phantom-only isolated data repair checkpoint. Collection is not acceptance.
+set -eu
+cd "$(dirname "$0")/../.."
+track_run="$1"
+track_scans="$2"
+mkdir -p "$track_run/originals" "$track_run/proposed"
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'track_code=$?; printf "RESULT: relocated track verification exit %s; inspect per-track acceptance\n" "$track_code" > "$track_run/RESULT"' EXIT
+printf 'concrete geometry-preserving source proposals\n' > "$track_run/STAGE"
+node scripts/track/propose-placements.mjs "$track_scans" "$track_run/proposed" > "$track_run/proposals.log" 2>&1
+track_sigil="$HOME/.sigil/versions/0.22.11/sigil"
+for track_id in quayside basin; do
+  cp "tracks/$track_id.json" "$track_run/originals/$track_id.json"
+  cp "$track_run/proposed/$track_id.json" "tracks/$track_id.json"
+  printf 'strict generation of relocated %s\n' "$track_id" > "$track_run/STAGE"
+  node scripts/art/gen-track.mjs --track "$track_id" > "$track_run/$track_id-generate.log" 2>&1
+  printf 'actual shared D37 placement of relocated %s\n' "$track_id" > "$track_run/STAGE"
+  node scripts/track/placement-report.mjs "$track_run/$track_id-placement.json" "tracks/$track_id.json" \
+    > "$track_run/$track_id-placement.log" 2>&1
+  node scripts/track/runtime.mjs "tracks/$track_id.json" "$track_run/$track_id.sgv" 0
+  printf 'actual COURIER race on relocated %s\n' "$track_id" > "$track_run/STAGE"
+  track_code=0
+  timeout 600 "$track_sigil" -L src eval -f scripts/track/ai.sgl -- "$track_run/$track_id.sgv" courier \
+    > "$track_run/$track_id-ai.json" 2> "$track_run/$track_id-ai.log" || track_code="$?"
+  printf '%s\n' "$track_code" > "$track_run/$track_id-ai-status"
+  test "$track_code" -le 1
+done
+printf 'finished; actual race report statuses remain explicit\n' > "$track_run/STAGE"

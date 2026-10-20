@@ -12,6 +12,14 @@ commit e5213c0 (feat/signal-02-tracks-areas)
 These are acceptance candidates. The original snapshots above remain the
 stable radius-gap sabotage and regression fixtures.
 
+scheduled/basin.json and scheduled/quayside.json copy the e5213c0 geometry
+above and add explicit live-layer cadence under the Leader17:08 scheduling
+ruling (David-approved bible section3 rules1-5). They do not alter the original
+snapshots. Quayside's two firewall owners start on lap3, Basin's on lap2;
+both use phraseBars4, upBars1, downBars1, with opposite phaseBars0/1.
+The source snapshot's zero-rest live layout defaults remain deliberate RED
+fixtures. Live layers are schedule data, not permanently painted road ICE.
+
 evidence/{basin,quayside}-ai.json were measured on Phantom cp12 with seed0,
 default tuning, actual race/handling, Carrier as the geometry-probe song.
 evidence/{basin,quayside}-combined.json were generated from those actual
@@ -24,6 +32,28 @@ of parity with an automatic live scheduler; that scheduler does not exist
 in this runtime yet. Full provenance and method are in docs/TRACKS.md and
 the task note Session Log. These reports must not be used as accepted track
 assets or silently edited to green.
+
+The cp12 reports above are historical evidence from before the approved
+scheduling contract. Current results must be stored separately, with fresh
+actual lap crossings after static/live separation, and must not replace
+those original first witnesses. The runtime now reads the compiled schedule
+through track-live-ice-at and track-tracer-slot. These pure consumers do not
+claim automatic live sprite/collision activation is already integrated.
+
+evidence/approved/{oval,quayside,basin}-{generated,ai,combined}.json were
+produced by Phantom cp15's completed pipeline (RESULT exit0), using the
+scheduled candidates and newly regenerated shared data contracts. All
+geometry/atlas, measured AI/par, combined rules1-6 and runtime roundtrip
+checks pass. Actual base-physics par laps: Quayside31.5500 seconds and
+Basin31.3833 seconds. These timings include permanent road ICE; automatic
+live visual/collision integration remains outside this tooling contract.
+Both race candidates pass every6-seed live combination; narrowest legal
+enumerated tracer witnesses are27.4 and29.0 texels respectively. Continuous
+target admission is separately guarded by the exact27-texel corridor check.
+The playable oval has no live layers, one seed product and96.6-texel minimum.
+38 gate/sabotage tests and18,054 queries through the real Sigil track
+schedule adapters also passed. Native final-build status is recorded in
+the task Session Log, separately from these completed pipeline artifacts.
 
 evidence/{loop,oval,quayside,basin}-generated.json are the cp12 painter's
 5120x5120 gate/atlas/memory reports; loop uses diagnostic --draft because

@@ -3,6 +3,7 @@ import path from "node:path";
 import assert from "node:assert/strict";
 import { DEFAULTS, parGate } from "./gates.mjs";
 import { loadTrack, worldSize } from "./format.mjs";
+import { liveContract } from "./schedule.mjs";
 
 const run = process.argv[2];
 if (!run) throw new Error("usage: verify.mjs <pipeline-output-directory>");
@@ -25,13 +26,14 @@ for (const id of ["oval", "quayside", "basin"]) {
   assert.equal(ai.pass, true, `${id} AI gate`);
   assert.equal(ai.threeLapsAllRacers, true);
   assert.equal(ai.parGate, true);
-  const source = loadTrack(id === "oval" ? "tracks/oval.json" : `test/fixtures/tracks/reshaped/${id}.json`);
+  const source = loadTrack(id === "oval" ? "tracks/oval.json" : `test/fixtures/tracks/scheduled/${id}.json`);
   assert.deepEqual(ai.world, worldSize(source), `${id} AI world dimensions`);
   assert.deepEqual(combined.world, worldSize(source), `${id} combined world dimensions`);
   assert.equal(parGate(source, ai).pass, true, `${id} measured par lap`);
   assert.equal(ai.lapTicks.length, 3);
   assert.ok(ai.landings.some(landing => landing.mark === "results"), "probe must include the coda exit");
   const artifact = json(`art/build/track/${id}-generated.json`);
+  assert.deepEqual(artifact.liveICE, liveContract(source), `${id} generated contract must equal the audited track data`);
   assert.deepEqual(artifact.world, worldSize(source), `${id} painted world dimensions`);
   for (const [name, gate] of Object.entries(artifact.gates)) assert.equal(gate.pass, true, `${id} generated ${name}`);
   assert.ok(artifact.gates.tiles.count > 0);

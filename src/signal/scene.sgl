@@ -30,6 +30,8 @@
           (signal track)
           (signal handling)
           (signal race)
+          (signal ice runtime)
+          (signal ice draw)
           (signal tuning)
           (signal fx state)
           (signal fx lights)
@@ -84,6 +86,7 @@
       (for-each (lambda (e) (set-texture-sampling! (cdr e) 'nearest 'clamp)) luts)
       (hud-font-init!)
       (mode7-init! VIEW-W VIEW-H)
+      (ice-draw-init!)
       (set! *tracks* tracks)
       (show-track! (caar tracks))
       (mode7-set-sky! sky 96.0 0.30 0.55 0.85)
@@ -195,6 +198,21 @@
     ;; length and their swell on a boost, so speed and boost still read).
     ;; scripts/gate-motion checks it in the browser.
     (define *calm* #f)
+    (define (automatic-warp r)
+      (let* ((ice (race-ice r))
+             (trace (and ice (ice-state-tracer ice)))
+             (tick (conductor-tick (race-song r))))
+        (and trace (< tick (tracer-until trace))
+             (let* ((p (track-point (race-track r) (tracer-center trace) (tracer-u trace)))
+                    (strength
+                      (if (< tick (tracer-strike trace))
+                          (+ 0.35 (* 0.65 (/ (- tick (tracer-announced trace))
+                                             (max 1 (- (tracer-strike trace) (tracer-announced trace))))))
+                          (max 0.0 (- 1.0 (/ (- tick (tracer-strike trace)) 6.0))))))
+               ;; Curved mesh supplies the exact reticle. A zero-width shader
+               ;; strip adds only the ripple, avoiding a false rectangular edge.
+               (list (car p) (cadr p) (caddr p) (cadddr p) 460.0 0.0 strength)))))
+
     (define (fx-uniforms! r c st knob hold)
       (let* ((on (lambda (k) (> (knob k) 0.0)))
              (sky (knob 'fx-sky))
@@ -211,7 +229,8 @@
                                               (else (+ 0.7 (* 0.3 (fx-ice st))))))
                                           (knob 'fx-pools))
                          '()))
-             (w (or (fx-warp st)
+             (automatic (automatic-warp r))
+             (w (or automatic (fx-warp st)
                     (and hold (list (+ (cam-x c) (* 600.0 (sin h))) (- (cam-y c) (* 600.0 (cos h))) (sin h) (- (cos h)) 460.0 34.0))))
              (wv (lambda (k d) (if w (list-ref w k) d)))
              ;; the weather (0.2): reflections, the wet ground, splashes (none with reduced motion)
@@ -236,7 +255,9 @@
                (* sky (fx-traced st) (+ 0.6 (* 0.4 (fx-ice st)))) (* sky (fx-pad st))
                (if hold (knob (quote fx-interf)) (fx-interf st)) (if (and (not hold) (fx-dropout st)) 1.0 0.0) flags (length lights)
                (wv 0 0.0) (wv 1 0.0) (wv 2 0.0) (wv 3 1.0)
-               (wv 4 0.0) (wv 5 0.0) (* (knob (quote fx-warp)) (if hold 1.0 (fx-warp-strength st))) 0.0
+               (wv 4 0.0) (wv 5 0.0)
+               (* (knob 'fx-warp) (cond (automatic (list-ref automatic 6))
+                                          (hold 1.0) (else (fx-warp-strength st)))) 0.0
                wet rain (knob 'fx-reflect) 1.5
                (if *rain-debug* 1.0 0.0) *rain-guard* 0.0 0.0))
         ;; the rain's streaks in the post pass: their density, and none
@@ -346,6 +367,18 @@
              (k (exact (round (/ rel (/ PI 8.0))))))
         (modulo k 16)))
 
+    (define (rival-row r x flick?)
+      (let ((flick (if flick? 1 0)))
+        (cond
+          ((string=? (racer-name x) "NULL")
+           (+ (cond ((race-null-flare? r x) 12)
+                    ((race-rival-attacking? r x) 10)
+                    (else 8))
+              flick))
+          ((string=? (racer-name x) "VOID")
+           (+ (if (race-rival-attacking? r x) 16 14) flick))
+          (else (+ 1 (racer-colour x) (if flick? 3 0))))))
+
     ;; The best lap's ghost: the player's machine where it was at this
     ;; point of the best lap, drawn see-through (every other pixel).
     (define (ghost-item c tuning g)
@@ -392,7 +425,7 @@
                                           (sparks-drawer spark))
                           (map (lambda (x)
                                  (let ((m (racer-machine x)))
-                                   (machine-sprite c tuning m (rival-dir c m) (+ 1 (racer-colour x) (if fl 3 0)) #f #f)))
+                                   (machine-sprite c tuning m (rival-dir c m) (rival-row r x fl) #f #f)))
                                (race-rivals r))))
              (items (append (filter (lambda (x) x) (cons (ghost-item c tuning ghost) items))
                             (gate-items c (race-track r)))))
@@ -861,6 +894,7 @@
           (set! *hud-dropout* (and (> *hud-interf* 0.0) (fx-dropout st)))
           (set! *hud-frame* (quotient (fx-tick st) 2)))
         (begin-frame)
+        (ice-draw-prepare! (race-track r) (race-ice r))
         (with-3d-pass *view* (list 0.05 0.04 0.10 1.0)
           ;; a frame faded fully out draws nothing (it is black even where
           ;; the fade cannot reach: the dither off, or lut=0)
@@ -870,6 +904,7 @@
               (mode7-draw-ground! c)
               (when (> k 1) (passes (- k 1))))
             (let ((d (info-get info 'draw-ground))) (when d (d c)))
+            (draw-live-ice! c)
             (when (cdr (assq 'sprites info))
               (draw-machines! c tuning r (camera-heading c) (cdr (assq 'spark info)) (cdr (assq 'ghost info))))
             (let ((d (info-get info 'draw-3d))) (when d (d)))))

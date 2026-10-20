@@ -1,0 +1,34 @@
+{
+  "sourceCommit": "f8c3bdb0eae00f518e3d6675129ac73662c46de9",
+  "job": "/tmp/signal-track-tooling-cp53/",
+  "sourceState": "f8c3bdb; build helper adds explicit SIGIL_JOBS=1 and verbose logs",
+  "result": "RESULT: current native/web review builds exit 0; inspect STAGE and artifacts",
+  "nativeSmoke": "RESULT: native graphical shader/world smoke PASS; muted, private Xvfb, captured frame",
+  "web": {
+    "compiled": true,
+    "asyncify": true,
+    "optimized": true,
+    "stamp": "unversioned",
+    "runtimeTested": false
+  },
+  "artifacts": {
+    "build/release/bin/signal-overdrive": {
+      "bytes": 12906233,
+      "sha256": "61f42f406633c5b2174bf422fe40d7a8f9a6e51c486cf1f26e24014bb02f0d21"
+    },
+    "build/web/signal-overdrive.wasm": {
+      "bytes": 10447619,
+      "sha256": "eb7be88b5ba260ea8449764eade447893fd8c22e1a49aa41059aaa025f375759"
+    },
+    "build/web/index.html": {
+      "bytes": 24621,
+      "sha256": "87776b275dfe5e6c25ac3111a946c4b7318c19b6deb298c49c3e9cb7846f647f"
+    }
+  },
+  "privateReviewArchiveSHA256": "4cc190766d0d43f757d31209dbe73918eb42182ff43b01d064d0967620dbdec2",
+  "limits": [
+    "Web build only; no browser runtime or performance claim",
+    "Isolated source snapshot has no git metadata, so web stamp is unversioned; explicit source commit above is authoritative",
+    "Private review only; no merge, push, tag, deploy or release"
+  ]
+}

@@ -21,9 +21,19 @@ export function worldSize(source) {
   return dimensions;
 }
 
+export function scheduleLayer(source, layer) {
+  const zone = source.musicZones.find(zone => ["firewall", "drone"].includes(zone.kind)
+    && (zone.id === layer.id || zone.id === `${layer.id}-${zone.kind}`));
+  const kind = layer.kind ?? zone?.kind ?? "seeded-static";
+  return { ...layer, kind,
+    fromLap: layer.fromLap ?? (zone ? (zone.sections.includes("lap2") ? 2 : 3) : 1),
+    phraseBars: layer.phraseBars ?? (kind === "seeded-static" ? 0 : 1),
+    upBars: layer.upBars ?? 1, downBars: layer.downBars ?? 0, phaseBars: layer.phaseBars ?? 0 };
+}
+
 export function validateTrack(t) {
   if (!t || typeof t !== "object" || Array.isArray(t)) fail("expected an object");
-  const fields = ["version", "id", "title", "district", "role", "world", "geometry", "zones", "iceLayers", "song", "sections", "musicZones", "decoration"];
+  const fields = ["version", "id", "title", "district", "role", "world", "geometry", "zones", "iceLayers", "tracer", "song", "sections", "musicZones", "decoration"];
   for (const key of Object.keys(t)) if (!fields.includes(key)) fail(`unknown field ${key}`);
   if (t.version !== 1) fail("expected version 1");
   if (typeof t.id !== "string" || !/^[a-z][a-z0-9-]*$/.test(t.id)) fail("invalid id");
@@ -72,7 +82,12 @@ export function validateTrack(t) {
   uniqueIds(t.iceLayers, "layer");
   let product = 1;
   for (const layer of t.iceLayers) {
-    keysOnly(layer, ["id", "layouts"], "ICE layer");
+    keysOnly(layer, ["id", "layouts", "kind", "fromLap", "phraseBars", "upBars", "downBars", "phaseBars"], "ICE layer");
+    if (layer.kind !== undefined && !["firewall", "drone", "seeded-static"].includes(layer.kind)) fail("invalid ICE kind (swarm data uses drone)");
+    for (const [key, lo, hi] of [["fromLap", 1, 3], ["phraseBars", 0, 256],
+      ["upBars", 1, 256], ["downBars", 0, 256], ["phaseBars", -256, 256]]) {
+      if (layer[key] !== undefined && (!Number.isInteger(layer[key]) || layer[key] < lo || layer[key] > hi)) fail(`invalid ICE ${key}`);
+    }
     if (!layer.id || !Array.isArray(layer.layouts) || !layer.layouts.length) fail("empty ICE layer");
     uniqueIds(layer.layouts, "layout");
     product *= layer.layouts.length;
@@ -82,6 +97,12 @@ export function validateTrack(t) {
       if (!layout.id || !Array.isArray(layout.zones)) fail("invalid ICE layout");
       layout.zones.forEach(z => interval(z));
     }
+  }
+  if (t.tracer !== undefined) {
+    keysOnly(t.tracer, ["enabled", "fromLap", "periodBars"], "tracer");
+    if (t.tracer.enabled !== undefined && typeof t.tracer.enabled !== "boolean") fail("invalid tracer enabled");
+    if (t.tracer.fromLap !== undefined && (!Number.isInteger(t.tracer.fromLap) || t.tracer.fromLap < 1 || t.tracer.fromLap > 3)) fail("invalid tracer fromLap");
+    if (t.tracer.periodBars !== undefined && (!Number.isInteger(t.tracer.periodBars) || t.tracer.periodBars < 1 || t.tracer.periodBars > 256)) fail("invalid tracer periodBars");
   }
   if (!t.song || !t.song.id || !t.song.cues || !finite(t.song.bpm) || t.song.bpm <= 0
     || !Array.isArray(t.song.sections)) fail("missing song contract");
@@ -108,10 +129,15 @@ export function validateTrack(t) {
     interval([section.from, section.to, -1, 1]);
   }
   for (const zone of t.musicZones) {
-    if (!zone.id || !["drop", "searchlights", "firewall"].includes(zone.kind)
+    if (!zone.id || !["drop", "searchlights", "firewall", "drone"].includes(zone.kind)
       || !Array.isArray(zone.sections)) fail("invalid music zone");
     if (!zone.sections.length || zone.sections.some(mark => !expected.some(e => e.mark === mark))) fail("unknown music zone section");
     interval([zone.from, zone.to, -1, 1]);
+  }
+  for (const layer of t.iceLayers) if (scheduleLayer(t, layer).kind === "seeded-static") {
+    for (const [key, value] of Object.entries({fromLap:1,phraseBars:0,upBars:1,downBars:0,phaseBars:0})) {
+      if (layer[key] !== undefined && layer[key] !== value) fail(`seeded-static ${key} must be ${value}`);
+    }
   }
   if (!t.decoration || !Number.isInteger(t.decoration.puddles)
     || t.decoration.puddles < 0 || t.decoration.puddles > 1000) fail("invalid puddle count");

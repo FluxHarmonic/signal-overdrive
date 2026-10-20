@@ -1,0 +1,27 @@
+#!/bin/sh
+# Phantom-only bounded checkpoint. Placement diagnostics can be RED and are
+# recorded separately; a completed helper is not acceptance of those tracks.
+set -eu
+cd "$(dirname "$0")/../.."
+track_run="$1"
+mkdir -p "$track_run"
+trap 'track_code=$?; printf "RESULT: shared admission verification exit %s; inspect placement-status/report separately\n" "$track_code" > "$track_run/RESULT"' EXIT
+track_sigil="$HOME/.sigil/versions/0.22.11/sigil"
+for track_suite in ice-placement ice-runtime ice-race; do
+  printf 'shared admission suite: %s\n' "$track_suite" > "$track_run/STAGE"
+  timeout 180 "$track_sigil" -L src -L .sigil/deps/sigil-test/src \
+    eval "(begin (load \"test/test-$track_suite.sgl\") (unless (run-tests) (error \"shared admission failed\")))" \
+    > "$track_run/$track_suite.log" 2>&1
+done
+printf 'generic reservation preserves existing scheduler parity\n' > "$track_run/STAGE"
+node scripts/track/schedule-parity.mjs "$track_run/parity.sgv" > "$track_run/parity-generation.log"
+timeout 240 "$track_sigil" -L src eval -f scripts/track/schedule-parity.sgl -- "$track_run/parity.sgv" \
+  > "$track_run/parity.log" 2>&1
+printf 'registered-cup D37 placement first-witness report\n' > "$track_run/STAGE"
+track_code=0
+node scripts/track/placement-report.mjs "$track_run/placement.json" \
+  tracks/breakwater.json tracks/quayside.json tracks/basin.json \
+  > "$track_run/placement.log" 2>&1 || track_code="$?"
+test "$track_code" -le 1
+printf '%s\n' "$track_code" > "$track_run/placement-status"
+printf 'finished; placement diagnostics are separate from test completion\n' > "$track_run/STAGE"

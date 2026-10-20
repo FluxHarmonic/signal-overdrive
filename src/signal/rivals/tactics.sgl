@@ -1,0 +1,26 @@
+;;; Null's swerve is committed a beat ahead. Only the active courier attacks;
+;;; the inactive one follows its normal racing line without a queued swerve.
+(define-library (signal rivals tactics)
+  (import (sigil struct)
+          (sigil math))
+  (export null-plan null-plan? null-plan-lane null-plan-pending null-plan-apply-at
+          null-plan-flare-until null-step)
+  (begin
+    (define-struct null-plan
+      (lane default: 0.0)
+      (pending default: #f)
+      (apply-at default: 0)
+      (flare-until default: 0))
+
+    ;; wanted is an AI lane offset, already clamped to the drivable road.
+    ;; beat-start/next-beat are exact simulation-song boundaries.
+    (define (null-step plan active? tick beat-start next-beat wanted)
+      (cond
+        ((not active?) (null-plan))
+        ((and (null-plan-pending plan) (>= tick (null-plan-apply-at plan)))
+         (null-plan lane: (null-plan-pending plan)))
+        ((and (= tick beat-start)
+              (not (null-plan-pending plan))
+              (> (abs (- wanted (null-plan-lane plan))) 0.08))
+         (null-plan plan pending: wanted apply-at: next-beat flare-until: next-beat))
+        (else plan)))))

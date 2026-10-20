@@ -6,8 +6,15 @@ track_run="$1"
 mkdir -p "$track_run"
 trap 'track_code=$?; printf "RESULT: final verification exit %s; inspect STAGE, pipeline/RESULT, regressions.log and build.log\n" "$track_code" > "$track_run/RESULT"' EXIT
 track_sigil="$HOME/.sigil/versions/0.22.11/sigil"
+printf 'regenerate retired diagnostic data contract\n' > "$track_run/STAGE"
+node scripts/art/gen-track.mjs --file test/fixtures/tracks/retired-loop.json \
+  --draft --output "$track_run/retired" --preview > "$track_run/loop-art.log" 2>&1
+cp "$track_run/retired/src/signal/track/loop-data.sgl" src/signal/track/
 printf 'pipeline\n' > "$track_run/STAGE"
 sh scripts/track/check-pipeline "$track_run/pipeline"
+cp "$track_run/pipeline/art/src/signal/track/oval-data.sgl" src/signal/track/
+cp "$track_run/pipeline/art/assets/signal/oval-atlas.png" "$track_run/pipeline/art/assets/signal/oval-map.png" \
+  "$track_run/pipeline/art/assets/signal/oval-avg.png" assets/signal/
 printf 'source regressions\n' > "$track_run/STAGE"
 : > "$track_run/regressions.log"
 for track_suite in track handling race camera conductor; do
@@ -24,4 +31,6 @@ env SIGIL_AUDIO_BACKEND=null SIGIL_APP_PLATFORM=x11 DISPLAY= WAYLAND_DISPLAY= \
   --music-headless --mute --start --autopilot --track=oval --musiclog --quit-after 2 \
   > "$track_run/headless.log" 2>&1
 rg -q 'headless race complete; audio uninitialized' "$track_run/headless.log"
+printf 'native graphical schedule/world smoke\n' > "$track_run/STAGE"
+node scripts/track/native-world.mjs "$track_run/native"
 printf 'finished\n' > "$track_run/STAGE"
