@@ -16,6 +16,8 @@
         (signal mode7 decal)
         (signal shell core))
 
+(load "scripts/track/native-test-support.sgl")
+
 (define (scene-texture name)
   (let* ((image (load-image (string-append "assets/signal/" name)))
          (texture (load-texture image)))
@@ -97,32 +99,33 @@
       (advance (+ i 1)))))
 
 (test-group "full live ICE scene"
-  (test "actual cup scheduler draws through shell, normal camera and HUD"
-    (run-game "Signal live ICE scene verification" 480 270
-      (lambda ()
-        (gfx-setup)
-        (set-viewport 480 270)
-        (scene-init!
-          (map (lambda (id)
-                 (let ((name (symbol->string id)))
-                   (list id
-                         (scene-texture (string-append name "-atlas.png"))
-                         (scene-texture (string-append name "-map.png"))
-                         (scene-texture (string-append name "-avg.png")))))
-               TRACKS)
-          (scene-texture "sky.png")
-          (scene-texture "machines.png")
-          (list (cons 'embers (scene-texture "lut-embers.png"))
-                (cons 'crash (scene-texture "lut-crash.png"))))
-        (title-set-logo! (scene-texture "title-logo.png"))
-        (intro-set-mark! (scene-texture "fh-mark.png"))
-        (decal-init! VIEW-W VIEW-H)
-        (capture-race! "breakwater" 6000)
-        (capture-race! "basin" 6300)
-        (for-each
-          (lambda (name)
-            (assert-true (and (member name captured) #t)))
-          '("breakwater-grid" "breakwater-firewall-active"
-            "breakwater-drone-scheduled" "breakwater-tracer-warning"
-            "basin-grid" "basin-null-warning"))
-        (gfx-shutdown)))))
+  (live-ice-native-test "test-ice-scene: actual scheduler, normal camera and HUD"
+    (lambda ()
+      (run-game "Signal live ICE scene verification" 480 270
+        (lambda ()
+          (gfx-setup)
+          (set-viewport 480 270)
+          (scene-init!
+            (map (lambda (id)
+                   (let ((name (symbol->string id)))
+                     (list id
+                           (scene-texture (string-append name "-atlas.png"))
+                           (scene-texture (string-append name "-map.png"))
+                           (scene-texture (string-append name "-avg.png")))))
+                 TRACKS)
+            (scene-texture "sky.png")
+            (scene-texture "machines.png")
+            (list (cons 'embers (scene-texture "lut-embers.png"))
+                  (cons 'crash (scene-texture "lut-crash.png"))))
+          (title-set-logo! (scene-texture "title-logo.png"))
+          (intro-set-mark! (scene-texture "fh-mark.png"))
+          (decal-init! VIEW-W VIEW-H)
+          (capture-race! "breakwater" 6000)
+          (capture-race! "basin" 6300)
+          (for-each
+            (lambda (name)
+              (assert-true (and (member name captured) #t)))
+            '("breakwater-grid" "breakwater-firewall-active"
+              "breakwater-drone-scheduled" "breakwater-tracer-warning"
+              "basin-grid" "basin-null-warning"))
+          (gfx-shutdown))))))

@@ -249,6 +249,14 @@ The swarm's scheduled-state capture may be offscreen when this driver's
 pass misses its live cadence; the separate mesh proof establishes visible
 swarm geometry. Missing or stale captures and frame/shader errors fail the
 wrapper even if a native frame coroutine swallows an exception.
+The default `scripts/dev sigil test` suite records three named skips for
+these native-only files. Setting `SIGIL_TEST_HARNESS` requests execution:
+the staged runner must exist, its private Xvfb display must match
+`SIGNAL_ICE_PRIVATE_DISPLAY`, and `SIGIL_AUDIO_BACKEND` must be `null`.
+Missing prerequisites under an explicit harness are failures, never skips.
+The wrappers establish those settings and reject skipped execution.
+`check-native-isolation` proves the native checks, a real queued-audio mute
+sabotage, broken-harness refusal and the default full suite with named skips.
 `check-native-review` copies a completed native bundle, assets, license and
 Guix launcher into a private review tree, smokes that isolated copy and
 creates a checksummed archive. It performs no publication or deployment.

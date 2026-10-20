@@ -1,6 +1,5 @@
 // Phantom-only active geometry proof on an isolated software-GL display.
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
 import {localProcesses,privateDisplay} from "../drift/native.mjs";
@@ -16,12 +15,12 @@ for (const name of names) fs.rmSync(`build/ice-mesh-${name}.png`,{force:true});
 const deadline=setTimeout(()=>pool.cleanup(),600000);
 try {
   const {display}=await privateDisplay(pool,run);
-  const compiler=process.env.SIGIL??path.join(os.homedir(),".sigil/versions/0.22.11/sigil");
   const harness=process.env.SIGIL_TEST_HARNESS;
-  const invocation=harness?[path.resolve(harness)]:[compiler,"test","--config","release"];
-  const child=pool.launch(path.resolve("scripts/dev"),[...invocation,
+  assert.ok(harness,"standard native runner must be staged first");
+  const child=pool.launch(path.resolve("scripts/dev"),[path.resolve(harness),
     "--sgl","--no-strict","test/test-ice-draw.sgl"],
-    {env:{...process.env,DISPLAY:display,SIGIL_APP_PLATFORM:"x11",SIGIL_AUDIO_BACKEND:"null",
+    {env:{...process.env,DISPLAY:display,SIGNAL_ICE_PRIVATE_DISPLAY:display,
+      SIGIL_APP_PLATFORM:"x11",SIGIL_AUDIO_BACKEND:"null",
       XDG_SESSION_TYPE:"x11",LIBGL_ALWAYS_SOFTWARE:"1",LP_NUM_THREADS:"1",GALLIUM_DRIVER:"llvmpipe"},
       stdio:["ignore","pipe","pipe"]});
   child.stdout.on("data",data=>{log+=data;});
@@ -29,6 +28,8 @@ try {
   const code=await new Promise((resolve,reject)=>{child.on("error",reject);child.on("exit",resolve);});
   assert.equal(code,0,log.slice(-4000));
   assert.doesNotMatch(log,/Scheme error in frame|Error loading|FAIL:|shader.*error/i);
+  assert.match(log,/NATIVE ICE TEST RUN: test-ice-draw:/);
+  assert.doesNotMatch(log,/SKIP: requires staged SIGIL_TEST_HARNESS/);
   const captures=new Map();
   for (const name of names) {
     const bytes=fs.readFileSync(`build/ice-mesh-${name}.png`);
