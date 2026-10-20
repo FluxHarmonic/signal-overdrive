@@ -30,15 +30,40 @@
     ;; point (x, y), rows from the top, z how far the frame has faded to
     ;; black, 0..1 (the title's fades), and w 1 for reduced motion: no
     ;; tearing, the glitch's or corruption's (corruption's red stays), and
-    ;; the speed lines standing still.
+    ;; the speed lines standing still. rain (0.2, the district look): x the
+    ;; streaks' density 0..1 (0: none; the scene passes 0 with reduced
+    ;; motion), y their slant, columns per row, z the guard 0..1 (the road
+    ;; ahead kept clear; see the shader), w 1 for the debug view. ahead[8]:
+    ;; the road ahead on the screen, (x y half-width-px valid) per point. The streaks are drawn where
+    ;; the glitch tore the row (so they tear with it), before corruption's
+    ;; red and the title's fade (so those take them too), and each picks up
+    ;; the light under it: over a light pool a drop is that pool's colour.
     (define LUT-FRAGMENT
       "uniform vec4 params;
 uniform vec4 opts;
 uniform vec4 fx;
 uniform vec4 vp;
+uniform vec4 rain;
+uniform vec4 ahead[8];
 uniform sampler2D src;
 uniform sampler2D lut;
 float hash(float n) { return fract(sin(n * 12.9898) * 43758.5453); }
+// 1 inside the road ahead (the centreline from the machine to 1,900 texels
+// on, as screen points with their half-widths in pixels), 0 past its edge
+float roadAhead(vec2 q) {
+  float best = 0.0;
+  for (int i = 0; i < 7; i++) {
+    vec4 a = ahead[i];
+    vec4 b = ahead[i + 1];
+    if (a.w < 0.5 || b.w < 0.5) continue;
+    vec2 ab = b.xy - a.xy;
+    float t = clamp(dot(q - a.xy, ab) / max(dot(ab, ab), 0.0001), 0.0, 1.0);
+    float hw = mix(a.z, b.z, t) + 2.0;
+    float d = length(q - (a.xy + ab * t));
+    best = max(best, 1.0 - smoothstep(hw, hw * 1.25 + 2.0, d));
+  }
+  return best;
+}
 out vec4 frag_color;
 const int B4[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
 void main() {
@@ -47,12 +72,14 @@ void main() {
   // the glitch: bands of rows torn sideways, the red channel split off
   float g = vp.w > 0.5 ? 0.0 : max(fx.z, fx.w);
   vec4 texel;
+  int rx = p.x;
   if (g > 0.01) {
     float band = floor(float(yt) / 3.0);
     float f = floor(fx.y * 24.0);
     float h = hash(band * 7.13 + f * 3.71);
     int shift = h < g * 0.6 ? int((hash(band + f) - 0.5) * 60.0 * g) : 0;
     ivec2 q = ivec2(clamp(p.x + shift, 0, 479), p.y);
+    rx = q.x;
     texel = texelFetch(src, q, 0);
     texel.r = texelFetch(src, ivec2(clamp(q.x + int(4.0 * g), 0, 479), p.y), 0).r;
   } else {
@@ -77,6 +104,62 @@ void main() {
       float len = 10.0 + 40.0 * fx.x;
       if (perp < 0.75 && r > pos && r < pos + len) c = mix(c, vec3(204.0, 230.0, 255.0), 0.8 * fx.x);
     }
+  }
+  // the rain: two layers of slanted streaks a pixel wide, near ones
+  // longer, faster and further apart; a lane of each layer lit by the
+  // density, each lane's drops falling at its own speed and period
+  // The guard (rain.z, David's 0.2 note: the drops hid the track): none
+  // over the road ahead, thinner, shorter and fainter over the rest of the
+  // ground and near the horizon, where bends are read; the sky and the
+  // screen's edges keep the full rain; and the downpour capped. 0 is the
+  // first look's rain, unguarded.
+  bool touched = false;
+  float band = 0.0;
+  if (rain.x > 0.01 || rain.w > 0.5) {
+    float y = float(yt);
+    float gd = clamp(rain.z, 0.0, 1.0);
+    vec2 q = vec2(float(p.x), y);
+    band = rain.w > 0.5 || gd > 0.0 ? roadAhead(q) : 0.0;
+    float hz = 1.0 - smoothstep(6.0, 22.0, abs(y - vp.y));
+    float ground = smoothstep(vp.y, vp.y + 4.0, y);
+    float edge = smoothstep(0.30, 0.47, abs(float(p.x) / 480.0 - 0.5));
+    float open = ground * (1.0 - edge);
+    float dm = mix(1.0, (1.0 - band) * (1.0 - 0.65 * hz) * (1.0 - 0.45 * open), gd);
+    float am = mix(1.0, (1.0 - 0.5 * hz) * (1.0 - 0.55 * open), gd);
+    float lm = mix(1.0, 1.0 - 0.4 * open, gd);
+    float dens = mix(rain.x, min(rain.x, 0.7), gd);
+    for (int layer = 0; layer < 2; layer++) {
+      if (dens <= 0.01) break;
+      float near = layer == 0 ? 1.0 : 0.0;
+      float spacing = mix(4.0, 7.0, near);
+      float u = float(rx) + y * rain.y * mix(0.7, 1.0, near);
+      float lane = floor(u / spacing);
+      float h = hash(lane * 3.17 + near * 51.3);
+      if (h > dens * mix(0.6, 0.45, near) * dm) continue;
+      if (abs(u - (lane + 0.5) * spacing) > 0.5) continue;
+      float speed = mix(330.0, 520.0, near) * (0.85 + 0.3 * fract(h * 7.3));
+      float period = mix(90.0, 150.0, near) * (0.7 + 0.6 * fract(h * 3.1));
+      float pos = mod(y - fx.y * speed + h * 997.0, period);
+      // a drop catches light, but not over a strong colour: mixed into
+      // amber, orange, red or a rail it would snap to another role (P16)
+      float chroma = max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
+      if (pos < mix(5.0, 11.0, near) * lm && chroma < 90.0) {
+        float lum = dot(c, vec3(0.299, 0.587, 0.114));
+        vec3 lit = min(vec3(255.0), c * 1.7 + 25.0);
+        vec3 drop = mix(vec3(166.0, 190.0, 221.0) * mix(0.5, 0.75, near), lit, smoothstep(40.0, 140.0, lum));
+        c = mix(c, drop, mix(0.5, 0.75, near) * am);
+        touched = true;
+      }
+    }
+  }
+  // the rain's debug view (rain.w): red where a streak or a splash ring
+  // (the ground marks those in alpha) touched the pixel, green over the
+  // road ahead below the horizon; scripts/rain-occlusion.mjs counts them
+  if (rain.w > 0.5) {
+    bool splash = texel.a < 0.75;
+    bool inBand = band > 0.5 && float(yt) > vp.y;
+    frag_color = vec4(touched || splash ? 1.0 : 0.0, inBand ? 1.0 : 0.0, splash ? 1.0 : 0.0, 1.0);
+    return;
   }
   // corruption: toward the trace's red
   c = mix(c, vec3(204.0, 51.0, 64.0) * (0.4 + 0.6 * dot(c, vec3(0.0013))), 0.6 * fx.w);

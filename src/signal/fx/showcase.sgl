@@ -1,7 +1,7 @@
-;;; (signal fx showcase) - The showcase: each 0.1 effect alone for eight
-;;; seconds, its trigger fired on the beat so it shows without driving into
-;;; it, then all of them together. Pure: a function of the tick and the
-;;; pulse.
+;;; (signal fx showcase) - The showcase: each effect (0.1's, then 0.2's
+;;; district look) alone for eight seconds, its trigger fired on the beat so
+;;; it shows without driving into it, then all of them together. Pure: a
+;;; function of the tick and the pulse.
 ;;;
 ;;; (showcase-at tick p) answers a list:
 ;;;   solo     the effect shown alone (the fx-solo numbering), 0 for all
@@ -9,6 +9,7 @@
 ;;;   integrity  the integrity the effects should see, or #f for the cargo's
 ;;;   traced?  #t to show the effects as if TRACED (the tower)
 ;;;   caption  what the HUD says
+;;;   rain     the rain to force, 0..1 (a downpour for the weather's three), or #f
 
 (define-library (signal fx showcase)
   (import (signal fx beat))
@@ -18,14 +19,14 @@
   (begin
     (define SHOWCASE-SEGMENT 480)      ; ticks, 8 s
     (define FX-NAMES '#("ALL" "HORIZON DIP" "LIGHT POOLS" "RAIL CHASE" "SKYLINE LIFE"
-                       "ICE GLITCH" "ICE WARP" "INTERFERENCE"))
+                       "ICE GLITCH" "ICE WARP" "INTERFERENCE" "REFLECTIONS" "WET GROUND" "RAIN"))
 
     (define (showcase-at tick p)
-      (let* ((seg (modulo (quotient tick SHOWCASE-SEGMENT) 8))
+      (let* ((seg (modulo (quotient tick SHOWCASE-SEGMENT) 11))
              (within (modulo tick SHOWCASE-SEGMENT))
              (downbeat (and (onset? p KICK) (= 0 (pulse-row p))))
              (bar (pulse-bar p))
-             (solo (if (= seg 7) 0 (+ seg 1)))
+             (solo (if (= seg 10) 0 (+ seg 1)))
              (fires (case solo
                       ((1) (if (and downbeat (even? bar)) '(drop) '()))
                       ((5) (if downbeat '(wall) '()))
@@ -41,4 +42,5 @@
               (string-append "SHOWCASE: " (vector-ref FX-NAMES solo)
                              (cond ((= solo 7) "  INTEGRITY TIER CYCLING")
                                    (traced "  (TRACED)")
-                                   (else ""))))))))
+                                   (else "")))
+              (and (>= solo 8) 1.0))))))

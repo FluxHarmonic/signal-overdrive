@@ -115,6 +115,33 @@ export function validateTrack(t) {
   }
   if (!t.decoration || !Number.isInteger(t.decoration.puddles)
     || t.decoration.puddles < 0 || t.decoration.puddles > 1000) fail("invalid puddle count");
+  keysOnly(t.decoration, ["puddles", "water", "beyond"], "decoration");
+  // Water (the district look, 0.2): areas of the off-road floor painted as
+  // water, which the ground shader mirrors the skyline in. Each is
+  // {polygon: [[x, y], ...]} in world texels (3..64 points, inside the
+  // world) or {region: "outside"} (everything outside the closed
+  // centreline). The road, its barrier and run-off, and an apron beside
+  // them always win over water. beyond: what the shader draws past the
+  // map's edge, "floor" (the default) or "water".
+  const world = worldSize(t);
+  if (t.decoration.water !== undefined) {
+    if (!Array.isArray(t.decoration.water) || t.decoration.water.length > 16) fail("water must be a list of at most 16 areas");
+    for (const area of t.decoration.water) {
+      if (area && area.region !== undefined) {
+        keysOnly(area, ["region"], "water area");
+        if (area.region !== "outside") fail("water region must be outside");
+      } else {
+        keysOnly(area, ["polygon"], "water area");
+        const p = area.polygon;
+        if (!Array.isArray(p) || p.length < 3 || p.length > 64) fail("a water polygon needs 3..64 points");
+        for (const q of p) {
+          if (!Array.isArray(q) || q.length !== 2 || !q.every(finite)
+            || q[0] < 0 || q[1] < 0 || q[0] > world.width || q[1] > world.height) fail("water polygon point outside the world");
+        }
+      }
+    }
+  }
+  if (t.decoration.beyond !== undefined && !["floor", "water"].includes(t.decoration.beyond)) fail("beyond must be floor or water");
   return t;
 }
 

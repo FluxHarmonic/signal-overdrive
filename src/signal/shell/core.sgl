@@ -12,7 +12,8 @@
 ;;;   start       Enter or Space; a pad's Start or A; a tap on a phone
 ;;;   restart     R; a pad's Back
 ;;;   tuning      Tab: the overlay (Up/Down pick a knob, Left/Right set
-;;;               it, 0 resets it); P the palette; / the dither
+;;;               it, 0 resets it); P the palette (the district's, crash,
+;;;               embers); / the dither
 
 (define-library (signal shell core)
   (import (sigil math)
@@ -36,6 +37,7 @@
           (signal fx beat)
           (signal fx state)
           (signal fx showcase)
+          (signal fx district)
           (signal shell music)
           (signal shell theme)
           (signal music conductor)
@@ -160,18 +162,34 @@
                             PAUSE-FADE-OUT))))
         (theme-frame!)))
 
-    (define (core-focus! focused?)
-      (unless (eq? focused? *focused*)
-        (set! *focused* focused?)
-        (unless focused?
-          (keys-clear! *keys*)
-          (set! *touch* (list 0.0 0.0 0.0 #f #f))
-          (set! *touch-boost-pending* #f))
-        ;; The first returning frame includes the hidden interval. It
-        ;; must not owe catch-up ticks after the race was paused.
-        (set! *skip-interval* #t)
-        (audio-pause! (core-paused?))
-        (when *race* (music-frame! (race-song *race*) (music-held?)))))
+    ;; focus=ignore: run on without the window's focus (for frame-time runs
+    ;; on a machine whose display is locked, where no window gets focus;
+    ;; unfocused, the game pauses and a run would time a still frame). A
+    ;; development parameter: on the web it waits for ?dev (rule D), like
+    ;; track= and song=; natively (--focus=ignore) it applies at once.
+    (define *focus-ignore* #f)
+    (define *focus-request* #f)
+    (define (focus-request!)
+      (when (and *focus-request* (dev-keys?))
+        (set! *focus-request* #f)
+        (set! *focus-ignore* #t)
+        ;; the page sends focus only on a change: already unfocused, the
+        ;; game would stay paused until the next one
+        (core-focus! *focused*)
+        (say "focus ignored: runs unfocused")))
+    (define (core-focus! focused-in?)
+      (let ((focused? (or focused-in? *focus-ignore*)))
+        (unless (eq? focused? *focused*)
+          (set! *focused* focused?)
+          (unless focused?
+            (keys-clear! *keys*)
+            (set! *touch* (list 0.0 0.0 0.0 #f #f))
+            (set! *touch-boost-pending* #f))
+          ;; The first returning frame includes the hidden interval. It
+          ;; must not owe catch-up ticks after the race was paused.
+          (set! *skip-interval* #t)
+          (audio-pause! (core-paused?))
+          (when *race* (music-frame! (race-song *race*) (music-held?))))))
     (define *keys* (make-keys))
     (define *sticks* (make-sticks))
     (define *pad* (make-pad))
@@ -260,7 +278,7 @@
     (define *showcase-solo* 1)    ; the showcase's solo, worked out once a tick
     (define *fx-ms* 0.0)          ; fx-tick!'s CPU ms a frame, smoothed (in SIM)
     (define *fx-frame-ms* 0.0)
-    (define FX-ORDER '(fx-dip fx-pools fx-chase fx-sky fx-glitch fx-warp fx-interf))
+    (define FX-ORDER '(fx-dip fx-pools fx-chase fx-sky fx-glitch fx-warp fx-interf fx-reflect fx-wet fx-rain))
     (define (fx-param? kv) (and (> (string-length kv) 3) (string=? (substring kv 0 3) "fx-")))
     (define (showcase?) (> (tuning-ref *tuning* 'fx-showcase) 0.5))
     (define (fx-solo)
@@ -307,7 +325,12 @@
                         (else (or what forced)))))
           (set! *fx* (fx-step *fx* pl events integrity
                               (list (machine-x m) (machine-y m) (machine-heading m))
-                              fires fx-knob))
+                              fires fx-knob
+                              ;; the district's rain for this section (the showcase forces a downpour)
+                              (rain-target (and sc (> (length sc) 5) (list-ref sc 5))
+                                           (tuning-ref *tuning* 'fx-weather)
+                                           (district-look (track-district (race-track r)))
+                                           (pulse-section pl))))
           ;; the drop kicks the camera too (§3.3)
           (when (and (fx-drop-now *fx*) (> (fx-knob 'fx-dip) 0.0)) (set! *kick* 1.0)))))
 
@@ -379,6 +402,9 @@
       (set! *pacing* (pacing-new))
       (set! *paused* #f)
       (set! *focused* #t)
+      ;; a new session: focus=ignore is asked for again, after the boot
+      (set! *focus-ignore* #f)
+      (set! *focus-request* #f)
       (set! *skip-interval* #f)
       (set! *resync-requests* 0)
       (music-reset!)
@@ -427,6 +453,10 @@
     (define (core-param! kv)
       (cond ((string=? kv "autopilot") (set! *autopilot* #t) (say "autopilot on"))
             ((string=? kv "start") (set! *start-now* #t) (intro-skip!) (title-skip!))
+            ((string=? kv "focus=ignore")
+             (set! *focus-request* #t)
+             (focus-request!)
+             (when *focus-request* (say "focus=ignore waits for ?dev")))
             ((string=? kv "pointer=coarse") (set! *touch-device* #t))
             ((string=? kv "pointer=fine") (set! *touch-device* #f))
             ((string=? kv "motion=reduce") (set! *reduce-motion* #t))
@@ -439,6 +469,7 @@
             ((or (string=? kv "dev") (and (> (string-length kv) 3) (string=? (substring kv 0 4) "dev=")))
              (set! *dev* #t) (say "dev keys on")
              (song-request!)
+             (focus-request!)
              (track-request!))
             ;; no HUD: clean captures, and the P15 gate's static frame
             ((string=? kv "nohud") (set! *no-hud* #t))
@@ -672,7 +703,7 @@
         (set! *overlay* (if *overlay* #f 0))
         (say "overlay " (if *overlay* "on" "off")))
       (when (pressed? 'p)
-        (set! *tuning* (tuning-set *tuning* 'palette (if (> (tuning-ref *tuning* 'palette) 0.5) 0.0 1.0))))
+        (set! *tuning* (tuning-set *tuning* 'palette (exact->inexact (modulo (+ 1 (exact (round (tuning-ref *tuning* 'palette)))) 3)))))
       (when (pressed? 'slash)
         (set! *tuning* (tuning-set *tuning* 'dither (if (> (tuning-ref *tuning* 'dither) 0.5) 0.0 1.0))))
       (when *overlay*

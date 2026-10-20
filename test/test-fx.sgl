@@ -1,13 +1,18 @@
 ;;; The effects' state and the beat seam: the stub keeps the conductor's
 ;;; clock, the drop lands on a downbeat, a glitch never outlasts P15's 100 ms,
 ;;; the chase steps only on hats, the tracer strikes one bar after it marks,
-;;; interference follows the tiers, and the horizon bend inverts.
+;;; interference follows the tiers, and the horizon bend inverts. And 0.2's
+;;; district look: the weather eases (rain, then the ground's wetness, which
+;;; dries slower than it wets), a district's look and rain by section, and
+;;; the showcase's weather solos.
 
 (import (sigil test)
         (sigil math)
         (sigil list)
         (signal fx beat)
-        (signal fx state))
+        (signal fx state)
+        (signal fx district)
+        (signal fx showcase))
 
 (define (near? a b eps) (< (abs (- a b)) eps))
 (define ALL-ON (lambda (k) 1.0))
@@ -182,3 +187,98 @@
   (test "the sky moves with the horizon; the bottom row does not move"
     (assert-true (near? 12.0 (bend-offset 40.0 12.0 80.0 270.0) 1e-12))
     (assert-true (near? 0.0 (bend-offset 270.0 12.0 80.0 270.0) 1e-12))))
+
+;; n ticks with the rain this tick's section asks for given by rain-at,
+;; (lambda (tick) 0..1), or no rain argument at all when rain-at is #f
+(define (run-weather n rain-at)
+  (let loop ((k 1) (st (fx-new)) (acc '()))
+    (if (> k n)
+        (reverse acc)
+        (let ((st (if rain-at
+                      (fx-step st (stub-pulse k 'lap1 #f) '() 100.0 POSE '() ALL-ON (rain-at k))
+                      (fx-step st (stub-pulse k 'lap1 #f) '() 100.0 POSE '() ALL-ON))))
+          (loop (+ k 1) st (cons (fx-copy st) acc))))))
+;; the largest rise and the largest fall of an accessor between ticks
+(define (steps sts get)
+  (let loop ((xs sts) (up 0.0) (down 0.0))
+    (if (or (null? xs) (null? (cdr xs)))
+        (list up down)
+        (let ((d (- (get (cadr xs)) (get (car xs)))))
+          (loop (cdr xs) (max up d) (max down (- d)))))))
+
+(test-group "weather (0.2)"
+  (test "without a district's rain the weather stays dry"
+    (let ((last (list-ref (run-weather 200 #f) 199)))
+      (assert-equal 0.0 (fx-rain last))
+      (assert-equal 0.0 (fx-wet last))))
+  (test "the first tick starts at the resting values: never a dry start"
+    (let ((first (car (run-weather 1 (lambda (k) 0.25)))))
+      (assert-true (near? 0.25 (fx-rain first) 1e-12))
+      (assert-true (near? (wet-target 0.25) (fx-wet first) 1e-12))
+      (assert-true (near? 0.5 (wet-target 0.25) 1e-12))))
+  (test "a downpour swells, then the ground wets; both ease, never jump"
+    (let* ((sts (run-weather 900 (lambda (k) (if (< k 300) 0.25 1.0))))
+           (at (lambda (k) (list-ref sts (- k 1)))))
+      ;; the rain rises at most 0.01 a tick, and is all in within 80 ticks
+      (assert-true (<= (car (steps sts fx-rain)) (+ 0.01 1e-9)))
+      (assert-true (near? 0.25 (fx-rain (at 299)) 1e-12))
+      (assert-true (< (fx-rain (at 340)) 1.0))
+      (assert-true (near? 1.0 (fx-rain (at 380)) 1e-12))
+      ;; the ground follows at most 0.0025 a tick, to the downpour's wetness
+      (assert-true (<= (car (steps sts fx-wet)) (+ 0.0025 1e-9)))
+      (assert-true (< (fx-wet (at 400)) (wet-target 1.0)))
+      (assert-true (near? (wet-target 1.0) (fx-wet (at 900)) 1e-9))))
+  (test "the ground dries slower than it wets"
+    (let* ((sts (run-weather 2600 (lambda (k) (if (< k 600) 1.0 0.0))))
+           (fall (cadr (steps sts fx-wet))))
+      (assert-true (> fall 0.0))
+      (assert-true (<= fall (+ 0.0008 1e-9)))
+      ;; and when the rain stops it does dry out, completely
+      (assert-true (near? 0.0 (fx-rain (list-ref sts 1499)) 1e-12))
+      (assert-true (> (fx-wet (list-ref sts 1499)) 0.0))
+      (assert-true (near? 0.0 (fx-wet (list-ref sts 2599)) 1e-12))
+      (assert-true (< (fx-wet (list-ref sts 899)) (fx-wet (list-ref sts 699))))))
+  (test "the weather is not a transient: a restart keeps it"
+    (let ((st (list-ref (run-weather 50 (lambda (k) 0.6)) 49)))
+      (fx-clear-transients! st)
+      (assert-true (near? 0.6 (fx-rain st) 1e-12)))))
+
+(test-group "district look (0.2)"
+  (test "Docklands has its palette, its cold fog and rain heaviest in hold"
+    (let ((l (district-look 'docklands)))
+      (assert-equal 'docklands (look-district l))
+      (assert-equal 'docklands (look-palette l))
+      (assert-equal (look-fog-color l) (look-sky-low l))
+      (for-each (lambda (s) (assert-true (< (section-rain l s) (section-rain l 'hold))))
+                '(calm grid lap1 lap2 fill traced uplink results))
+      (assert-true (> (section-rain l 'lap1) 0.0))))
+  (test "any other district keeps 0.1's look and no rain"
+    (for-each (lambda (d)
+                (let ((l (district-look d)))
+                  (assert-equal 'none (look-district l))
+                  (assert-equal 'embers (look-palette l))
+                  (assert-equal 0.0 (section-rain l 'hold))))
+              '(none neon-row unknown)))
+  (test "the showcase gives each weather effect a downpour, and only those"
+    (let ((seen (let loop ((seg 0) (acc '()))
+                  (if (= seg 11) (reverse acc)
+                      (let ((sc (showcase-at (+ 10 (* seg SHOWCASE-SEGMENT)) (stub-pulse 10 'lap1 #f))))
+                        (loop (+ seg 1) (cons (list (car sc) (list-ref sc 5)) acc)))))))
+      (assert-equal '((1 #f) (2 #f) (3 #f) (4 #f) (5 #f) (6 #f) (7 #f) (8 1.0) (9 1.0) (10 1.0) (0 #f)) seen)))
+  (test "the rain reaching fx-step: the showcase's, else fx-weather's, else the section's"
+    ;; the shell's first version gave #<undefined> from the REFLECTIONS solo
+    ;; on, and fx-step's min threw every tick (signal-03's repro)
+    (let ((l (district-look 'docklands)))
+      (for-each (lambda (seg)
+                  (let* ((sc (showcase-at (+ 10 (* seg SHOWCASE-SEGMENT)) (stub-pulse 10 'lap1 #f)))
+                         (r (rain-target (list-ref sc 5) -1.0 l 'lap1)))
+                    (assert-true (number? r))
+                    (assert-equal (if (memv (car sc) '(8 9 10)) 1.0 (section-rain l 'lap1)) r)))
+                '(0 1 2 3 4 5 6 7 8 9 10))
+      (assert-equal 0.4 (rain-target #f 0.4 l 'hold))
+      (assert-equal 0.0 (rain-target #f 0.0 l 'hold))
+      (assert-equal (section-rain l 'hold) (rain-target #f -1.0 l 'hold))
+      ;; and the step takes it: a showcase downpour reaches the weather
+      (let ((st (fx-step (fx-new) (stub-pulse 10 'lap1 #f) '() 100.0 POSE '() ALL-ON
+                         (rain-target 1.0 -1.0 l 'lap1))))
+        (assert-true (near? 1.0 (fx-rain st) 1e-12))))))

@@ -59,6 +59,20 @@
          "#583681" "#5C4D8C" "#636D81" "#6B7085" "#1A73D9" "#8C40B3" "#814EBA" "#B641A0"
          "#B36BFF" "#FF59D9" "#3AACA0" "#7380A6" "#4DF2D9" "#8A8FA0" "#93A4BA" "#DBE0E6"
          "#CCE6FF" "#F0F0F0" "#FAFCFF")
+        ;; Docklands' district palette (Signal 0.2, design §4.2): embers
+        ;; unchanged and in its order, then seven colours for the harbour
+        ;; (scripts/art/lib.mjs's DOCK names; scripts/art/check-palette.mjs
+        ;; checks them). Added, not swapped, so every blend that lands on an
+        ;; embers colour today still can.
+        (docklands
+         "#0D0A1A" "#241104" "#261804" "#3D1D07" "#3B1F1A" "#3D281A" "#17122E" "#21173D"
+         "#2A2D3A" "#402807" "#74391A" "#7A4D1A" "#4A5A2B" "#2E1D48" "#2E1C4D" "#3D1A40"
+         "#1A3840" "#1F3A4D" "#333648" "#7A2E70" "#3D4052" "#2A7270" "#AD541A" "#B6721A"
+         "#F2731A" "#CC3340" "#9E5761" "#FF5959" "#1A8C4D" "#FF9F1A" "#FFCC33" "#B89E5C"
+         "#583681" "#5C4D8C" "#636D81" "#6B7085" "#1A73D9" "#8C40B3" "#814EBA" "#B641A0"
+         "#B36BFF" "#FF59D9" "#3AACA0" "#7380A6" "#4DF2D9" "#8A8FA0" "#93A4BA" "#DBE0E6"
+         "#CCE6FF" "#F0F0F0" "#FAFCFF"
+         "#08182A" "#10293A" "#1E2642" "#2B3A55" "#A6BEDD" "#203078" "#46506E")
         (ramped
          "#0D0A1A" "#3B1F1A" "#3D281A" "#17122E" "#21173D" "#2A2D3A" "#74391A" "#7A4D1A"
          "#4A5A2B" "#2E1D48" "#2E1C4D" "#3D1A40" "#1A3840" "#1F3A4D" "#333648" "#7A2E70"
