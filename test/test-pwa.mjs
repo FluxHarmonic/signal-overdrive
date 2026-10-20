@@ -51,14 +51,19 @@ async function page(controlled, available = null) {
     window, document, navigator: { serviceWorker: sw }, Event, MessageChannel: Channel,
     location: { reload() { reloads++; } }, console: { log() {} },
     setInterval(fn) { intervals.push(fn); },
-    setTimeout(fn) { timers.push(fn); return timers.length; }, clearTimeout() {}
+    setTimeout(fn, milliseconds) {
+      timers.push(fn);
+      if (milliseconds === 1000) queueMicrotask(fn); // advance the retry clock
+      return timers.length;
+    }, clearTimeout() {}
   });
   await flush();
   return {
-    sw, worker, current, calls, messages, window,
+    sw, worker, current, calls, messages, window, document, registration,
     menu() { phase = 1; }, race() { phase = 2; }, choose() { chosen = true; },
     poll() { intervals[0](); }, reloads: () => reloads, announcements: () => announcements,
     install() {
+      registration.installing = null;
       registration.waiting = worker;
       worker.state = "installed";
       worker.dispatchEvent(new Event("statechange"));
@@ -74,6 +79,98 @@ test("first install stays quiet when claim wins the installed callback race", as
   assert.equal(p.announcements(), 0);
   assert(!p.calls.some(([type]) => type === "update"));
   assert.equal(p.reloads(), 0);
+});
+
+test("adjacent checks join the browser's existing install through completion", async () => {
+  const p = await page(true);
+  let updates = 0;
+  p.registration.update = async () => { updates++; };
+  const first = p.window.SignalOverdriveUpdate.check();
+  const second = p.window.SignalOverdriveUpdate.check();
+  assert.equal(first, second);
+  let complete = false;
+  first.then(() => { complete = true; });
+  await flush();
+  assert.equal(complete, false);
+  assert.equal(updates, 0, "an installing worker must not receive another update job");
+  p.install(); await first;
+  assert.equal(complete, true);
+  assert.equal(p.messages.length, 0, "download completion is not consent");
+  assert.equal(p.reloads(), 0);
+});
+
+test("manual, online and visibility checks share one update job", async () => {
+  const p = await page(true);
+  p.registration.installing = null;
+  let updates = 0, finish;
+  p.registration.update = () => { updates++; return new Promise(resolve => { finish = resolve; }); };
+  const first = p.window.SignalOverdriveUpdate.check();
+  p.window.dispatchEvent(new Event("online"));
+  p.document.dispatchEvent(new Event("visibilitychange"));
+  const second = p.window.SignalOverdriveUpdate.check();
+  assert.equal(first, second);
+  assert.equal(updates, 1);
+  finish(); await first;
+  const next = p.window.SignalOverdriveUpdate.check();
+  assert.notEqual(next, first, "a completed check permits a later deployment check");
+  assert.equal(updates, 2);
+  finish(); await next;
+});
+
+test("an interrupted install releases the shared check without offering or applying it", async () => {
+  const p = await page(true);
+  const first = p.window.SignalOverdriveUpdate.check();
+  p.worker.state = "redundant";
+  p.registration.installing = null;
+  p.worker.dispatchEvent(new Event("statechange"));
+  await first;
+  assert.equal(p.announcements(), 0);
+  assert.equal(p.messages.length, 0);
+  assert.equal(p.reloads(), 0);
+  assert.notEqual(p.window.SignalOverdriveUpdate.check(), first);
+});
+
+test("a permanently interrupted installation retries once and then releases callers", async () => {
+  const p = await page(true);
+  p.registration.installing = null;
+  let updates = 0;
+  p.registration.update = async () => {
+    updates++;
+    p.registration.installing = new EventTarget();
+    p.registration.installing.state = "redundant";
+  };
+  const first = p.window.SignalOverdriveUpdate.check();
+  assert.equal(p.window.SignalOverdriveUpdate.check(), first);
+  await first;
+  assert.equal(updates, 2, "one original attempt and one retry, with no loop");
+  assert.equal(p.announcements(), 0);
+  assert.equal(p.messages.length, 0);
+  assert.equal(p.reloads(), 0);
+});
+
+test("a failed automatic registration install enters the shared recovery path", async () => {
+  const p = await page(false);
+  let updates = 0;
+  p.registration.update = async () => { updates++; };
+  p.registration.installing = null;
+  p.worker.state = "redundant";
+  p.worker.dispatchEvent(new Event("statechange"));
+  await flush();
+  assert.equal(updates, 1);
+  assert.equal(p.announcements(), 0, "first installation stays quiet through recovery");
+  assert.equal(p.messages.length, 0);
+  assert.equal(p.reloads(), 0);
+});
+
+test("replacing a successfully installed worker does not start recovery", async () => {
+  const p = await page(true);
+  let updates = 0;
+  p.registration.update = async () => { updates++; };
+  p.install();
+  p.worker.state = "redundant";
+  p.worker.dispatchEvent(new Event("statechange"));
+  await flush();
+  assert.equal(updates, 0);
 });
 
 test("no new version supplies no menu notification and no activation", async () => {

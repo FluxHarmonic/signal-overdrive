@@ -33,12 +33,33 @@ flag, menu permission and once-only choice through Crash's `update/waiting`,
 `update/chosen?` dispatch bridge. The shell revokes permission in the same frame
 that leaves this menu; native sessions never acquire the web item.
 
+Public, online, visibility and periodic update checks share one promise until
+the browser's current installation finishes and its metadata is inspected.
+`registration.update()` alone resolves before installation finishes; another
+caller joins that install instead of starting a competing update job. This
+also joins a worker already installing after registration. Download completion
+still requires the player's explicit menu choice before activation.
+A worker made redundant during installation receives one retry after a second,
+within the same shared check. A second interruption ends the check; corrupt
+resources still fail verification and never become a ready menu item.
+An automatic registration install that fails before any explicit check uses
+the same recovery path, preserving first-install silence.
+
 Chrome verification must run on Phantom, never the laptop. The deterministic
 controls are `node --test test/test-pwa.mjs`; `node scripts/check-pwa-controls.mjs`
-proves the gates reject seven planted defects. Preparation fixtures are
+proves the gates reject eight planted defects. Preparation fixtures are
 `node --test test/test-pwa-build.mjs`. The real same-profile gate is
 `node scripts/verify-pwa.mjs build/site`; repeat with `--restart`, and require
 nonzero exit from `--sabotage no-worker` and `--sabotage frozen-worker`.
+For a failed update, add `--diagnostics` to capture service-worker console,
+exceptions, target lifecycle and install errors through CDP. Worker attachment
+can change timing, so also run acceptance without this option. Failures include
+worker-script request revisions, server errors, registration transitions and
+cache names. `--diagnostics --sabotage mixed-deployment` corrupts only B's wasm
+response and must report the worker's actual integrity rejection and exit nonzero.
+Every baseline and restart run also calls the public check twice without
+awaiting the first call, requires a shared completion promise, and verifies B
+is installed before either call completes.
 Required real-browser observations:
 
 1. Install A in a fresh profile. Assert real controller, cache inventory,
