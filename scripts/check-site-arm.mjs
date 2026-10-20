@@ -346,7 +346,7 @@ const net = new Map();
 // worker's, keyed "<session>:<requestId>", so the "live" leg can tell a
 // stub's answer from one that went for the network
 const LIVE = new RegExp(`^https://(www\\.)?${PLAUSIBLE_DOMAIN.replace(/\./g, "\\.")}(/|$)`);
-const liveReqs = new Map(), stubbedIds = new Set();
+const liveReqs = new Map(), stubbedIds = new Set(), browserIds = new Set();   // browserIds: the browser session's pauses, by networkId
 const noteLive = (sid, msg) => {
   const p = msg.params || {};
   if (msg.method === "Fetch.requestPaused" && LIVE.test(p.request.url) && p.networkId) stubbedIds.add(`${sid}:${p.networkId}`);
@@ -436,11 +436,11 @@ bws.addEventListener("message", async (ev) => {
       await bsend("Network.enable", {}, sid);
       await bsend("Network.setCacheDisabled", { cacheDisabled: true }, sid);
       await bsend("Fetch.enable", { patterns: PATTERNS }, sid);
-    } catch (e) { workerSetup.push(`${where(sid)}: ${e.message}`); }
+    } catch (e) { if (!/navigated or closed|No target with given id|Session with given id not found/.test(e.message)) workerSetup.push(`${where(sid)}: ${e.message}`); }   // a worker gone already makes no request
     await bsend("Runtime.runIfWaitingForDebugger", {}, sid).catch(() => { /* not waiting */ });
     return;
   }
-  if (msg.method === "Fetch.requestPaused") answer(msg.sessionId, p);
+  if (msg.method === "Fetch.requestPaused") { if (!msg.sessionId && p.networkId && LIVE.test(p.request.url)) browserIds.add(p.networkId); answer(msg.sessionId, p); }
   if (msg.sessionId) noteLive(msg.sessionId, msg);
 });
 try {
@@ -928,8 +928,10 @@ try {
 
   // ---- live: no request went to the real signaloverdrive.net -------------------------------
   // Every request for the live site that the page or a worker made must have
-  // been answered by a stub (paused and fulfilled from BASE) or by the site's
-  // own worker; the browser session's are all answered by construction. One
+  // been answered by a stub (paused and fulfilled from BASE: on its own
+  // session, or, for one its session did not pause, on the browser session,
+  // matched by networkId) or by the site's own worker; the browser session's
+  // own requests (worker scripts) are all answered by construction. One
   // that was neither went for the network, where the resolver backstop failed
   // it: that is a leak (as the worker's sw.js was before this leg). A request
   // abandoned before any of that (ERR_ABORTED, no response) went nowhere.
@@ -937,7 +939,7 @@ try {
   // answered here, so the leg saw the paths it guards.
   {
     const detail = [];
-    const kind = (k, r) => stubbedIds.has(k) ? "stub" : r.fromSW ? "worker" : r.cache ? "cache"
+    const kind = (k, r) => stubbedIds.has(k) ? "stub" : browserIds.has(k.slice(k.indexOf(":") + 1)) ? "browser-stub" : r.fromSW ? "worker" : r.cache ? "cache"
       : r.status === null && /ERR_ABORTED/.test(r.failed || "") ? "abandoned" : "leak";
     const tally = {};
     const leaks = [];
