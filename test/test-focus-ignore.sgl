@@ -6,8 +6,9 @@
 ;;; parameter (rule D) and waits for ?dev, in either order. Already
 ;;; unfocused, it unpauses the game when it applies, with no new focus
 ;;; event: the page sends focus only on a change.
-;;; The groups run in order: ?dev, once on, stays on for the process, so
-;;; the native case runs first, with ?dev never given.
+;;; ?dev, once on, stays on for the process (core-boot! keeps it), and the
+;;; test files share one process: a test that needs ?dev never given
+;;; starts with core-test-forget-dev!.
 (import (sigil test)
         (substratic store kv)
         (signal shell core))
@@ -38,6 +39,7 @@
     (core-focus! #t)
     (assert-false (core-paused?)))
   (test "without ?dev it is not honoured"
+    (core-test-forget-dev!)
     (core-boot! 'web)
     (core-param! "focus=ignore")
     (core-focus! #f)

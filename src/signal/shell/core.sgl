@@ -52,7 +52,8 @@
   (export core-boot! core-frame! core-keys core-sticks core-pad core-param! core-touch!
           core-tap! core-race core-tuning core-describe core-probe core-knobs-markdown GAME-NAME
           core-audio-start! core-focus! core-paused? core-advance! core-headless-frame! core-gesture!
-          core-startup-mark! core-visible! core-escape-quits? core-flow)
+          core-startup-mark! core-visible! core-escape-quits? core-flow
+          core-test-forget-dev!)
 
   (begin
     (define GAME-NAME "signal-overdrive")
@@ -405,6 +406,10 @@
     ;; page's effects panel reads it), so a player can't trip them.
     (define *dev* #f)
     (define (dev-keys?) (or *dev* (not (eq? *platform* 'web))))
+    ;; tests only: ?dev as if never given. A page boots once, so core-boot!
+    ;; keeps ?dev; the test files share one process, and a test of a
+    ;; development parameter's wait for ?dev must not see an earlier file's.
+    (define (core-test-forget-dev!) (set! *dev* #f))
     (define *tapped* #f)
     ;; the page's touch scheme sends its whole state at once:
     ;; steer throttle brake boost drift

@@ -28,6 +28,8 @@
 
   (test "on the web it waits for ?dev, then applies"
     (assert-false (eq? bound 'carrier-b))
+    ;; an earlier test file in this process may have given ?dev
+    (core-test-forget-dev!)
     (core-boot! 'web)
     (core-param! "song=carrier-b")
     (assert-equal bound (song-id))
