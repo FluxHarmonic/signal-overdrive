@@ -29,12 +29,22 @@
 (define ordered
   (map (lambda (name) (cdr (assoc name packages)))
        (get-build-order-for (package-name app) packages #t)))
-(define native-packages (find-native-packages ordered))
+(define (release-archive pkg)
+  (path-join "build/release/native"
+             (string-append "lib" (package-name pkg) ".a")))
+
+;;; Installed manifests include development-only native packages. The release
+;;; archive inventory is authoritative here; retain dependency order for linking.
+(define native-packages
+  (filter (lambda (pkg) (file-exists? (release-archive pkg)))
+          (find-native-packages ordered)))
+(when (null? native-packages)
+  (error "no release native archives; build the release before linking its harness"))
 (for-each
   (lambda (pkg)
-    (unless (file-exists? (path-join "build/release/native"
-                           (string-append "lib" (package-name pkg) ".a")))
-      (error "native archive must already exist; no rebuild or fetch" (package-name pkg))))
+    (display "Native harness release archive: ")
+    (display (release-archive pkg))
+    (newline))
   native-packages)
 (build-test-runtime (resolve-config app 'release) native-packages
   "signal-live-ice-test" "build/release" #t (path-join root ".sigil/deps/sigil-lib"))

@@ -1,0 +1,43 @@
+;;; Loaded by the three native-only tests. Ordinary suites register a named
+;;; skip; an explicitly requested harness must satisfy every prerequisite.
+(import (sigil test)
+        (sigil io)
+        (sigil fs)
+        (sigil process))
+
+(define (live-ice-native-test name thunk)
+  (let ((harness (getenv "SIGIL_TEST_HARNESS")))
+    (if (and harness (not (string=? harness "")))
+        (test name
+          (guard (exn
+                   (else
+                     (display "FAIL native ICE test: " (current-error-port))
+                     (display name (current-error-port))
+                     (display " — " (current-error-port))
+                     (write (exception-message exn) (current-error-port))
+                     (newline (current-error-port))
+                     (raise exn)))
+            (unless (file-exists? harness)
+              (error "staged SIGIL_TEST_HARNESS does not exist" harness))
+            (unless (equal? (getenv "SIGIL_AUDIO_BACKEND") "null")
+              (error "native ICE harness requires SIGIL_AUDIO_BACKEND=null"))
+            (let ((display-name (getenv "DISPLAY"))
+                  (private-display (getenv "SIGNAL_ICE_PRIVATE_DISPLAY")))
+              (unless (and display-name
+                           (> (string-length display-name) 1)
+                           (char=? (string-ref display-name 0) #\:)
+                           (equal? display-name private-display))
+                (error "native ICE harness requires its private Xvfb display"
+                       display-name private-display)))
+            (display "NATIVE ICE TEST RUN: ")
+            (display name)
+            (newline)
+            (thunk)))
+        (let ((reason
+                "requires staged SIGIL_TEST_HARNESS, private Xvfb and SIGIL_AUDIO_BACKEND=null"))
+          (display "SKIP native ICE test: ")
+          (display name)
+          (display " — ")
+          (display reason)
+          (newline)
+          (test-skip (string-append name " [SKIP: " reason "]"))))))

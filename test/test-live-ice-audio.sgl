@@ -6,6 +6,8 @@
         (signal music conductor)
         (signal shell music))
 
+(load "scripts/track/native-test-support.sgl")
+
 (define RATE 44100)
 (define FRAMES 4410)
 (define out (make-bytevector (* 8 FRAMES) 0))
@@ -18,18 +20,44 @@
         (loop (+ i 1)
               (max peak (abs (bytevector-ieee-single-ref out (* 4 i) 'little)))))))
 
+(define (audio-check message passed? actual)
+  (unless passed?
+    (display "FAIL live ICE audio: " (current-error-port))
+    (display message (current-error-port))
+    (display "; actual=" (current-error-port))
+    (write actual (current-error-port))
+    (newline (current-error-port))
+    (error message actual)))
+
 (test-group "live ICE: immediate song mute"
-  (test "mute already-queued music, advance through silence, restore on exit"
-    (assert-false (audio-initialized?))
-    (let ((c (conductor-new 'lap1)))
-      (music-start! 'offline-test-context c)
-      (music-frame! c #f dead-air: #f)
-      (assert-true (> (drain-peak) 0.001))
-      (let ((before (music-audible-seconds)))
-        (music-frame! (advance c 6) #f dead-air: #t)
-        (assert-equal 0.0 (drain-peak))
-        (assert-true (< (abs (- (- (music-audible-seconds) before) 0.1)) (/ 1.0 RATE))))
-      (music-frame! (advance c 12) #f dead-air: #f)
-      (assert-true (> (drain-peak) 0.001))
-      (music-close!))
-    (assert-false (audio-initialized?))))
+  (live-ice-native-test "test-live-ice-audio: queued mute, advancing clock and recovery"
+    (lambda ()
+      (audio-check "audio device must remain unopened before the test"
+                   (not (audio-initialized?)) (audio-initialized?))
+      (dynamic-wind
+        (lambda () #t)
+        (lambda ()
+          (let ((c (conductor-new 'lap1)))
+            (music-start! 'offline-test-context c)
+            (music-frame! c #f dead-air: #f)
+            (let ((peak (drain-peak)))
+              (audio-check "queued song must be audible (peak > 0.001)" (> peak 0.001) peak))
+            (let ((before (music-audible-seconds)))
+              ;; Deliberately omit contact mute only in the native sabotage:
+              ;; the real ring must then fail the exact-silence check below.
+              (music-frame! (advance c 6) #f
+                dead-air: (not (equal? (getenv "SIGNAL_ICE_NATIVE_SABOTAGE") "audio-mute")))
+              (let* ((peak (drain-peak))
+                     (delta (- (music-audible-seconds) before)))
+                (audio-check "contact must immediately silence the queued ring (peak = 0)"
+                             (= peak 0.0) peak)
+                (audio-check "clock must advance 0.1 seconds through silence (within one sample)"
+                             (< (abs (- delta 0.1)) (/ 1.0 RATE)) delta)))
+            (music-frame! (advance c 12) #f dead-air: #f)
+            (let ((peak (drain-peak)))
+              (audio-check "song must recover after contact (peak > 0.001)" (> peak 0.001) peak))))
+        music-close!)
+      (audio-check "audio device must remain unopened after the test"
+                   (not (audio-initialized?)) (audio-initialized?))
+      (display "LIVE ICE AUDIO PASS: queued mute, advancing clock, recovery; no device")
+      (newline))))

@@ -16,8 +16,7 @@ printf 'stage installed sources beside the standard runtime\n' > "$track_run/STA
 node scripts/track/stage-native-harness.mjs "$track_run" > "$track_run/staging.log" 2>&1
 export SIGIL_TEST_HARNESS="$track_run/harness/bin/signal-live-ice-test"
 printf 'actual queued-stream dead-air test without a device\n' > "$track_run/STAGE"
-timeout 180 scripts/dev "$SIGIL_TEST_HARNESS" --sgl --no-strict test/test-live-ice-audio.sgl \
-  > "$track_run/live-audio.log" 2>&1
+node scripts/track/native-audio.mjs "$track_run/audio" > "$track_run/live-audio.log" 2>&1
 printf 'native active and warning meshes on private Xvfb\n' > "$track_run/STAGE"
 node scripts/track/native-ice.mjs "$track_run/meshes" > "$track_run/meshes.log" 2>&1
 printf 'finished\n' > "$track_run/STAGE"

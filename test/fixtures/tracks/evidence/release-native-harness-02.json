@@ -1,0 +1,57 @@
+{
+  "toolingParent": "45740a9c02a8e6814273a104a999bb5db58b168e",
+  "integrationBase": "ef56aafca6c671cf499331e050414fe0c75c9747",
+  "scope": "Private copy of cp57 accepted integration plus native-isolation patch, with the release-archive harness fix overlaid",
+  "job": "/tmp/signal-track-tooling-cp58",
+  "result": "RESULT: release-only native harness proof exit 0; inspect STAGE and logs",
+  "harnessSourceSha256": "0e7336a60c566695520c5027af07eae44485728d19cd14651cf612038eb9684d",
+  "releaseArchives": [
+    "libmotif.a",
+    "libsigil.a",
+    "libsigil-audio.a",
+    "libsigil-desktop.a",
+    "libsigil-dsp.a",
+    "libsigil-graphics.a",
+    "libsignal-overdrive.a",
+    "libsubstratic.a"
+  ],
+  "selectedNativePackagesInDependencyOrder": [
+    "sigil-dsp",
+    "sigil-audio",
+    "sigil-desktop",
+    "motif",
+    "sigil-graphics",
+    "substratic",
+    "signal-overdrive"
+  ],
+  "coreRuntimeArchive": "libsigil.a is linked separately by the public test-runtime builder",
+  "regression": {
+    "builder": "45740a9:scripts/track/build-native-harness.sgl",
+    "exit": 1,
+    "witness": "native archive must already exist; no rebuild or fetch; Details: sigil-crypto",
+    "oldHarnessBinaryRemovedBeforeProof": true
+  },
+  "native": {
+    "check-native-direct": 0,
+    "audio": "RESULT: native queued audio PASS; explicit harness, no skip, no audio device",
+    "meshes": "RESULT: active ICE graphical capture PASS; all kinds, warnings, cache replacement and clear",
+    "check-native-scene": 0,
+    "scene": "RESULT: complete current game scene PASS; 9 fresh captures, real shell/scheduler/assets",
+    "allThreeRunMarkersObserved": true
+  },
+  "sabotage": {
+    "arm": "SIGNAL_ICE_NATIVE_SABOTAGE=audio-mute",
+    "exit": 1,
+    "witness": "FAIL live ICE audio: contact must immediately silence the queued ring (peak = 0); actual=0.37314",
+    "skipped": false
+  },
+  "defaultSuite": {
+    "priorProof": "native-isolation-02.json",
+    "passed": 349,
+    "namedSkips": 3,
+    "rerun": false,
+    "reason": "Only harness archive selection and documentation changed; test registration and wrappers are unchanged"
+  },
+  "productionCodeChanged": false,
+  "integrationTreeEdited": false
+}

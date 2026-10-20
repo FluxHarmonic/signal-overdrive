@@ -1,0 +1,33 @@
+{
+  "toolingParent": "f8940538f31e07d6cc15b80a0612320dfe9550c2",
+  "integrationBase": "ef56aafca6c671cf499331e050414fe0c75c9747",
+  "scope": "Isolated integration candidate plus tooling native-isolation patch; no integration edits",
+  "job": "/tmp/signal-track-tooling-cp57",
+  "defaultSuite": {
+    "command": "scripts/dev sigil test",
+    "exit": 0,
+    "passed": 349,
+    "skipped": 3,
+    "total": 352,
+    "duration": "22m 33.09s",
+    "nativeEnvironmentUnset": true,
+    "namedSkips": [
+      "SKIP native ICE test: test-ice-draw: active kinds, warnings, cache replacement and clear — requires staged SIGIL_TEST_HARNESS, private Xvfb and SIGIL_AUDIO_BACKEND=null",
+      "SKIP native ICE test: test-ice-scene: actual scheduler, normal camera and HUD — requires staged SIGIL_TEST_HARNESS, private Xvfb and SIGIL_AUDIO_BACKEND=null",
+      "SKIP native ICE test: test-live-ice-audio: queued mute, advancing clock and recovery — requires staged SIGIL_TEST_HARNESS, private Xvfb and SIGIL_AUDIO_BACKEND=null"
+    ]
+  },
+  "native": {
+    "audio": "RESULT: native queued audio PASS; explicit harness, no skip, no audio device",
+    "meshes": "RESULT: active ICE graphical capture PASS; all kinds, warnings, cache replacement and clear",
+    "scene": "RESULT: complete current game scene PASS; 9 fresh captures, real shell/scheduler/assets"
+  },
+  "negative": {
+    "audio-sabotage": 1,
+    "broken-ice-draw": 1,
+    "broken-ice-scene": 1,
+    "broken-live-ice-audio": 1
+  },
+  "sabotageWitness": "FAIL live ICE audio: contact must immediately silence the queued ring (peak = 0); actual=0.37314",
+  "productionCodeChanged": false
+}
