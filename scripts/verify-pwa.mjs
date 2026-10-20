@@ -80,6 +80,10 @@ const server = http.createServer((req, res) => {
     // Browser-level SW checks can bypass page offline emulation. Deny the
     // server too, proving the offline page cannot borrow any network bytes.
     if (offline) { res.writeHead(503).end(); return; }
+    // Pages and the real review host canonicalize index.html this way.
+    if (pathname === "/drive/index.html") {
+      res.writeHead(308, { location: "/drive/" }).end(); return;
+    }
     if (sabotage === "no-worker" && pathname === "/drive/sw.js") { res.writeHead(404).end(); return; }
     const served = sabotage === "frozen-worker" && pathname === "/drive/sw.js" ? roots[0] : roots[revision];
     const file = path.resolve(served, "." + pathname, pathname.endsWith("/") ? "index.html" : "");

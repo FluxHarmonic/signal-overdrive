@@ -16,20 +16,21 @@ function run(overrides = {}) {
   });
   const report = result.stdout + result.stderr;
   assert.equal(result.signal, null, "control process completed normally");
-  assert.match(report, /# tests 9\b/, "all nine controls ran: syntax/setup failures are not a red arm");
+  assert.match(report, /# tests 10\b/, "all ten controls ran: syntax/setup failures are not a red arm");
   return { code: result.status, report };
 }
 try {
   const baseline = run();
   assert.equal(baseline.code, 0, baseline.report);
-  console.log("PASS baseline 9/9");
+  console.log("PASS baseline 10/10");
   const plants = [
     ["first-install-claim-race", "page", "const controlledAtLoad = !!navigator.serviceWorker?.controller;", "const controlledAtLoad = true;"],
     ["menu-auto-applies", "page", 'app.dispatch("update", "chosen?") === 1', "true"],
     ["racing-page-accepts", "page", 'locked = lifecycle() === 1 && app.dispatch("pwa-lock", "") === 1;', "locked = true;"],
     ["restart-silently-selects-B", "worker", "if (!active) { active = VERSION; await select(active); }", "active = VERSION; await select(active);"],
     ["mixed-deploy-accepted", "worker", "if (hex !== item.sha256)", "if (false)"],
-    ["second-race-ignored", "worker", "replies.some(safe => !safe)", "false"]
+    ["second-race-ignored", "worker", "replies.some(safe => !safe)", "false"],
+    ["canonical-shell-redirect", "worker", 'item.url === "index.html" ? scope.href : url', "url"]
   ];
   for (const [name, kind, old, replacement] of plants) {
     assert.equal(sources[kind].split(old).length, 2, `${name}: unique plant anchor`);
@@ -40,7 +41,7 @@ try {
     console.log(`PASS sabotage ${name}: RED (${result.report.match(/# fail (\d+)/)?.[1]} failed checks)`);
   }
   for (const [kind, file] of Object.entries(files)) assert.equal(fs.readFileSync(file, "utf8"), sources[kind], `${file} unchanged`);
-  console.log("VERDICT GREEN: six defects rejected; checkout bytes unchanged");
+  console.log("VERDICT GREEN: seven defects rejected; checkout bytes unchanged");
 } finally {
   fs.rmSync(scratch, { recursive: true, force: true });
 }

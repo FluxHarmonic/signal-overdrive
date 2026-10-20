@@ -6,6 +6,8 @@ runtime inventory. Slate's CalVer is a product-specific decision, not grounds to
 rename Signal's releases. A single prepare step creates the icons, worker and
 inventory, both after web linking and after staging moves wasm to `/w/<hash>/`.
 The cache refuses resource bytes that do not match that inventory.
+The shell downloads from its canonical directory URL: Pages redirects
+`index.html` to that URL. Its cache key remains stable for offline navigation.
 
 Recommend `standalone`: Android and desktop get an app window, while the game's
 existing fullscreen gesture remains available. Landscape is preferred. The
@@ -33,7 +35,7 @@ that leaves this menu; native sessions never acquire the web item.
 
 Chrome verification must run on Phantom, never the laptop. The deterministic
 controls are `node --test test/test-pwa.mjs`; `node scripts/check-pwa-controls.mjs`
-proves the gates reject six planted defects. Preparation fixtures are
+proves the gates reject seven planted defects. Preparation fixtures are
 `node --test test/test-pwa-build.mjs`. The real same-profile gate is
 `node scripts/verify-pwa.mjs build/site`; repeat with `--restart`, and require
 nonzero exit from `--sabotage no-worker` and `--sabotage frozen-worker`.

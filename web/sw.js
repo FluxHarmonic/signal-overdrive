@@ -31,7 +31,10 @@ self.addEventListener("install", event => {
         while (next < INVENTORY.length) {
           const item = INVENTORY[next++];
           const url = new URL(item.url, scope).href;
-          const response = await fetch(new Request(url, { cache: "reload" }));
+          // Pages redirects index.html to the directory. Fetch its canonical
+          // URL directly, retaining the stable shell key in the cache.
+          const downloadURL = item.url === "index.html" ? scope.href : url;
+          const response = await fetch(new Request(downloadURL, { cache: "reload" }));
           if (!response.ok || response.redirected) throw new Error(`PWA missing resource ${url}`);
           const hash = await crypto.subtle.digest("SHA-256", await response.clone().arrayBuffer());
           const hex = Array.from(new Uint8Array(hash), n => n.toString(16).padStart(2, "0")).join("");

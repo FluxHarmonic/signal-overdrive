@@ -145,7 +145,7 @@ function cacheStorage() {
   };
 }
 
-function worker(version, caches, clients = [], badHash = false) {
+function worker(version, caches, clients = [], badHash = false, indexRedirect = false) {
   const handlers = new Map(), messages = [];
   const content = "page-" + version;
   const inventory = [{ url: "index.html", sha256: createHash("sha256").update(content).digest("hex") }];
@@ -159,7 +159,9 @@ function worker(version, caches, clients = [], badHash = false) {
     .replace("__PWA_INVENTORY__", JSON.stringify(inventory)), {
     self, caches, URL, Request, Response, Headers, Map, Uint8Array,
     crypto: webcrypto, MessageChannel: Channel, setTimeout, clearTimeout,
-    fetch: async () => new Response(badHash ? "wrong-bytes" : content)
+    fetch: async request => indexRedirect && request.url.endsWith("/index.html")
+      ? Response.redirect(self.registration.scope, 308)
+      : new Response(badHash ? "wrong-bytes" : content)
   });
   return {
     async run(type, extra = {}) {
@@ -173,6 +175,16 @@ function worker(version, caches, clients = [], badHash = false) {
     }
   };
 }
+
+test("Pages' index redirect does not prevent canonical shell installation or offline navigation", async () => {
+  const caches = cacheStorage();
+  const a = worker("A", caches, [], false, true);
+  await a.run("install"); await a.run("activate");
+  const response = await a.run("fetch", { request: {
+    url: "https://signal.test/drive/", method: "GET", mode: "navigate"
+  } });
+  assert.equal(await response.text(), "page-A");
+});
 
 test("browser restart keeps A selected until the menu explicitly applies B", async () => {
   const caches = cacheStorage();
