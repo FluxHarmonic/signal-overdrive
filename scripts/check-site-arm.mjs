@@ -33,7 +33,7 @@
 //              exactly once, in <head>, and no other site's
 //                (scripts/plausible-check.mjs, shared with the other game sites)
 // In headless Chrome (muted, into the worker-null sink), with plausible.io
-// stood in for so nothing reaches the internet:
+// stood in for so nothing reaches the internet (see live):
 //   landing    /: the title, the logo (291x27, alt "Signal Overdrive"), the
 //              three JetBrains Mono faces loaded, every image decoded and the
 //              pictures 480x270, the reactive-music section, the How it's
@@ -83,6 +83,12 @@
 //              itself reports its audio ring as "worklet-sab" (the bridge's
 //              SharedArrayBuffer path). The control: / is NOT isolated and
 //              has no SharedArrayBuffer, so the probe can tell the two apart.
+//   live       no request went to the real signaloverdrive.net: every one the
+//              page or a worker made for it was answered by a stub or the
+//              site's own worker (the PWA worker's sw.js, fetched by the
+//              browser, and its precache, fetched by the worker, are stubbed
+//              on their own CDP sessions); the live site and plausible.io do
+//              not resolve in this Chrome, so a request no stub answers fails
 //   console    no console error, exception or failed request on /, the 404 or
 //              the game, at either host
 // Exit 0 green, 1 red, 2 setup failed (the line starts SETUP-FAILED).
@@ -312,6 +318,10 @@ spawnSync("sh", ["-c", "pactl list short sinks 2>/dev/null | grep -q worker-null
 const chrome = spawn("google-chrome", [
   "--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--mute-audio", "--autoplay-policy=no-user-gesture-required",
   "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--enable-webgl", "--ignore-gpu-blocklist",
+  // the backstop: the live site and plausible.io do not resolve, so a request
+  // no stub answers fails here instead of reaching the internet (the stubs
+  // answer before name resolution; the "live" leg below counts any such failure)
+  `--host-resolver-rules=MAP ${PLAUSIBLE_DOMAIN} ~NOTFOUND, MAP www.${PLAUSIBLE_DOMAIN} ~NOTFOUND, MAP plausible.io ~NOTFOUND`,
   "--remote-debugging-port=0", `--user-data-dir=${udd}`, "--window-size=1100,900", "about:blank",
 ], { stdio: "ignore", detached: true, env: { ...process.env, PULSE_SINK: "worker-null" } });
 const killChrome = () => { try { process.kill(-chrome.pid, "SIGKILL"); } catch { /* gone */ } try { fs.rmSync(udd, { recursive: true, force: true }); } catch { /* scratch */ } };
@@ -332,11 +342,26 @@ const ws = new WebSocket(pageWs);
 let msgId = 0; const pending = new Map();
 const consoleLines = [], consoleErrors = [];
 const net = new Map();
+// every request for the live site, from the page's session and every
+// worker's, keyed "<session>:<requestId>", so the "live" leg can tell a
+// stub's answer from one that went for the network
+const LIVE = new RegExp(`^https://(www\\.)?${PLAUSIBLE_DOMAIN.replace(/\./g, "\\.")}(/|$)`);
+const liveReqs = new Map(), stubbedIds = new Set();
+const noteLive = (sid, msg) => {
+  const p = msg.params || {};
+  if (msg.method === "Fetch.requestPaused" && LIVE.test(p.request.url) && p.networkId) stubbedIds.add(`${sid}:${p.networkId}`);
+  if (msg.method === "Network.requestWillBeSent" && LIVE.test(p.request.url)) liveReqs.set(`${sid}:${p.requestId}`, { url: p.request.url, sid, status: null, fromSW: false, cache: false, failed: null });
+  const r = liveReqs.get(`${sid}:${p.requestId}`);
+  if (!r) return;
+  if (msg.method === "Network.responseReceived") { r.status = p.response.status; r.fromSW = !!p.response.fromServiceWorker; r.cache = !!(p.response.fromDiskCache || p.response.fromPrefetchCache); }
+  if (msg.method === "Network.loadingFailed") r.failed = p.errorText;
+};
 let stub = null;
 ws.addEventListener("message", (ev) => {
   const msg = JSON.parse(ev.data);
   if (msg.id && pending.has(msg.id)) { const { res, rej } = pending.get(msg.id); pending.delete(msg.id); msg.error ? rej(new Error(JSON.stringify(msg.error))) : res(msg.result); return; }
   if (stub) stub.onMessage(msg);
+  noteLive("page", msg);
   const p = msg.params || {};
   if (msg.method === "Runtime.consoleAPICalled") {
     const t = (p.args || []).map((a) => a.value ?? a.description ?? "").join(" ");
@@ -360,6 +385,70 @@ await send("Page.enable"); await send("Runtime.enable"); await send("Network.ena
 await send("Network.setCacheDisabled", { cacheDisabled: true });
 // plausible.io, stood in for: no leg reaches the internet
 stub = await plausibleStub(send, { mode: "stub", sites: { [REAL]: BASE } });
+
+// ---- the requests the page's session does not see ---------------------------------------
+// plausibleStub's Fetch is the page session's, and pauses only the page's own
+// requests. A service worker's script (its install, and every update check)
+// is fetched by the browser, and only the browser session's Fetch pauses it;
+// the worker's own fetches (its precache) pause only on the worker's session,
+// with Fetch enabled while it waits for the debugger at its start (measured
+// 2026-10-20, Chrome on Phantom). Without this the PWA's worker at
+// https://signaloverdrive.net asked the live site for its sw.js (a 404 from
+// 0.1, which has none). Both are answered here as the stub answers the page:
+// the site from BASE, whole (Fetch.fulfillRequest), and plausible.io refused
+// (the worker passes cross-origin requests through to the page's own path,
+// so none of its own is expected).
+const bver = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
+const bws = new WebSocket(bver.webSocketDebuggerUrl);
+let bId = 0; const bPending = new Map();
+const bsend = (method, params = {}, sessionId) => new Promise((res, rej) => { const id = ++bId; bPending.set(id, { res, rej }); bws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
+const PATTERNS = [{ urlPattern: `${REAL}/*`, requestStage: "Request" }, { urlPattern: "https://plausible.io/*", requestStage: "Request" }];
+const workers = new Map(), workerSetup = [], workerServed = [], workerRefused = [];
+const where = (sid) => sid ? `${workers.get(sid)?.type || "worker"} ${workers.get(sid)?.url || ""}`.trim() : "browser";
+const answer = async (sid, { requestId, request }) => {
+  try {
+    if (!request.url.startsWith(REAL + "/")) {
+      workerRefused.push(`${where(sid)}: ${request.url}`);
+      await bsend("Fetch.failRequest", { requestId, errorReason: "ConnectionRefused" }, sid);
+      return;
+    }
+    const r = await fetch(BASE + request.url.slice(REAL.length), { method: request.method, redirect: "manual",
+      headers: Object.fromEntries(Object.entries(request.headers).filter(([k]) => !/^(host|connection|content-length)$/i.test(k))),
+      body: /^(GET|HEAD)$/.test(request.method) ? undefined : request.postData });
+    const body = Buffer.from(await r.arrayBuffer());
+    const responseHeaders = [];
+    r.headers.forEach((value, name) => {
+      if (/^(content-encoding|content-length|transfer-encoding|connection)$/i.test(name)) return;   // fetch decoded the body
+      responseHeaders.push({ name, value: name.toLowerCase() === "location" ? value.replace(BASE, REAL) : value });
+    });
+    await bsend("Fetch.fulfillRequest", { requestId, responseCode: r.status, responseHeaders, body: body.toString("base64") }, sid);
+    workerServed.push({ by: sid ? "worker" : "browser", url: request.url, status: r.status });
+  } catch { /* the worker went away mid-request */ }
+};
+bws.addEventListener("message", async (ev) => {
+  const msg = JSON.parse(ev.data);
+  if (msg.id && bPending.has(msg.id)) { const { res, rej } = bPending.get(msg.id); bPending.delete(msg.id); msg.error ? rej(new Error(JSON.stringify(msg.error))) : res(msg.result); return; }
+  const p = msg.params || {};
+  if (msg.method === "Target.attachedToTarget") {
+    const sid = p.sessionId;
+    workers.set(sid, { type: p.targetInfo.type, url: p.targetInfo.url });
+    try {
+      await bsend("Network.enable", {}, sid);
+      await bsend("Network.setCacheDisabled", { cacheDisabled: true }, sid);
+      await bsend("Fetch.enable", { patterns: PATTERNS }, sid);
+    } catch (e) { workerSetup.push(`${where(sid)}: ${e.message}`); }
+    await bsend("Runtime.runIfWaitingForDebugger", {}, sid).catch(() => { /* not waiting */ });
+    return;
+  }
+  if (msg.method === "Fetch.requestPaused") answer(msg.sessionId, p);
+  if (msg.sessionId) noteLive(msg.sessionId, msg);
+});
+try {
+  await new Promise((res, rej) => { bws.addEventListener("open", res); bws.addEventListener("error", rej); });
+  await bsend("Fetch.enable", { patterns: PATTERNS });
+  await bsend("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true,
+    filter: [{ type: "service_worker" }, { type: "shared_worker" }, { type: "worker" }] });
+} catch (e) { stub.close(); setup(`the browser session's stub for workers did not start: ${e.message || e}`); }
 const evalJS = async (expr) => {
   const r = await send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true });
   if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 300));
@@ -711,13 +800,16 @@ try {
     if (!g.sab) detail.push("no working SharedArrayBuffer");
     if (!ready) detail.push("the game never said ready in 60 s");
     // the game's own word on its audio ring: worklet-sab is the bridge's
-    // SharedArrayBuffer path (anything else is a fallback)
+    // SharedArrayBuffer path (anything else is a fallback). The probe line
+    // has more than one " mode " (the flow's comes first: "... sel 0 mode run
+    // tier ..."); the ring's is the one after its underrun count
+    // ("... underruns-all 0 mode worklet-sab cues ...")
     let mode = null;
     if (ready) {
       const l1 = consoleLines.length;
       await evalJS(`(globalThis.SigilWebApp).dispatch("probe", "")`);
       const probe = await waitFor(async () => consoleLines.slice(l1).find((l) => /signal-overdrive: probe /.test(l)), 10000);
-      mode = probe ? (probe.match(/ mode (\S+)/) || [])[1] : null;
+      mode = probe ? (probe.match(/ underruns-all \S+ mode (\S+)/) || [])[1] : null;
       if (mode !== "worklet-sab") detail.push(`the game's audio ring is ${mode ?? "unreported"} (want worklet-sab)${probe ? "" : ": no probe line"}`);
     }
     const wasm = netSince(n0).filter((r) => /\.wasm$/.test(new URL(r.url).pathname));
@@ -832,6 +924,36 @@ try {
     stub.setMode("stub");
     detail.length ? bad("analytics-down", detail.join("; "))
       : ok("analytics-down", `with plausible.io refused (${stub.failed.length - f0} requests), / renders and /${SLUG}/ starts, isolated, with no other error`);
+  }
+
+  // ---- live: no request went to the real signaloverdrive.net -------------------------------
+  // Every request for the live site that the page or a worker made must have
+  // been answered by a stub (paused and fulfilled from BASE) or by the site's
+  // own worker; the browser session's are all answered by construction. One
+  // that was neither went for the network, where the resolver backstop failed
+  // it: that is a leak (as the worker's sw.js was before this leg). A request
+  // abandoned before any of that (ERR_ABORTED, no response) went nowhere.
+  // The positive control: the worker's script and its own fetches were
+  // answered here, so the leg saw the paths it guards.
+  {
+    const detail = [];
+    const kind = (k, r) => stubbedIds.has(k) ? "stub" : r.fromSW ? "worker" : r.cache ? "cache"
+      : r.status === null && /ERR_ABORTED/.test(r.failed || "") ? "abandoned" : "leak";
+    const tally = {};
+    const leaks = [];
+    for (const [k, r] of liveReqs) { const c = kind(k, r); tally[c] = (tally[c] || 0) + 1; if (c === "leak") leaks.push(r); }
+    if (leaks.length) detail.push(`${leaks.length} request(s) for the live site no stub answered: ${leaks.slice(0, 4).map((r) => `${r.sid === "page" ? "page" : where(r.sid)} ${r.url} ${r.status ?? r.failed ?? "no answer"}`).join(", ")}`);
+    if (tally.cache) detail.push(`${tally.cache} answered from the HTTP cache (the cache is disabled; the leg cannot tell where those came from)`);
+    if (workerSetup.length) detail.push(`a worker's session refused the stub: ${workerSetup.slice(0, 2).join("; ")}`);
+    if (workerRefused.length) detail.push(`a worker asked plausible.io itself (refused): ${workerRefused.slice(0, 2).join(", ")}`);
+    const scripts = workerServed.filter((s) => s.by === "browser" && s.url === `${REAL}/${SLUG}/sw.js`);
+    const own = workerServed.filter((s) => s.by === "worker");
+    if (!scripts.length) detail.push(`the browser session answered no ${REAL}/${SLUG}/sw.js (the leg saw no worker install at the live origin)`);
+    if (!own.length) detail.push("no worker's own fetch at the live origin was answered (the leg saw no precache)");
+    const errs = workerServed.filter((s) => s.status >= 400);
+    if (errs.length) detail.push(`BASE answered ${errs.length} worker request(s) with an error: ${errs.slice(0, 3).map((s) => `${s.url.replace(REAL, "")} ${s.status}`).join(", ")}`);
+    detail.length ? bad("live", detail.join("; "))
+      : ok("live", `0 requests reached ${REAL}: ${liveReqs.size} from the page and workers (${Object.entries(tally).map(([c, n]) => `${n} ${c}`).join(", ")}), and ${workerServed.filter((s) => s.by === "browser").length} worker script fetches (${scripts.length} of /${SLUG}/sw.js) and ${own.length} of the workers' own fetches answered from ${BASE}`);
   }
 
   // ---- console -----------------------------------------------------------------------------
