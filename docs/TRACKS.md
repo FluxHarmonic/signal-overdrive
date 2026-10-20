@@ -241,7 +241,10 @@ with the canonical scheduler across seeds and shared tier profiles. Keep
 each individual status: an overall timeout never establishes acceptance.
 
 On Phantom, `check-native-direct` checks the real queued audio mute and
-visible curved meshes for every ICE kind. `check-native-scene` uses the
+visible curved meshes for every ICE kind. Its harness selects native packages
+from archives present in `build/release/native`, preserving dependency order.
+Installed development dependencies without release archives are omitted; the
+harness does not build or fetch their archives. `check-native-scene` uses the
 existing standard native runner to capture complete shell/race scenes with
 current assets, normal camera and HUD. It fast-forwards genuine simulation
 ticks to choose frames; it does not measure frame times or audio pacing.
