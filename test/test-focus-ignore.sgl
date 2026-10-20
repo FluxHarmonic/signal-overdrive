@@ -1,0 +1,57 @@
+;;; focus=ignore: the game runs on without the window's focus. Frame-time
+;;; runs on a locked display need it: no window gets focus there, and
+;;; unfocused the game pauses, so a run timed a still title frame (0.2's
+;;; first native arms, on Phantom's locked sway session). Natively
+;;; (--focus=ignore) it applies at once; on the web it is a development
+;;; parameter (rule D) and waits for ?dev, in either order. Already
+;;; unfocused, it unpauses the game when it applies, with no new focus
+;;; event: the page sends focus only on a change.
+;;; The groups run in order: ?dev, once on, stays on for the process, so
+;;; the native case runs first, with ?dev never given.
+(import (sigil test)
+        (substratic store kv)
+        (signal shell core))
+(set-store-root! "/tmp/signal-test-focus-ignore-store")
+(core-param! "mute")
+
+(test-group "focus=ignore natively"
+  (test "--focus=ignore applies at once without ?dev, and the game runs on unfocused"
+    (core-boot! 'desktop)
+    (core-focus! #f)
+    (assert-true (core-paused?))
+    (core-focus! #t)
+    (core-param! "focus=ignore")
+    (core-focus! #f)
+    (assert-false (core-paused?)))
+  (test "already unfocused, --focus=ignore unpauses the game at once"
+    (core-boot! 'desktop)
+    (core-focus! #f)
+    (assert-true (core-paused?))
+    (core-param! "focus=ignore")
+    (assert-false (core-paused?))))
+
+(test-group "focus=ignore on the web"
+  (test "unfocused, the game pauses"
+    (core-boot! 'web)
+    (core-focus! #f)
+    (assert-true (core-paused?))
+    (core-focus! #t)
+    (assert-false (core-paused?)))
+  (test "without ?dev it is not honoured"
+    (core-boot! 'web)
+    (core-param! "focus=ignore")
+    (core-focus! #f)
+    (assert-true (core-paused?)))
+  (test "?dev after it honours it, unpausing the unfocused game with no new focus event"
+    (core-param! "dev")
+    (assert-false (core-paused?))
+    (core-focus! #f)
+    (assert-false (core-paused?)))
+  (test "a new boot asks again; with ?dev already on it applies at once"
+    (core-boot! 'web)
+    (core-focus! #f)
+    (assert-true (core-paused?))
+    (core-param! "focus=ignore")
+    (assert-false (core-paused?))
+    (core-focus! #f)
+    (assert-false (core-paused?))))

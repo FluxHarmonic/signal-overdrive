@@ -578,6 +578,10 @@
     }
   ],
   "decoration": {
-    "puddles": 60
+    "puddles": 60,
+    "beyond": "water",
+    "water": [
+      {"region":"outside"}
+    ]
   }
 }

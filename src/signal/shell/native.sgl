@@ -2,12 +2,14 @@
 ;;; scales of the 480x270 view (x3 the first time, then remembered), the
 ;;; textures read from assets/signal/ (run it from the package root).
 ;;;
-;;;   signal-overdrive [--KNOB=VALUE ...] [--autopilot] [--start] [--quit-after S]
+;;;   signal-overdrive [--KNOB=VALUE ...] [--autopilot] [--start] [--focus=ignore] [--quit-after S]
 ;;;                    [--shots DIR --shot-times "T1,T2,..."] [--knobs]
 ;;;
 ;;; Every knob of (signal tuning) can be set from the command line exactly
 ;;; as from the URL: --grip=8.5 --top=600. --autopilot drives the player on
-;;; the racing line (for checks); --start skips the title; --quit-after
+;;; the racing line (for checks); --start skips the title; --focus=ignore
+;;; runs on without the window's focus (frame-time runs on a locked
+;;; display, where the game would pause); --quit-after
 ;;; quits after S seconds of wall time. --shots writes DIR/shot-T.png when
 ;;; the race clock passes each T seconds (so an autopilot run shoots the same
 ;;; places every time), then quits. --knobs prints the knob table as markdown.
@@ -89,7 +91,8 @@
                                     (texture (string-append n "-avg.png")))))
                           TRACKS)
                      (texture "sky.png") (texture "machines.png")
-                     (list (cons 'embers (texture "lut-embers.png")) (cons 'crash (texture "lut-crash.png"))))
+                     (list (cons 'embers (texture "lut-embers.png")) (cons 'crash (texture "lut-crash.png"))
+                           (cons 'docklands (texture "lut-docklands.png"))))
         (title-set-logo! (texture "title-logo.png"))
         (decal-init! VIEW-W VIEW-H)
         (intro-set-mark! (texture "fh-mark.png"))

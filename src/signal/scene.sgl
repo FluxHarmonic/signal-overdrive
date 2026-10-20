@@ -33,6 +33,7 @@
           (signal tuning)
           (signal fx state)
           (signal fx lights)
+          (signal fx district)
           (signal music conductor))
 
   (export VIEW-W VIEW-H scene-init! scene-ready? scene-frame! scene-camera
@@ -74,7 +75,8 @@
     ;; tracks is ((name atlas map avg) ...), one entry per track.
     (define *tracks* '())
     (define *shown* #f)          ; the track whose textures the ground has
-    ;; luts: ((embers . texture) (crash . texture)), (signal lut)'s lookups.
+    ;; luts: ((embers . texture) (crash . texture) (docklands . texture)),
+    ;; (signal lut)'s lookups, one per palette in (signal dither).
     (define *lut-pipe* #f)
     (define *luts* '())
     (define (scene-init! tracks sky sheet luts)
@@ -111,9 +113,16 @@
                             (/ (track-world-height t) 32.0) 3.2)
           (set! *shown* name))))
 
-    ;; The post pass's palette and spread, when they change.
+    ;; The district look of the track on show ((signal fx district)): set
+    ;; each frame before the post pass and the ground read it.
+    (define *look* (district-look 'none))
+
+    ;; The post pass's palette and spread, when they change. The palette
+    ;; knob: 0 the district's, 1 crash, 2 embers (P cycles them).
     (define (sync-post! tuning)
-      (let ((pal (if (> (tuning-ref tuning 'palette) 0.5) 'crash 'embers))
+      (let ((pal (case (exact (round (tuning-ref tuning 'palette)))
+                   ((1) 'crash) ((2) 'embers)
+                   (else (if (assq (look-palette *look*) *luts*) (look-palette *look*) 'embers))))
             (spread (tuning-ref tuning 'spread)))
         (unless (and (eq? pal *palette*) (= spread *spread*))
           (set! *palette* pal)
@@ -205,8 +214,13 @@
              (w (or (fx-warp st)
                     (and hold (list (+ (cam-x c) (* 600.0 (sin h))) (- (cam-y c) (* 600.0 (cos h))) (sin h) (- (cos h)) 460.0 34.0))))
              (wv (lambda (k d) (if w (list-ref w k) d)))
+             ;; the weather (0.2): reflections, the wet ground, splashes (none with reduced motion)
+             (wet (* (knob 'fx-wet) (if hold 1.0 (fx-wet st))))
+             (rain (* (min 1.0 (knob 'fx-rain)) (if hold 1.0 (fx-rain st))))
              (flags (+ (if (on 'fx-pools) 1 0) (if (on 'fx-chase) 2 0) (if (on 'fx-sky) 4 0)
-                       (if (on 'fx-warp) 8 0) (if (on 'fx-interf) 16 0) (if *calm* 32 0))))
+                       (if (on 'fx-warp) 8 0) (if (on 'fx-interf) 16 0) (if *calm* 32 0)
+                       (if (on 'fx-reflect) 64 0) (if (> wet 0.0) 128 0)
+                       (if (and (> rain 0.0) (not *calm*)) 256 0))))
         (set! *hold* hold)
         (set! *dip* (cond (*calm* 0.0)
                           (hold (* DIP-ROWS (knob (quote fx-dip))))
@@ -222,7 +236,38 @@
                (* sky (fx-traced st) (+ 0.6 (* 0.4 (fx-ice st)))) (* sky (fx-pad st))
                (if hold (knob (quote fx-interf)) (fx-interf st)) (if (and (not hold) (fx-dropout st)) 1.0 0.0) flags (length lights)
                (wv 0 0.0) (wv 1 0.0) (wv 2 0.0) (wv 3 1.0)
-               (wv 4 0.0) (wv 5 0.0) (* (knob (quote fx-warp)) (if hold 1.0 (fx-warp-strength st))) 0.0))))
+               (wv 4 0.0) (wv 5 0.0) (* (knob (quote fx-warp)) (if hold 1.0 (fx-warp-strength st))) 0.0
+               wet rain (knob 'fx-reflect) 1.5
+               (if *rain-debug* 1.0 0.0) *rain-guard* 0.0 0.0))
+        ;; the rain's streaks in the post pass: their density, and none
+        ;; with reduced motion (the wet ground and the water stay)
+        (set! *rain-streaks* (if *calm* 0.0 (* (knob 'fx-rain) (if hold 1.0 (fx-rain st)))))))
+    (define *rain-streaks* 0.0)
+    ;; the rain's guard over the road ahead (0..1, 0 the first look's rain)
+    ;; and its debug view (scripts/rain-occlusion.mjs), from the tuning
+    (define *rain-guard* 1.0)
+    (define *rain-debug* #f)
+    ;; The road ahead on the screen, for the rain's guard: the centreline at
+    ;; RAIN-AHEAD texels past the machine, each (x y half-width-px valid),
+    ;; 32 floats; a point within 20 texels of the camera, or behind it, is
+    ;; (0 0 0 0). The rows are bent as the ground's are (the dip, *dip*:
+    ;; the flat row yf shows at about yf + dip * bu^2, bu as the shader's),
+    ;; and a half-width is at most 140 px.
+    (define RAIN-AHEAD '(0.0 80.0 200.0 380.0 640.0 1000.0 1450.0 1900.0))
+    (define (rain-ahead c tr s)
+      (apply append
+             (map (lambda (d)
+                    (let* ((pt (track-point tr (+ s d) 0.0))
+                           (hw (track-hw tr (track-index-at tr (+ s d))))
+                           (pr (camera-project c (car pt) (cadr pt) 0.0 20.0)))
+                      (if pr
+                          (let* ((yf (projected-y pr))
+                                 (hz (cam-horizon c))
+                                 (bu (max 0.0 (min 1.0 (/ (- VIEW-H yf) (- VIEW-H hz))))))
+                            (list (projected-x pr) (+ yf (* *dip* bu bu))
+                                  (min 140.0 (* hw (projected-scale pr))) 1.0))
+                          (list 0.0 0.0 0.0 0.0))))
+                  RAIN-AHEAD)))
 
     ;; --- sprites -------------------------------------------------------------------------
 
@@ -760,9 +805,12 @@
                              (cons 'fog-end (tuning-ref tuning 'fog-end))
                              (cons 'fog? (> (tuning-ref tuning 'fog) 0.5))
                              (cons 'far-start (tuning-ref tuning 'far-start))
-                             (cons 'fog-color '(0.18 0.11 0.30))
-                             (cons 'sky-top '(0.05 0.04 0.10))
-                             (cons 'sky-low '(0.18 0.11 0.30))))
+                             (cons 'fog-color (look-fog-color *look*))
+                             (cons 'sky-top (look-sky-top *look*))
+                             (cons 'sky-low (look-sky-low *look*))
+                             (cons 'ground-taps (tuning-ref tuning 'fx-ground-taps))
+                             (cons 'ground-aniso (tuning-ref tuning 'fx-ground-aniso))
+                             (cons 'ground-lod-bias (tuning-ref tuning 'fx-ground-bias))))
       (mode7-set-far! (tuning-ref tuning 'far-end)))
 
     ;; info: (best . ticks) (flash . frames) (start-line . text)
@@ -785,6 +833,7 @@
     ;; argument is the race camera's, and hides the accessor there)
     (define (camera-heading c) (cam-heading c))
     (define (scene-frame! tuning r cam-heading info win-w win-h integer-only)
+      (set! *look* (district-look (track-district (race-track r))))
       (sync-post! tuning)
       (show-track! (track-name (race-track r)))
       (look! tuning)
@@ -800,6 +849,8 @@
         (set! *win* (cons win-w win-h))
         (set! *horizon* (tuning-ref tuning 'horizon))
         (let ((st (cdr (assq 'fx info))))
+          (set! *rain-guard* (tuning-ref tuning 'fx-rain-guard))
+          (set! *rain-debug* (> (tuning-ref tuning 'fx-rain-debug) 0.5))
           (fx-uniforms! r c st (cdr (assq 'fx-knob info)) (> (tuning-ref tuning 'fx-hold) 0.5))
           (set! *hud-interf* (* (if (> ((cdr (assq 'fx-knob info)) 'fx-interf) 0.0) 1.0 0.0) (fx-interf st)))
           (set! *hud-dropout* (and (> *hud-interf* 0.0) (fx-dropout st)))
@@ -828,12 +879,18 @@
                                        (if *hold* ((cdr (assq 'fx-knob info)) 'fx-glitch) (cdr (assq 'glitch info)))
                                        (cdr (assq 'corrupt info))))
           (set-pipeline-uniform! *lut-pipe* 'vp (list (* 0.5 VIEW-W) (+ (tuning-ref tuning 'horizon) *dip*) (or (info-get info 'fade) 0.0)
-                                                      (if *calm* 1.0 0.0))))
+                                                      (if *calm* 1.0 0.0)))
+          (set-pipeline-uniform! *lut-pipe* 'rain (list *rain-streaks* 0.28 *rain-guard* (if *rain-debug* 1.0 0.0)))
+          (when (or (> *rain-guard* 0.0) *rain-debug*)
+            (set-pipeline-uniform! *lut-pipe* 'ahead (rain-ahead c (race-track r) (machine-s m)))))
         (when dither?
           (with-3d-pass *post* #f
-            (if (> (tuning-ref tuning 'lut) 0.5)
-                (draw-mesh *lut-pipe* *tri* *view-tex* (cdr (assq *palette* *luts*)))
-                (draw-mesh *post-pipe* *tri* *view-tex*))))
+            ;; fx-post-passes > 1 draws it again, to measure its GPU cost
+            (let passes ((k (exact (round (tuning-ref tuning 'fx-post-passes)))))
+              (if (> (tuning-ref tuning 'lut) 0.5)
+                  (draw-mesh *lut-pipe* *tri* *view-tex* (cdr (assq *palette* *luts*)))
+                  (draw-mesh *post-pipe* *tri* *view-tex*))
+              (when (> k 1) (passes (- k 1))))))
         (view-present! *presenter* (if dither? *post* *view*) f)
         (set-blend-mode 'normal)
         (when (cdr (assq 'hud info)) (hud! tuning r info))

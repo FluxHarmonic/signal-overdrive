@@ -122,5 +122,6 @@ export function trackDefinition(source, seed = 0) {
   return { hw: g.halfWidth, world: worldSize(source),
     control: g.type === "stadium" ? stadium(...g.center, g.straight, g.radius, g.points) : g.control,
     ...source.zones, ice, seed, selectedLayouts,
-    puddles: source.decoration.puddles };
+    puddles: source.decoration.puddles, district: source.district,
+    water: source.decoration.water || [], beyond: source.decoration.beyond || "floor" };
 }

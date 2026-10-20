@@ -19,6 +19,11 @@
 ;;;   interf  tracking lines and colour bleed in the sky and the HUD only
 ;;;           (P15), by integrity tier, with dropouts on the beat grid
 ;;;
+;;; And 0.2's weather (the district look, (signal fx district)): the rain
+;;; eases toward its section's level, and the ground's wetness toward what
+;;; that rain leaves (quicker to wet than to dry). Both start at their
+;;; resting values on a district's first tick, so a race never starts dry.
+;;;
 ;;; Each has an intensity knob, fx-NAME, 0 (off) to 1 (default) or more.
 
 (define-library (signal fx state)
@@ -30,7 +35,7 @@
           fx-tick fx-kick fx-snare fx-beat fx-flare fx-pad fx-ice fx-traced fx-chase fx-padstep
           fx-bar fx-row fx-section fx-dip-age fx-glitch-left fx-glitch-power fx-glitch-seed
           fx-warp fx-warp-age fx-warp-struck fx-interf fx-tier fx-dropout fx-drop-now
-          fx-dip-rows fx-glitch-now fx-warp-strength
+          fx-dip-rows fx-glitch-now fx-warp-strength fx-rain fx-wet wet-target
           GLITCH-MAX-TICKS DIP-ROWS WARP-TELEGRAPH
           integrity-tier tier-dropout? tier-name
           bend-offset bend-screen-row)
@@ -66,7 +71,10 @@
       ;; armed (waiting for a downbeat), then telegraphing, then struck
       (warp default: #f mutable: #t) (warp-armed default: #f mutable: #t)
       (warp-age default: 0 mutable: #t) (warp-struck default: #f mutable: #t)
-      (interf default: 0.0 mutable: #t) (tier default: 0 mutable: #t) (dropout default: #f mutable: #t))
+      (interf default: 0.0 mutable: #t) (tier default: 0 mutable: #t) (dropout default: #f mutable: #t)
+      ;; the weather, 0..1: the rain now, the ground's wetness, and whether
+      ;; it has had its first tick (when both snap to their resting values)
+      (rain default: 0.0 mutable: #t) (wet default: 0.0 mutable: #t) (weather-on default: #f mutable: #t))
 
     (define (fx-new) (fx))
     (define (fx-copy st) (fx st))
@@ -131,6 +139,27 @@
             ((fx-warp-struck st) (max 0.0 (- 1.0 (/ (fx-warp-age st) 6.0))))
             (else (+ 0.35 (* 0.65 (/ (fx-warp-age st) WARP-TELEGRAPH))))))
 
+    ;; --- the weather ------------------------------------------------------------------
+
+    ;; The wetness a steady rain r leaves: none without rain; a drizzle (0.25)
+    ;; leaves the ground half wet, a downpour all but soaked.
+    (define (wet-target r) (if (<= r 0.0) 0.0 (min 1.0 (+ 0.35 (* 0.6 r)))))
+
+    ;; Toward target by at most up (rising) or down (falling) a tick.
+    (define (ease v target up down)
+      (if (< v target) (min target (+ v up)) (max target (- v down))))
+
+    (define (weather-step! st target)
+      (cond ((not (fx-weather-on st))
+             (set-fx-weather-on! st #t)
+             (set-fx-rain! st target)
+             (set-fx-wet! st (wet-target target)))
+            (else
+             ;; the rain swells over about a second and a half, the ground
+             ;; wets over about three and dries over about eight
+             (set-fx-rain! st (ease (fx-rain st) target 0.01 0.005))
+             (set-fx-wet! st (ease (fx-wet st) (wet-target (fx-rain st)) 0.0025 0.0008)))))
+
     ;; --- stepping ---------------------------------------------------------------------
 
     (define (decay v k) (if (< v 0.002) 0.0 (* v k)))
@@ -166,8 +195,9 @@
     ;; player's events this tick ('boost, 'pad, 'ice, (wall . impact));
     ;; integrity: the cargo's, or the panel's override; pose: (x y heading),
     ;; the player's; fires: what the panel or a key asked for this tick
-    ;; ('wall 'ice 'drop); knob: (lambda (key) intensity).
-    (define (fx-step st p events integrity pose fires knob)
+    ;; ('wall 'ice 'drop); knob: (lambda (key) intensity); more: the rain
+    ;; this tick's section asks for, 0..1 (the district's; 0 when omitted).
+    (define (fx-step st p events integrity pose fires knob . more)
       (let* ((kick? (onset? p KICK))
              (row (pulse-row p))
              (downbeat (and kick? (= 0 row)))
@@ -226,4 +256,5 @@
           (set-fx-tier! st tier)
           (set-fx-interf! st (if (< v target) (min target (+ v 0.05)) (max target (- v 0.02))))
           (set-fx-dropout! st (and (> interf-k 0.0) (tier-dropout? tier row))))
+        (weather-step! st (if (pair? more) (max 0.0 (min 1.0 (car more))) 0.0))
         st))))

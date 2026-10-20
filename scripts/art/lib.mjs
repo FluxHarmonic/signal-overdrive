@@ -78,6 +78,32 @@ for (const [k, v] of Object.entries(C)) {
   if (!EMBERS.includes(v)) throw new Error(`lib.mjs: C.${k} ${v} is not an embers colour`);
 }
 
+// Docklands' district palette: embers plus these seven, in this order (the
+// `docklands` entry in src/signal/dither.sgl; scripts/art/check-palette.mjs
+// checks the two agree and the spacing and glow rules). Only Docklands art
+// may use them: a generator draws with them only when it paints a
+// Docklands track, and checks against DOCKLANDS. (A dark magenta for
+// reflected neon was dropped: magenta mixed into the water already lands on
+// embers' #7A2E70, and the new colour caught faint red light as pink.)
+export const DOCK = {
+  HARBOUR_DEEP: "#08182A",   // deep water, the darkest cold black
+  HARBOUR: "#10293A",        // water, lit; the water's ripple lines
+  WET_ASPHALT: "#1E2642",    // the road's plates, wet
+  HARBOUR_FOG: "#2B3A55",    // the fog and the sky at the horizon
+  FLOOD: "#A6BEDD",          // floodlight on wet things; rain catching light
+  REFLECT_COLD: "#203078",   // cold signs and windows mirrored in water
+  WET_SHEEN: "#46506E",      // the sky's light on a wet surface
+};
+export const DOCKLANDS = [...EMBERS, ...Object.values(DOCK)];
+
+// ---- a track's mip texture (NAME-avg.png) ---------------------------------------
+// Each 32x32 tile's levels 1 to 5 in a 24x16 cell, the cells in the atlas's
+// order (64 per row): level 1 (16x16) at (0,0), 2 (8x8) at (16,0), 3 (4x4) at
+// (16,8), 4 (2x2) at (20,8), 5 (1x1, the tile's average) at (22,8). The
+// ground shader (mode7/render.sgl, mipFetch) reads the same layout.
+export const MIP_CELL = [24, 16];
+export const MIP_OFFSETS = [null, [0, 0], [16, 0], [16, 8], [20, 8], [22, 8]];
+
 // ---- Bayer -----------------------------------------------------------------------
 
 export const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
@@ -116,8 +142,8 @@ export class Canvas {
   }
   save(file) { writePNG(file, this.w, this.h, this.px); }
   // every opaque pixel's colour must be a palette colour
-  checkPalette(name) {
-    const ok = new Set(EMBERS.map((h) => hex(h).join(",")));
+  checkPalette(name, palette = EMBERS) {
+    const ok = new Set(palette.map((h) => hex(h).join(",")));
     let bad = 0, first = null;
     for (let k = 0; k < this.px.length; k += 4) {
       if (this.px[k + 3] === 0) continue;

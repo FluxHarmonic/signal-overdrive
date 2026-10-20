@@ -70,13 +70,23 @@ void main() {
     ;;          sky interference's movement, all off), w lights used
     ;;   fx[4]  the warp strip's centre (x, y) and direction (z, w), world
     ;;   fx[5]  x its half-length, y its half-width, z strength 0..1
+    ;;   fx[6]  the weather (0.2): x the ground's wetness 0..1, y the rain
+    ;;          0..1 (splashes), z the reflections' strength 0..1, w the
+    ;;          water's ripple in pixels; flags 64 reflections, 128 the wet
+    ;;          ground, 256 splashes (off with reduced motion, as are the
+    ;;          ripple's movement and the water's rolling bands)
+    ;;   fx[7]  the rain's readability (0.2): x 1 for its debug view (splash
+    ;;          pixels marked in alpha), y the guard 0..1 (fewer, fainter rings)
+    ;; filt: the far ground's filter (0.2): x taps along the ray (0: fade to
+    ;; the tile's average, as 0.1), y the stretch the taps resolve (the
+    ;; along/across footprint ratio), z the mip level bias; see farGround.
     ;; lights[i]: x y a pool's centre (world texels), z its radius, w the
     ;; colour (integer part: 0 city magenta, 1 orange, 2 cyan, 3 amber)
     ;; plus its intensity (fractional part).
     ;; Codes in the textures' alpha (255 - alpha; 0 plain): the atlas: 1-16
     ;; the left rail's blocks, 17-32 the right rail's (block index mod 16),
     ;; 33-48 a pad's chevrons (position along their period, 16 steps), 49 a
-    ;; pad's rim. The sky: 1 the tower's bands, 2-9 a window group, 10-41 a
+    ;; pad's rim, 50 water (the sky mirrored in it). The sky: 1 the tower's bands, 2-9 a window group, 10-41 a
     ;; sign, 42 a far lit floor, 43 the rest of the tower (bands and body loom
     ;; in front of the mid layer).
     (define GROUND-FRAGMENT
@@ -90,7 +100,8 @@ uniform vec4 fogc;
 uniform vec4 skytop;
 uniform vec4 skylow;
 uniform vec4 lights[16];
-uniform vec4 fx[6];
+uniform vec4 fx[8];
+uniform vec4 filt;
 uniform sampler2D atlas;
 uniform sampler2D tmap;
 uniform sampler2D tavg;
@@ -101,6 +112,64 @@ out vec4 frag_color;
 float hash2(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 bool flag(int b) { return (int(fx[3].z + 0.5) & b) != 0; }
 int code(float a) { return 255 - int(a * 255.0 + 0.5); }
+
+// The tile at map cell tc: its index in the atlas (0, the plain tile, off
+// the map), and the glitch's scramble (a share of the tiles show another).
+int tileAt(vec2 tc) {
+  int idx = 0;
+  if (tc.x >= 0.0 && tc.y >= 0.0 && tc.x < world.y && tc.y < world.z) {
+    vec4 m = texelFetch(tmap, ivec2(tc), 0);
+    idx = int(m.r * 255.0 + 0.5) + 256 * int(m.g * 255.0 + 0.5);
+  }
+  if (fx[0].y > 0.0 && hash2(tc + vec2(fx[0].z * 1.7, fx[0].z)) < fx[0].y * 0.3) {
+    ivec2 ts = textureSize(atlas, 0) / int(world.x);
+    idx = int(hash2(tc * 1.3 + vec2(fx[0].z)) * float(ts.x * ts.y - 1));
+  }
+  return idx;
+}
+// A tile's texel at inner (0..tile) on mip level L: 0 the atlas itself, 1
+// to 5 the mip texture (tavg), each tile's levels in a 24x16 cell (16x16
+// at (0,0), 8x8 at (16,0), 4x4 at (16,8), 2x2 at (20,8), 1x1 at (22,8);
+// MIP_OFFSETS in scripts/art/lib.mjs)
+vec3 mipFetch(ivec2 cell, vec2 inner, int L) {
+  ivec2 i = ivec2(inner);
+  if (L <= 0) return texelFetch(atlas, cell * int(world.x) + i, 0).rgb;
+  ivec2 off = L == 1 ? ivec2(0, 0) : (L == 2 ? ivec2(16, 0) : (L == 3 ? ivec2(16, 8) : (L == 4 ? ivec2(20, 8) : ivec2(22, 8))));
+  return texelFetch(tavg, cell * ivec2(24, 16) + off + (i >> L), 0).rgb;
+}
+// The ground far away, filtered (David, 0.2: the road ahead stayed sharp
+// only ~50 texels past the machine). A pixel there covers `across` texels
+// sideways and `along` texels down the ray's direction on the ground; the
+// rails and edges run that way. filt.x taps spread along it, each read at
+// the mip level for max(across, along / filt.y) (filt.y: the stretch the
+// taps resolve), biased by filt.z, two levels blended so no band shows.
+vec3 farGround(vec2 g, float across, float along, vec2 dir) {
+  int n = clamp(int(filt.x + 0.5), 1, 8);
+  float fp = max(across, along / max(filt.y, 1.0));
+  float lod = clamp(log2(max(fp, 0.001)) + filt.z, 0.0, 5.0);
+  int l0 = int(floor(lod));
+  int l1 = min(l0 + 1, 5);
+  float fr = lod - float(l0);
+  int per = textureSize(atlas, 0).x / int(world.x);
+  vec3 s = vec3(0.0);
+  for (int k = 0; k < 8; k++) {
+    if (k >= n) break;
+    vec2 q = g + dir * (((float(k) + 0.5) / float(n) - 0.5) * along);
+    vec2 tc = floor(q / world.x);
+    int idx = tileAt(tc);
+    ivec2 cell = ivec2(idx % per, idx / per);
+    vec2 inner = clamp(floor(q - tc * world.x), 0.0, world.x - 1.0);
+    s += fr > 0.0 ? mix(mipFetch(cell, inner, l0), mipFetch(cell, inner, l1), fr) : mipFetch(cell, inner, l0);
+  }
+  return s / float(n);
+}
+// value noise, 0..1, smooth: where the ground is wet first
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash2(i), hash2(i + vec2(1.0, 0.0)), f.x), mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0, 1.0)), f.x), f.y);
+}
 vec3 cityc(int k) {
   if (k == 0) return vec3(1.0, 0.349, 0.851);
   if (k == 1) return vec3(1.0, 0.8, 0.2);
@@ -157,6 +226,16 @@ vec3 skybase(float px, float py) {
     if (k == 1 && tower.r >= 0.0) c = tower;
   }
   return c;
+}
+
+// The skyline mirrored about the horizon, as still water shows it (a
+// skyline at infinity reflects at the depression it stands at), rippled
+// sideways by amp pixels. From skybase, not skyline: the signal's
+// interference stays in the sky and off the ground (P15).
+vec3 mirror(float px, float py, float amp) {
+  float w = flag(32) ? 0.0 : fx[0].w;
+  float rip = sin(py * 0.9 + w * 2.3) * amp + sin(py * 0.37 - w * 1.1) * amp * 0.5;
+  return skybase(px + rip, 2.0 * proj.w - py);
 }
 
 // The sky, with the signal's interference (sky and HUD only, P15):
@@ -223,17 +302,8 @@ void main() {
   }
   float tile = world.x;
   vec2 tc = floor(g / tile);
-  int idx = 0;
-  if (tc.x >= 0.0 && tc.y >= 0.0 && tc.x < world.y && tc.y < world.z) {
-    vec4 m = texelFetch(tmap, ivec2(tc), 0);
-    idx = int(m.r * 255.0 + 0.5) + 256 * int(m.g * 255.0 + 0.5);
-  }
-  int per = textureSize(tavg, 0).x;
-  // the glitch's scrambled tiles: a share of the tiles show another
-  if (fx[0].y > 0.0 && hash2(tc + vec2(fx[0].z * 1.7, fx[0].z)) < fx[0].y * 0.3) {
-    ivec2 ts = textureSize(tavg, 0);
-    idx = int(hash2(tc * 1.3 + vec2(fx[0].z)) * float(ts.x * ts.y - 1));
-  }
+  int idx = tileAt(tc);
+  int per = textureSize(atlas, 0).x / int(tile);
   ivec2 cell = ivec2(idx % per, idx / per);
   ivec2 inner = ivec2(floor(g - tc * tile));
   vec4 at = texelFetch(atlas, cell * int(tile) + inner, 0);
@@ -256,22 +326,78 @@ void main() {
     }
   }
   // texels per pixel: across (t) and along (the ground receding)
-  float foot = max(t, ra * t * t * cp / cam.z);
-  if (world.w > fog.w) {
-    vec3 a = texelFetch(tavg, cell, 0).rgb;
+  float fa = ra * t * t * cp / cam.z;
+  float foot = max(t, fa);
+  // the far fade: from the point-sampled texel (the chase's colours
+  // included) to the filtered ground; with no taps (filt.x 0), to the
+  // tile's average, as 0.1 drew it
+  if (world.w > fog.w && foot > fog.w) {
+    vec3 a = filt.x < 0.5 ? mipFetch(cell, vec2(0.0), 5) : farGround(g, t, fa, normalize(ra * fw + sx * rt));
     c = mix(c, a, smoothstep(fog.w, world.w, foot));
   }
-  // the neon light pools
+  float along = t * ra;
+  // the weather: water mirrors the skyline; the wet ground (a smooth field
+  // over the world, wet first where it is lowest) shows it faintly
+  bool water = cd == 50;
+  bool splash = false;
+  float wet = 0.0;
+  if (flag(128) && fx[6].x > 0.0 && !water) {
+    float n = vnoise(g / 230.0) * 0.7 + vnoise(g / 61.0 + vec2(17.0, 5.0)) * 0.3;
+    wet = clamp((fx[6].x - n) * 6.0 + 0.5, 0.0, 1.0);
+  }
+  // texels with an effect code (rails, pads; 1..49) keep their role
+  // colours (P16): no mirror and no splash rings on them
+  bool coded = cd > 0 && cd < 50;
+  // water mirrors the skyline (fx-reflect, flag 64): rougher in the rain,
+  // reflecting more at a grazing angle (far)
+  if (flag(64) && fx[6].z > 0.0 && water) {
+    vec3 m = mirror(px, py, fx[6].w * (1.0 + 1.5 * fx[6].y));
+    // and the old trick for water: thin dark bands rolling through it
+    float roll = flag(32) ? 0.0 : fx[0].w * 9.0;
+    if (mod(py + roll + floor(sin(py * 0.21) * 3.0), 9.0) < 1.0) m *= 0.55;
+    c = mix(c, m, fx[6].z * (0.5 + 0.35 * smoothstep(300.0, 1800.0, along)));
+  }
+  // the wet ground (fx-wet, flag 128) shows the skyline faintly
+  if (wet > 0.0 && !coded) c = mix(c, mirror(px, py, 1.0), 0.22 * wet);
+  // the neon light pools; on wet ground and water each light also streaks
+  // toward the camera, as a lamp's reflection does on a wet road
   if (flag(1)) {
     int n = int(fx[3].w + 0.5);
+    float sheen = water ? 1.0 : wet;
     for (int i = 0; i < 16; i++) {
       if (i >= n) break;
       vec4 lg = lights[i];
       vec2 d = g - lg.xy;
       float d2 = dot(d, d);
-      if (d2 < lg.z * lg.z) {
-        float k = 1.0 - sqrt(d2) / lg.z;
+      float r = lg.z;
+      if (d2 < r * r * (sheen > 0.0 ? 6.0 : 1.0)) {
+        float k = d2 < r * r ? 1.0 - sqrt(d2) / r : 0.0;
+        if (sheen > 0.0) {
+          float a = dot(d, fw);
+          vec2 e = vec2(dot(d, rt) / (r * 0.42), a / (r * (a < 0.0 ? 2.4 : 0.8)));
+          float q = dot(e, e);
+          float ks = q < 1.0 ? 1.0 - sqrt(q) : 0.0;
+          k = mix(k, max(k * 0.6, ks), sheen);
+        }
         c += lightc(int(lg.w)) * (k * k * fract(lg.w));
+      }
+    }
+  }
+  // rain on the ground: rings spreading where drops land, near the camera
+  // only (far away they would be sub-pixel sparkle)
+  if (flag(256) && fx[6].y > 0.0 && (water || wet > 0.3) && along < 900.0) {
+    vec2 cell = floor(g / 20.0);
+    float h = hash2(cell + vec2(3.3, 1.9));
+    // (the rain guard, fx[7].y: fewer and fainter, so the road reads through)
+    if (h < fx[6].y * 0.35 * mix(1.0, 0.55, fx[7].y)) {
+      float ph = fract(fx[0].w * 1.7 + h * 13.0);
+      vec2 ctr = (cell + 0.25 + 0.5 * vec2(hash2(cell + vec2(3.1, 0.0)), hash2(cell + vec2(7.7, 0.0)))) * 20.0;
+      float ring = abs(length(g - ctr) - (1.0 + ph * 7.0));
+      // not on coded texels nor strong colours (ICE's amber, a pad's yellow)
+      float chroma = max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
+      if (ring < max(0.9, foot * 0.6) && !coded && chroma < 0.35) {
+        c = mix(c, vec3(0.651, 0.745, 0.867), mix(0.7, 0.35, fx[7].y) * (1.0 - ph));
+        splash = true;
       }
     }
   }
@@ -286,11 +412,10 @@ void main() {
     // olive in the palette, and amber has to read as ICE (P16)
     else if (hatch && s > 0.3 && mod(floor(px) + floor(v_screen.y), 2.0) < 0.5) c = vec3(1.0, 0.624, 0.102);
   }
-  if (fog.z > 0.5) {
-    float along = t * ra;
-    c = mix(c, fogc.rgb, smoothstep(fog.x, fog.y, along) * fogc.a);
-  }
-  frag_color = vec4(c, 1.0);
+  if (fog.z > 0.5) c = mix(c, fogc.rgb, smoothstep(fog.x, fog.y, along) * fogc.a);
+  // the rain's debug view (fx[7].x): a splash marked in alpha, for the
+  // post pass to count (scripts/rain-occlusion.mjs)
+  frag_color = vec4(c, splash && fx[7].x > 0.5 ? 0.5 : 1.0);
 }
 ")
 
@@ -368,10 +493,10 @@ void main() {
       (set-pipeline-uniform! *ground* 'view (v4 w h 0 0))
       (set-pipeline-uniform! *sprite* 'view (v4 w h 0 0))
       (mode7-set-look! '())
-      (mode7-set-fx! (make-list 24 0.0))
+      (mode7-set-fx! (make-list 32 0.0))
       (mode7-set-lights! '()))
 
-    ;; The effects hooks: 24 floats, fx[0] to fx[5] (see GROUND-FRAGMENT).
+    ;; The effects hooks: 32 floats, fx[0] to fx[7] (see GROUND-FRAGMENT).
     ;; All zero draws the plain ground and sky.
     (define (mode7-set-fx! floats)
       (set! *bend* (f32 (car floats)))
@@ -418,7 +543,9 @@ void main() {
       (set-pipeline-uniform! *ground* 'skyp (v4 layer-h rate-far rate-mid rate-near)))
 
     ;; Keys: fog-start fog-end fog? (#t/#f) fog-amount far-start far-end
-    ;; fog-color sky-top sky-low (each (r g b) in 0..1).
+    ;; fog-color sky-top sky-low (each (r g b) in 0..1), ground-taps
+    ;; ground-aniso ground-lod-bias (the far ground's filter; no taps is
+    ;; 0.1's fade to the tile's average).
     (define (mode7-set-look! look)
       (let ((get (lambda (k d) (let ((e (assq k look))) (if e (cdr e) d)))))
         (set! *fog-v* (v4 (get 'fog-start 700.0) (get 'fog-end 2400.0)
@@ -429,7 +556,9 @@ void main() {
           (set-pipeline-uniform! *ground* 'fogc *fogc-v*))
         (let ((t (get 'sky-top '(0.05 0.04 0.10))) (l (get 'sky-low '(0.18 0.11 0.30))))
           (set-pipeline-uniform! *ground* 'skytop (v4 (car t) (cadr t) (caddr t) 1.0))
-          (set-pipeline-uniform! *ground* 'skylow (v4 (car l) (cadr l) (caddr l) 1.0)))))
+          (set-pipeline-uniform! *ground* 'skylow (v4 (car l) (cadr l) (caddr l) 1.0)))
+        (set-pipeline-uniform! *ground* 'filt (v4 (get 'ground-taps 0.0) (get 'ground-aniso 8.0)
+                                                (get 'ground-lod-bias 0.0) 0.0))))
 
     (define (mode7-draw-ground! c)
       (set-pipeline-uniform! *ground* 'cam (v4 (cam-x c) (cam-y c) (cam-height c) (cam-heading c)))

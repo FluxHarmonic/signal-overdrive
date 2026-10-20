@@ -10,9 +10,12 @@
 //   assets/signal/NAME-atlas.png   the unique tiles, 64 per row (2048 wide)
 //   assets/signal/NAME-map.png     world.width/32 by world.height/32: R + 256*G is
 //                                 the tile's index in the atlas
-//   assets/signal/NAME-avg.png     the atlas at one texel per tile (each
-//                                 tile's average colour): what the ground
-//                                 shader fades to far away, against shimmer
+//   assets/signal/NAME-avg.png     each tile's mip levels 1 to 5 (16x16 down
+//                                 to 1x1, the last its average colour), in
+//                                 a 24x16 cell per tile, 64 cells per row in
+//                                 the atlas's order (MIP_CELL, MIP_OFFSETS in
+//                                 lib.mjs): what the ground shader filters
+//                                 with far away, against shimmer
 //   src/signal/track/NAME-data.sgl the centreline the game drives on (one
 //                                 sample per 16 texels: x y tx ty half-width
 //                                 racing-line offset), and the zones
@@ -33,7 +36,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { Canvas, C, ramp, bayerOn, BAYER4, rng } from "./lib.mjs";
+import { Canvas, C, DOCK, DOCKLANDS, EMBERS, ramp, bayerOn, BAYER4, rng, MIP_CELL, MIP_OFFSETS } from "./lib.mjs";
 import { sampleDefinition, trackDefinition } from "../track/geometry.mjs";
 import { loadTrack } from "../track/format.mjs";
 import { geometryGates, tileGate } from "../track/gates.mjs";
@@ -53,6 +56,8 @@ const TILE = 32;
 const STEP = 16;              // centreline sample spacing, texels
 const BARRIER = 14;           // barrier band beyond the road edge
 const RUNOFF = 12;            // dithered run-off beyond the barrier
+const APRON = 48;             // a quay's concrete between the run-off and the water
+const WATER = 50;             // the effects code of a water texel (the shader mirrors the sky in it)
 const PREVIEW = process.argv.includes("--preview");
 const ONLY = option("--track");
 const INPUT = option("--file");
@@ -136,6 +141,39 @@ function build(name, def) {
     return res;
   }
 
+  // ---- water (the district look): areas of the floor, a row at a time ------------------
+  // Each area fills spans between its scanline crossings; "outside" is the
+  // complement of the closed centreline's own spans. A texel is water when an
+  // area covers it and it is at least the apron's width beyond the run-off.
+  const DOCKS = def.district === "docklands";
+  const areas = def.water.map((a) => a.region === "outside" ? { outside: true, poly: P } : { poly: a.polygon });
+  const rowMask = new Uint8Array(WIDTH);
+  function waterRow(y) {
+    rowMask.fill(0);
+    const yc = y + 0.5;
+    for (const a of areas) {
+      const xs = [], q = a.poly;
+      for (let i = 0; i < q.length; i++) {
+        const [x0, y0] = q[i], [x1, y1] = q[(i + 1) % q.length];
+        if ((y0 <= yc) !== (y1 <= yc)) xs.push(x0 + (yc - y0) / (y1 - y0) * (x1 - x0));
+      }
+      xs.sort((p, r) => p - r);
+      const fill = (from, to) => { for (let x = Math.max(0, Math.ceil(from - 0.5)); x < Math.min(WIDTH, Math.ceil(to - 0.5)); x++) rowMask[x] = 1; };
+      if (a.outside) {
+        let prev = 0;
+        for (let k = 0; k + 1 < xs.length; k += 2) { fill(prev, xs[k]); prev = xs[k + 1]; }
+        fill(prev, WIDTH);
+      } else for (let k = 0; k + 1 < xs.length; k += 2) fill(xs[k], xs[k + 1]);
+    }
+  }
+  const isWater = new Uint8Array(WIDTH * HEIGHT);
+  // the water's own texture: deep water with world-aligned ripple dashes
+  // (period 32, so open water deduplicates to one tile); the shader adds the
+  // mirrored sky over it
+  const waterTex = (x, y) => ((y & 7) === 0 && ((x + (y >> 3) * 11) & 31) < 9) ? DOCK.HARBOUR : DOCK.HARBOUR_DEEP;
+  // the apron: dark concrete slabs, world-aligned
+  const apron = (x, y) => ((x & 31) === 0 || (y & 31) === 0) ? C.BAR_B : (bayerOn(0.2, x, y) ? C.SLATE : C.BAR_A);
+
   // ---- paint ---------------------------------------------------------------------------
   const world = new Canvas(WIDTH, HEIGHT);
   const R = rng(7);
@@ -157,7 +195,8 @@ function build(name, def) {
     for (const p of PUDDLES) {
       const e = ((x - p.x) / p.rx) ** 2 + ((y - p.y) / p.ry) ** 2;
       if (e < 1) {
-        const glow = p.hue === "pink" ? [C.PLUM, C.PLUM_MID, C.HIGHLIGHT] : [C.TEAL_DARK, C.TEAL, C.SELECTED];
+        const glow = p.hue === "pink" ? [C.PLUM, C.PLUM_MID, C.HIGHLIGHT]
+          : DOCKS ? [C.WIRE_DARK, DOCK.REFLECT_COLD, C.COLD] : [C.TEAL_DARK, C.TEAL, C.SELECTED];
         const streak = ((y + Math.floor(x / 9)) % 5 === 0) && ((x * 7 + y * 3) % 11 < 6);
         const v = (1 - e) * 0.9;
         c = streak ? ramp(glow, v + 0.25, x, y) : ramp([C.BG, glow[0]], v, x, y);
@@ -165,6 +204,13 @@ function build(name, def) {
       }
     }
     return c;
+  }
+  // off the road: water, a quay's apron, or the floor; l is locate's answer
+  function ground(x, y, l) {
+    if (!rowMask[x]) return floor(x, y);
+    if (l && Math.abs(l.d) < HW + BARRIER + RUNOFF + APRON) return apron(x, y);
+    isWater[y * WIDTH + x] = 1;
+    return waterTex(x, y);
   }
   function road(x, y) {
     // world-aligned 64-texel plates in two close tones, chequered, with a
@@ -174,14 +220,20 @@ function build(name, def) {
     if (px === 1 || py === 1) return C.STATIC_B;
     if ((px === 5 || px === 59) && (py === 5 || py === 59)) return C.SLATE_MID;
     const odd = ((x >> 6) + (y >> 6)) & 1;
-    return bayerOn(0.28, x, y) ? (odd ? C.SIDE_DARK : C.SLATE) : (odd ? C.SLATE : C.SIDE_DARK);
+    const dark = DOCKS ? DOCK.WET_ASPHALT : C.SIDE_DARK;
+    return bayerOn(0.28, x, y) ? (odd ? dark : C.SLATE) : (odd ? C.SLATE : dark);
   }
   const jitter = (x, y) => (BAYER4[((y & 3) << 2) | (x & 3)] + 0.5) / 16 - 0.5;
 
   for (let y = 0; y < HEIGHT; y++) {
+    waterRow(y);
     for (let x = 0; x < WIDTH; x++) {
       const l = locate(x + 0.5, y + 0.5);
-      if (!l || Math.abs(l.d) > HW + BARRIER + RUNOFF + 2) { world.set(x, y, floor(x, y)); continue; }
+      if (!l || Math.abs(l.d) > HW + BARRIER + RUNOFF + 2) {
+        const c = ground(x, y, l);
+        world.set(x, y, c, isWater[y * WIDTH + x] ? 255 - WATER : 255);
+        continue;
+      }
       const s = l.s, u = l.d / HW;
       // the distance that picks the band, dithered: smooth edges in palette colours
       const ad = Math.abs(l.d) + jitter(x, y);
@@ -230,12 +282,27 @@ function build(name, def) {
         if (k >= 2 && k < 10) code = 1 + (Math.floor(s / 24) % 16) + (l.d < 0 ? 0 : 16);
       } else {
         const v = (ad - HW - BARRIER) / RUNOFF;
-        c = bayerOn(v, x, y) ? floor(x, y) : C.BAR_A;
+        c = bayerOn(v, x, y) ? ground(x, y, l) : C.BAR_A;
       }
       world.set(x, y, c, 255 - code);
     }
   }
-  world.checkPalette(name);
+  // the quay's lip: the two water texels next to land, a lit concrete edge
+  // and its shadow (left as water, so the sky still shows in it, darker)
+  let waterTexels = 0;
+  for (let y = 0; y < HEIGHT; y++) for (let x = 0; x < WIDTH; x++) {
+    if (!isWater[y * WIDTH + x]) continue;
+    waterTexels++;
+    let near = 3;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) for (let k = 1; k <= 2; k++) {
+      const xx = x + dx * k, yy = y + dy * k;
+      if (xx >= 0 && yy >= 0 && xx < WIDTH && yy < HEIGHT && !isWater[yy * WIDTH + xx]) near = Math.min(near, k);
+    }
+    if (near === 1) world.set(x, y, C.SLATE_MID, 255);
+    else if (near === 2) world.set(x, y, C.BG, 255 - WATER);
+  }
+  if (def.water.length) console.log(`${name}: ${waterTexels} water texels (${(100 * waterTexels / (WIDTH * HEIGHT)).toFixed(1)}% of the world)`);
+  world.checkPalette(name, DOCKS ? DOCKLANDS : EMBERS);
 
   // ---- tiles ------------------------------------------------------------------------------
   const tiles = new Map(), order = [];
@@ -247,8 +314,10 @@ function build(name, def) {
   };
   // tile 0: the plain floor (the shader draws it beyond the map's edge)
   const plain = new Canvas(TILE, TILE);
-  for (let j = 0; j < TILE; j++) for (let i = 0; i < TILE; i++)
-    plain.set(i, j, i === 0 || j === 0 ? C.TEAL_DARK : i === 16 && j === 16 ? C.BAR_C : C.BG);
+  for (let j = 0; j < TILE; j++) for (let i = 0; i < TILE; i++) {
+    if (def.beyond === "water") plain.set(i, j, waterTex(i, j), 255 - WATER);
+    else plain.set(i, j, i === 0 || j === 0 ? C.TEAL_DARK : i === 16 && j === 16 ? C.BAR_C : C.BG);
+  }
   tiles.set(keyOf(plain, 0, 0, TILE), 0); order.push({ canvas: plain });
   for (let ty = 0; ty < MAP_H; ty++) for (let tx = 0; tx < MAP_W; tx++) {
     const key = keyOf(world, tx * TILE, ty * TILE, WIDTH);
@@ -261,15 +330,28 @@ function build(name, def) {
   writeReport();
   if (!gates.tiles.pass) throw new Error(`${name}: ${order.length} unique tiles exceed the 4096 tile budget`);
   if (ROWS * TILE > 2048) throw new Error(`${name}: ${order.length} tiles need an atlas ${ROWS * TILE} tall, over WebGL2's guaranteed 2048`);
-  const atlas = new Canvas(PER_ROW * TILE, ROWS * TILE), avg = new Canvas(PER_ROW, ROWS);
+  const atlas = new Canvas(PER_ROW * TILE, ROWS * TILE), avg = new Canvas(PER_ROW * MIP_CELL[0], ROWS * MIP_CELL[1]);
   order.forEach((t, id) => {
     const ax = (id % PER_ROW) * TILE, ay = Math.floor(id / PER_ROW) * TILE;
-    let r = 0, g = 0, b = 0;
+    const tilePx = [];
     for (let j = 0; j < TILE; j++) for (let i = 0; i < TILE; i++) {
       const p = t.canvas ? t.canvas.get(i, j) : world.get(t.tx * TILE + i, t.ty * TILE + j);
-      atlas.set(ax + i, ay + j, p.slice(0, 3), p[3]); r += p[0]; g += p[1]; b += p[2];
+      atlas.set(ax + i, ay + j, p.slice(0, 3), p[3]); tilePx.push(p);
     }
-    avg.set(id % PER_ROW, Math.floor(id / PER_ROW), [Math.round(r / 1024), Math.round(g / 1024), Math.round(b / 1024)]);
+    // the tile's mip levels 1 to 5, each texel the rounded mean of its
+    // 2^L x 2^L block of the tile itself (not of the rounded level above),
+    // so level 5 is exactly the tile's average as 0.1 wrote it
+    const cx = (id % PER_ROW) * MIP_CELL[0], cy = Math.floor(id / PER_ROW) * MIP_CELL[1];
+    for (let L = 1; L <= 5; L++) {
+      const s = 1 << L, n = TILE >> L, [ox, oy] = MIP_OFFSETS[L];
+      for (let v = 0; v < n; v++) for (let u = 0; u < n; u++) {
+        let r = 0, g = 0, b = 0;
+        for (let j = 0; j < s; j++) for (let i = 0; i < s; i++) {
+          const p = tilePx[(v * s + j) * TILE + u * s + i]; r += p[0]; g += p[1]; b += p[2];
+        }
+        avg.set(cx + ox + u, cy + oy + v, [Math.round(r / (s * s)), Math.round(g / (s * s)), Math.round(b / (s * s))]);
+      }
+    }
   });
   const map = new Canvas(MAP_W, MAP_H);
   for (let k = 0; k < MAP_W * MAP_H; k++) map.set(k % MAP_W, Math.floor(k / MAP_W), [index[k] & 255, index[k] >> 8, 0]);
@@ -328,12 +410,12 @@ ${body}        ))
                     (vector-set! v (+ k i) (vector-ref c i))
                     (copy (+ i 1))))
                 (loop (cdr cs) (+ k (vector-length c))))))))
-    ;; (name samples step boost repair ice world-width world-height)
+    ;; (name samples step boost repair ice world-width world-height district)
     (define (${name}-track-data)
       (list '${name} (join CHUNKS) ${f(STEP)}
             '(${ZONES.boost.map(zone).join(" ")})
             '(${ZONES.repair.map(zone).join(" ")})
-            '(${ZONES.ice.map(zone).join(" ")}) ${WIDTH} ${HEIGHT}))))
+            '(${ZONES.ice.map(zone).join(" ")}) ${WIDTH} ${HEIGHT} '${def.district}))))
 `;
   fs.mkdirSync(path.join(ROOT, "src/signal/track"), { recursive: true });
   fs.writeFileSync(path.join(ROOT, `src/signal/track/${name}-data.sgl`), src);
