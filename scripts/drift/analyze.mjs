@@ -155,10 +155,12 @@ export function percentile(values, fraction) {
 // and tracking 120 ms around that lock scored it as 141 ms. After a weak
 // acquisition the windows are also searched WIDE_SEARCH either side, so
 // the late windows score at their true lag. LOST_WINDOWS consecutive
-// windows under 0.5 mean the capture cannot be aligned there. The floor
-// is for music-only captures: saved full-mix companions acquired at 0.57
-// to 0.86, and for them only an acquisition under 0.5 (no lock at
-// all) is lost.
+// windows under 0.5 mean the capture cannot be aligned there. Both rules
+// judge music-only captures only. In the full mix the engine and one-shots
+// mask the music by design: saved full-mix companions acquired at 0.57 to
+// 0.86 and every one had 4 to 22 consecutive windows under 0.5 (5 of them
+// from song 49.6-50 s). For a full-mix capture only an acquisition under
+// 0.5 (no lock at all) is lost; its longest weak run is reported.
 export const ACQUIRE_FLOOR = 0.8, LOST_WINDOWS = 3, WIDE_SEARCH = 1.0;
 
 export function assess(errors, coverage) {
@@ -273,8 +275,9 @@ export function analyze(run) {
   const meta = fs.existsSync(metaPath) ? JSON.parse(fs.readFileSync(metaPath, "utf8")) : {};
   const referenceRate = meta.reference_sample_rate ?? RATE;
   // The full mix (engine and one-shots over the music) correlates lower by
-  // nature, so ACQUIRE_FLOOR judges music-only captures only.
-  const acquireFloor = meta.music_only === false ? 0.5 : ACQUIRE_FLOOR;
+  // nature, so ACQUIRE_FLOOR and LOST_WINDOWS judge music-only captures only.
+  const fullMix = meta.music_only === false;
+  const acquireFloor = fullMix ? 0.5 : ACQUIRE_FLOOR;
   const ref = envelope(path.join(run, "reference.pcm"), "f32", referenceRate);
   if (!(cap.rms > 1e-4)) return { pass: false, reason: "silent actual-game capture", rms: cap.rms };
   const observations = fs.readFileSync(path.join(run, "capclock.txt"), "utf8").trim().split("\n")
@@ -416,7 +419,7 @@ export function analyze(run) {
   }
   const lockFailure = weakAcquisition
     ? `acquisition correlated ${acquisition ? acquisition.norm.toFixed(3) : "nowhere"}, under ${acquireFloor}`
-    : longest.length >= LOST_WINDOWS
+    : !fullMix && longest.length >= LOST_WINDOWS
       ? `${longest.length} consecutive windows under 0.5 from song ${longest.song.toFixed(2)} s`
       : null;
   if (lockFailure) verdict.pass = false;

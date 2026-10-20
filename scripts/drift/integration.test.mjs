@@ -129,10 +129,21 @@ try {
   assert.ok(!garbled.pass);
   assert.match(garbled.lock_failure ?? "", /consecutive windows under 0.5/);
   assert.ok(garbled.worst_ms < 20, JSON.stringify({ worst: garbled.worst_ms }));
+  // A shorter stretch (1.6 s) leaves exactly 3 windows under 0.5: a lost
+  // lock in a music-only capture, but in the full mix, where the engine
+  // masks the music by design, a weak run that is reported and not RED.
+  const shortGarble = { garbleFrom: 14, garbleTo: 15.6 };
+  const weakRun = fixture("weak-run", 0.007, 1, RATE, wave, null, null, null, 0, shortGarble);
+  assert.ok(!weakRun.pass);
+  assert.match(weakRun.lock_failure ?? "", /3 consecutive windows under 0.5/);
+  const weakRunMix = fixture("weak-run-mix", 0.007, 1, RATE, wave, null, null, null, 0, { ...shortGarble, meta: { music_only: false } });
+  assert.equal(weakRunMix.longest_unmatched_run, 3);
+  assert.equal(weakRunMix.lock_failure, null);
+  assert.ok(weakRunMix.pass, JSON.stringify({ coverage: weakRunMix.coverage, worst: weakRunMix.worst_ms, reason: weakRunMix.reason }));
   const skew = fixture("skew", 0, 1.01);
   assert.ok(!skew.pass);
   assert.ok(skew.p95_ms > 100);
   console.log(JSON.stringify({ normal: { p95: normal.p95_ms, worst: normal.worst_ms, coverage: normal.coverage }, count_in_p95: countInRun.p95_ms,
-    depth_p95: depth.p95_ms, wrong_material_p95: wrong.p95_ms, skew_p95: skew.p95_ms, late_start_worst: lateStart.worst_ms, late_start_lock: lateStart.lock_failure, late_start_mix_lock: lateMix.lock_failure, garbled_lock: garbled.lock_failure }));
-  console.log("Synthetic PCM and dated-clock integration: normal, count-in and on-time drums GREEN; depth, wrong material, skew, a beat lost mid-race, a late start (at its true lag) and a lost lock RED");
+    depth_p95: depth.p95_ms, wrong_material_p95: wrong.p95_ms, skew_p95: skew.p95_ms, late_start_worst: lateStart.worst_ms, late_start_lock: lateStart.lock_failure, late_start_mix_lock: lateMix.lock_failure, garbled_lock: garbled.lock_failure, weak_run_lock: weakRun.lock_failure, weak_run_mix: { pass: weakRunMix.pass, run: weakRunMix.longest_unmatched_run } }));
+  console.log("Synthetic PCM and dated-clock integration: normal, count-in and on-time drums GREEN; depth, wrong material, skew, a beat lost mid-race, a late start (at its true lag) and a lost lock RED; a full-mix weak run reported, not RED");
 } finally { fs.rmSync(root, { recursive: true, force: true }); }
