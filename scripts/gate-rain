@@ -84,8 +84,8 @@ for t in quayside basin breakwater; do
   for a in plant dry; do
     node -e '
 const [file, minBand] = process.argv.slice(1);
-const shots = require("fs").readFileSync(file, "utf8").split("\n").filter((l) => / band \d+ px/.test(l));
-const bad = shots.filter((l) => l.includes("not the debug view") || Number(l.match(/ band (\d+) px/)[1]) < Number(minBand));
+const shots = require("fs").readFileSync(file, "utf8").split("\n").filter((l) => /\.png: band \d+ px,/.test(l));
+const bad = shots.filter((l) => l.includes("not the debug view") || Number(l.match(/\.png: band (\d+) px,/)[1]) < Number(minBand));
 process.exit(shots.length && !bad.length ? 0 : 1);' "$d/$a.txt" "$MIN_BAND" || { echo "$t: the $a arm's frames are not a measurable debug view"; red=1; }
   done
   w=$(sed -nE 's/.*worst ([0-9.]+)%.*/\1/p' "$d/plant.txt")
