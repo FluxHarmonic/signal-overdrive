@@ -110,13 +110,15 @@ burst() {
   run "$1" "$2" "$steps]" "$4"
   for i in 0 1 2 3 4 5 6 7 8 9; do [ -s "$OUT/$1-$2/t$i.png" ] || { echo "SETUP-FAILED: no $1-$2 t$i.png"; exit 2; }; done
 }
-# texts NAME MOTION X Y W H COLOUR: each burst shot's count of the colour in
-# the box (view pixels), space-separated
+# texts NAME MOTION X Y W H COLOUR [shadow]: each burst shot's count of the
+# colour in the box (view pixels), space-separated; with "shadow", only the
+# text's glyph edges over its #0D0A1A shadow (png-count --shadow), not the
+# colour in the world under the box
 texts() {
   out=""
   for i in 0 1 2 3 4 5 6 7 8 9; do
     f="$OUT/$1-$2/t$i.png"
-    out="$out $(node "$REPO/scripts/png-count.mjs" "$f" $(($3 * SCALE)) $(($4 * SCALE)) $(($5 * SCALE)) $(($6 * SCALE)) "$7")"
+    out="$out $(node "$REPO/scripts/png-count.mjs" "$f" $(($3 * SCALE)) $(($4 * SCALE)) $(($5 * SCALE)) $(($6 * SCALE)) "$7" ${8:+--shadow $SCALE "#0D0A1A"})"
   done
   echo $out
 }
@@ -190,9 +192,12 @@ K_1=$(count "$OUT/kick-reduce/pre.png" "$OUT/kick-reduce/k1.png" $H 0)
 K_2=$(count "$OUT/kick-reduce/pre.png" "$OUT/kick-reduce/k2.png" $H 0)
 K_CTRL=$(count "$OUT/kick-full/pre.png" "$OUT/kick-full/k1.png" $H 0)
 # the boxes: the race's title prompt (row 120, size 2), the title screen's
-# (row 206, size 2), TRACED. (row 36, size 2); in view pixels
+# (row 206, size 2), TRACED. (row 36, size 2); in view pixels. The title
+# screen's camera flies over the Docklands' opening boost pads, whose
+# #FFCC33 stripes cross its box (since fc3665e, 2026-10-20: a steady prompt
+# read as blinking), so it counts the glyphs' edges over their shadow only
 P_R=$(texts prompt reduce 90 118 300 18 "#FFCC33"); P_F=$(texts prompt full 90 118 300 18 "#FFCC33")
-T_R=$(texts title reduce 60 204 360 18 "#FFCC33");  T_F=$(texts title full 60 204 360 18 "#FFCC33")
+T_R=$(texts title reduce 60 204 360 18 "#FFCC33" shadow);  T_F=$(texts title full 60 204 360 18 "#FFCC33" shadow)
 R_R=$(texts traced reduce 180 34 120 18 "#FF5959"); R_F=$(texts traced full 180 34 120 18 "#FF5959")
 # the thrusters: still with reduced motion, and the machines drawn in the
 # frame full motion shows between flickers; flickering in full motion
