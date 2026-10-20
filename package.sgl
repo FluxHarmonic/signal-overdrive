@@ -45,7 +45,7 @@
 
 (package
   name: "signal-overdrive"
-  version: "0.1.0"
+  version: "0.2.0"
   sigil: "0.22.11"
   description: "A Mode 7 racer in the spirit of F-Zero, set in the world of Crash The Stack"
   license: "GPL-3.0-or-later"
