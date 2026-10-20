@@ -225,7 +225,8 @@ try {
   fs.writeFileSync(path.join(RUN, "analysis.json"), JSON.stringify(report, null, 2) + "\n");
   const timing = `p95 ${result.p95_ms?.toFixed(1)} ms, worst ${result.worst_ms?.toFixed(1)} ms, coverage ${(100 * result.coverage).toFixed(1)}%`;
   let line;
-  if (MIX === "full") line = `RESULT: REPORT — full-mix companion (not a verdict), ${ARM}: ${timing}; ${verdict.reason}`;
+  const acquired = `acquisition ${Number.isFinite(result.acquisition?.norm) ? result.acquisition.norm.toFixed(3) : "none"}`;
+  if (MIX === "full") line = `RESULT: REPORT — full-mix companion (not a verdict), ${ARM}: ${timing}, ${acquired}; ${verdict.reason}`;
   else line = `RESULT: ${verdict.status} — ${ARM}: ${verdict.reason}; ${timing}`;
   fs.writeFileSync(path.join(RUN, "RESULT"), line + "\n");
   console.log(JSON.stringify({ ...report, rows: undefined }));

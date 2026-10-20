@@ -72,7 +72,11 @@ the full mix is the workload players run.
    (23.2 ms at 44.1 kHz), so it lags playback by half a period on average.
 5. **A lost lock is RED**, never windows dropped from the score:
    - an acquisition correlating under 0.8 (every normal music-only capture
-     saved from earlier gates acquired at 0.866 or better);
+     saved from earlier gates acquired at 0.866 or better). The floor
+     judges music-only captures only: the full-mix companion correlates
+     lower by nature (saved companions acquired at 0.57 to 0.86), so for
+     it only an acquisition under 0.5 is lost, and its RESULT line shows
+     the acquisition score;
    - 3 or more consecutive windows under 0.5.
 
    After a weak acquisition, until a window matches, each window is also

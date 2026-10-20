@@ -155,7 +155,10 @@ export function percentile(values, fraction) {
 // and tracking 120 ms around that lock scored it as 141 ms. After a weak
 // acquisition the windows are also searched WIDE_SEARCH either side, so
 // the late windows score at their true lag. LOST_WINDOWS consecutive
-// windows under 0.5 mean the capture cannot be aligned there.
+// windows under 0.5 mean the capture cannot be aligned there. The floor
+// is for music-only captures: saved full-mix companions acquired at 0.57
+// to 0.86, and for them only an acquisition under 0.5 (no lock at
+// all) is lost.
 export const ACQUIRE_FLOOR = 0.8, LOST_WINDOWS = 3, WIDE_SEARCH = 1.0;
 
 export function assess(errors, coverage) {
@@ -267,8 +270,11 @@ export function analyze(run) {
   if (required.some(mark => !trace.jumps.some(j => j.mark === mark))) throw new Error("race did not visit every intended section");
   const cap = envelope(path.join(run, "capture.pcm"), "s16");
   const metaPath = path.join(run, "meta.json");
-  const referenceRate = fs.existsSync(metaPath)
-    ? JSON.parse(fs.readFileSync(metaPath, "utf8")).reference_sample_rate ?? RATE : RATE;
+  const meta = fs.existsSync(metaPath) ? JSON.parse(fs.readFileSync(metaPath, "utf8")) : {};
+  const referenceRate = meta.reference_sample_rate ?? RATE;
+  // The full mix (engine and one-shots over the music) correlates lower by
+  // nature, so ACQUIRE_FLOOR judges music-only captures only.
+  const acquireFloor = meta.music_only === false ? 0.5 : ACQUIRE_FLOOR;
   const ref = envelope(path.join(run, "reference.pcm"), "f32", referenceRate);
   if (!(cap.rms > 1e-4)) return { pass: false, reason: "silent actual-game capture", rms: cap.rms };
   const observations = fs.readFileSync(path.join(run, "capclock.txt"), "utf8").trim().split("\n")
@@ -326,7 +332,7 @@ export function analyze(run) {
   // the aliases that then win score about 0.55.) The long window must lie
   // inside the analyzed race: past it the capture is silence.
   const VERIFY_EVERY = 8, VERIFY_SECONDS = 8, VERIFY_SEARCH = 2, RELOCK_MARGIN = 0.15, RELOCK_FLOOR = 0.7;
-  const weakAcquisition = !acquisition || !(acquisition.norm >= ACQUIRE_FLOOR);
+  const weakAcquisition = !acquisition || !(acquisition.norm >= acquireFloor);
   let lost = weakAcquisition, candidate = null;
   const relocks = [];
   let windowIndex = 0;
@@ -409,7 +415,7 @@ export function analyze(run) {
     if (lowRun > longest.length) longest = { length: lowRun, song: r.song - (lowRun - 1) * 60 / 140 };
   }
   const lockFailure = weakAcquisition
-    ? `acquisition correlated ${acquisition ? acquisition.norm.toFixed(3) : "nowhere"}, under ${ACQUIRE_FLOOR}`
+    ? `acquisition correlated ${acquisition ? acquisition.norm.toFixed(3) : "nowhere"}, under ${acquireFloor}`
     : longest.length >= LOST_WINDOWS
       ? `${longest.length} consecutive windows under 0.5 from song ${longest.song.toFixed(2)} s`
       : null;
