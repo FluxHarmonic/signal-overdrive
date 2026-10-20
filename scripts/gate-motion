@@ -67,6 +67,8 @@
 # Renders on the GPU when GPU=1 (default), SwiftShader with GPU=0.
 # MOTION_OUT names a fresh directory for the captures (default: a new
 # /tmp/gate-motion-XXXXXX).
+# MOTION_PORT and MOTION_CDP set fx-check's ports (default 8493, 9493), for
+# a second run on one machine at once.
 set -eu
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="${1:-$REPO/build/web}"
@@ -92,7 +94,7 @@ run() {
   d="$OUT/$1-$2"; mkdir -p "$d"
   printf '%s\n' "$3" > "$d/steps.json"
   if ! node "$REPO/scripts/fx-check.mjs" "$BUILD" "$d/steps.json" $GPUFLAG --scale $SCALE \
-       --query "mute&motion=$2&$4" --out "$d" > "$d/run.log" 2>&1; then
+       --query "mute&motion=$2&$4" --out "$d" --port "${MOTION_PORT:-8493}" --cdp "${MOTION_CDP:-9493}" > "$d/run.log" 2>&1; then
     echo "SETUP-FAILED: the $1 capture ($2) did not run cleanly; $d/run.log:"; cat "$d/run.log"; exit 2
   fi
 }
