@@ -24,6 +24,8 @@
   <link rel="icon" href="/favicon.ico" sizes="16x16 32x32">
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="alternate" type="application/rss+xml" title="Signal Overdrive news" href="/news/feed.xml">
+  <link rel="alternate" type="application/feed+json" title="Signal Overdrive news" href="/news/feed.json">
   <link rel="preload" href="/fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/style.css">
   <script src="/logo-glitch.js" defer></script>
@@ -73,6 +75,13 @@
       <a href="/drive/" aria-describedby="play-when">GET IN</a>
       <span class="how" id="play-when">Free, in your browser.</span>
     </div>
+
+    <!-- news:latest -->
+    <section class="latest" aria-labelledby="latest-news">
+      <h2 id="latest-news">Latest news</h2>
+      <p class="news-links"><a href="/news/">All news</a> <span aria-hidden="true">/</span> <a href="/news/feed.xml">RSS</a></p>
+    </section>
+    <!-- /news:latest -->
 
     <section class="music">
       <h2>The city plays your song</h2>

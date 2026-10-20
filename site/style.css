@@ -175,3 +175,40 @@ h1.name {
   text-shadow: -0.06em 0 0 var(--echo);
 }
 .lost p { color: var(--ink-dim); }
+
+/* The latest post on the landing (build-news.mjs fills it at stage time;
+   site/index.html keeps only the news links): a panel in the reading column,
+   with the heat's edge. Its title may name a release; the rest of the
+   landing's copy never does. */
+.latest {
+  max-width: 40em;
+  margin: 0 auto 3rem;
+  padding: 1.2rem 1.4rem;
+  background: var(--dark-2);
+  border-left: 3px solid var(--heat);
+}
+.latest article { margin: 0 0 0.8rem; }
+.latest h3 { margin: 0; font-size: 1.1rem; line-height: 1.4; }
+.latest h3 a { text-decoration: none; }
+.latest h3 a:hover { text-decoration: underline; }
+.latest .date { margin: 0.1rem 0 0.5rem; font-size: 0.85rem; color: var(--ink-dim); }
+.latest p { margin: 0; }
+.latest .news-links { font-size: 0.9rem; color: var(--ink-dim); }
+
+/* /news/: the index and one page per post, in the landing's reading column */
+main.news { max-width: 40em; padding-top: 2.5rem; padding-bottom: 4rem; }
+.news .back { margin: 0 0 2.5rem; font-size: 0.9rem; color: var(--ink-dim); }
+.news h1 { margin: 0 0 0.4rem; font-size: 1.6rem; line-height: 1.3; color: var(--ink); }
+.news .date { margin: 0 0 2rem; font-size: 0.9rem; color: var(--ink-dim); }
+.news .feeds { margin: 0 0 2rem; color: var(--ink-dim); }
+.news .post h2 { margin-top: 2.2rem; }
+.news .post p, .news .post ul { margin: 0 0 1em; }
+.news .post ul { padding-left: 1.4em; }
+.news .post li { margin-bottom: 0.4em; }
+.news .post li::marker { color: var(--heat); }
+.post-list { list-style: none; margin: 0; padding: 0; }
+.post-list li { margin: 0 0 1.8rem; padding-left: 1rem; border-left: 3px solid var(--heat); }
+.post-list li > a { font-size: 1.1rem; font-weight: 700; text-decoration: none; }
+.post-list li > a:hover { text-decoration: underline; }
+.post-list time { display: block; font-size: 0.85rem; color: var(--ink-dim); }
+.post-list p { margin: 0.3rem 0 0; }
