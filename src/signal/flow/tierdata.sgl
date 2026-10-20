@@ -10,41 +10,38 @@
 ;;; column). It selects a tier and passes it on; it never sets a number
 ;;; from it. ONE owner (the leader's ruling, 2026-10-19): the tooling
 ;;; worker's (signal tiers) data and its race decide rival pace, ICE
-;;; density and meter forgiveness from the tier. Until that branch merges,
-;;; every tier races at the session's pace on this base.
+;;; density and meter forgiveness from the tier.
 ;;;
-;;; The mode and the tier reach the race as two plain entries in the tuning
-;;; alist, (race-mode . run|time-trial) and (race-tier . learner|courier|elite):
-;;; not knobs, so the overlay and the URL never show them, and the race
-;;; constructors keep their signatures. The flow calls TIME TRIAL 'trial;
-;;; the race's name for it is 'time-trial (tier-race-mode).
+;;; The race gets them from race-new's tier: and mode: keywords, which
+;;; flow-race-new in (signal shell core) passes (the one place the flow
+;;; builds a race; race-start keeps them on restarts). race-new's
+;;; time-trial empties the field and the ICE itself (P26), so the session's
+;;; field of rivals stays in the tuning across modes. The mode and the tier
+;;; also ride in the tuning alist as two plain entries, (race-mode .
+;;; run|time-trial) and (race-tier . learner|courier|elite): not knobs, so
+;;; the overlay and the URL never show them. The flow calls TIME TRIAL
+;;; 'trial; the race's name for it is 'time-trial (tier-race-mode).
 ;;;
-;;; INTEGRATION SEAM, for when the tooling/runtime branch (signal tiers, and
-;;; race-new's tier: and mode: keywords) merges:
-;;;   - flow-race-new in (signal shell core) passes tier: and mode: (the
-;;;     one place the flow builds a race; race-start keeps them on restarts);
-;;;   - tier-race-tuning's rivals 0 in TIME TRIAL can go (that race-new
-;;;     empties the field in time-trial itself; until then, P26's empty
-;;;     field comes from here). It is the mode's rule, not a tier number;
-;;;   - TIER-IDS and tier-label may come from (signal tiers)'s TIERS and
-;;;     tier-label.
+;;; The order and the labels are (signal tiers)'s TIERS and labels.
 
 (define-library (signal flow tierdata)
   (import (sigil core)
-          (signal tuning))
+          (signal tuning)
+          (only (signal tiers) TIERS tier-parameters))
 
   (export TIER-IDS tier-label tier-lines tier-retransmits tier-corrupt-ends-cup?
           tier-race-tuning tier-race-mode tuning-with tier-index)
 
   (begin
-    (define TIER-IDS '(learner courier elite))
+    (define TIER-IDS TIERS)
 
     (define (tier-index id)
       (let loop ((ts TIER-IDS) (i 0))
         (cond ((null? ts) 0) ((eq? (car ts) id) i) (else (loop (cdr ts) (+ i 1))))))
 
+    ;; (signal tiers)'s label; an unknown id (a damaged save) reads as COURIER
     (define (tier-label id)
-      (case id ((learner) "LEARNER") ((courier) "COURIER") ((elite) "ELITE") (else "COURIER")))
+      (cdr (assq 'label (tier-parameters (if (memq id TIERS) id 'courier)))))
 
     ;; Two lines under the tier menu, in the flat system register.
     (define (tier-lines id)
@@ -74,11 +71,11 @@
 
     ;; --- the hook: mode and tier to the race's tuning -----------------------------
     ;; base: (rivals . n), the session's own field (a URL or the overlay may
-    ;; have set it), so a TIME TRIAL's empty field never carries into the
-    ;; next RUN. The tier only rides along as (race-tier . id): the rival
-    ;; pace stays the session's (the race's tier data scales it, not this).
+    ;; have set it), in every mode: race-new's time-trial empties the field
+    ;; itself. The tier only rides along as (race-tier . id): the rival pace
+    ;; stays the session's (the race's tier data scales it, not this).
     (define (tier-race-tuning t base mode tier)
       (let* ((rivals (cdr (assq 'rivals base)))
-             (t (tuning-set t 'rivals (if (eq? mode 'trial) 0.0 rivals)))
+             (t (tuning-set t 'rivals rivals))
              (t (tuning-with t 'race-mode (tier-race-mode mode))))
         (tuning-with t 'race-tier tier)))))

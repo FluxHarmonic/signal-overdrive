@@ -128,7 +128,7 @@
                   ((version . 1) (cleared) (cups) (best) junk))))))
 
 (test-group "the tier's tuning"
-  (test "RUN keeps the field, the tier rides along and never sets the pace; TIME TRIAL empties the field"
+  (test "the field stays the session's in every mode, the tier rides along and never sets the pace; race-new's TIME TRIAL empties the field"
     (let* ((base '((rivals . 5.0)))
            (l (tier-race-tuning TUNING base 'run 'learner))
            (e (tier-race-tuning TUNING base 'run 'elite))
@@ -141,13 +141,21 @@
       (assert-equal 'elite (cdr (assq 'race-tier e)))
       (assert-equal 'run (cdr (assq 'race-mode e)))
       (assert-equal 5.0 (tuning-ref l 'rivals))
-      (assert-equal 0.0 (tuning-ref t 'rivals))
+      (assert-equal 5.0 (tuning-ref t 'rivals))
       (assert-equal 5.0 (tuning-ref back 'rivals))
       (assert-equal 'time-trial (cdr (assq 'race-mode t)))
       (assert-equal 'courier (cdr (assq 'race-tier back)))
       ;; the entries are not knobs: the query string never names them
       (assert-false (assq 'race-tier (tuning-changed back)))
-      (assert-equal 0 (length (race-rivals (race-new t)))))))
+      ;; the race takes the mode and the tier from race-new's keywords
+      (let ((trial (race-new t tier: 'courier mode: (tier-race-mode 'trial)))
+            (run (race-new l tier: 'learner mode: (tier-race-mode 'run))))
+        (assert-equal 0 (length (race-rivals trial)))
+        (assert-equal '() (track-ice (race-track trial)))
+        (assert-equal 'time-trial (race-mode trial))
+        (assert-equal 5 (length (race-rivals run)))
+        (assert-equal 'learner (race-tier run))
+        (assert-equal 'run (race-mode run))))))
 
 ;; From the title to the cup's screen on LEARNER.
 (define (to-cup f)
@@ -496,6 +504,9 @@
     (assert-equal 'breakwater (track-name (race-track (core-race))))
     (assert-equal (tuning-ref TUNING 'rival-pace) (tuning-ref (core-tuning) 'rival-pace))
     (assert-equal 'learner (cdr (assq 'race-tier (core-tuning))))
+    ;; the race itself has the flow's tier and mode (flow-race-new)
+    (assert-equal 'learner (race-tier (core-race)))
+    (assert-equal 'run (race-mode (core-race)))
     ;; Escape pauses a race natively (no quit), and the race holds
     (assert-false (core-escape-quits?))
     ;; in the countdown: it pauses too, and its tick runs in every phase
@@ -555,15 +566,21 @@
     (assert-equal 'quayside (track-name (race-track (core-race))))
     (assert-equal 0 (length (race-rivals (core-race))))
     (assert-equal 'time-trial (cdr (assq 'race-mode (core-tuning))))
-    ;; R retries it, still in the flow
+    ;; race-new's time-trial: no rivals and no ICE
+    (assert-equal 'time-trial (race-mode (core-race)))
+    (assert-equal '() (track-ice (race-track (core-race))))
+    ;; R retries it, still in the flow, still a TIME TRIAL
     (frames 1 'r)
     (assert-equal 'racing (flow-screen (core-flow)))
     (assert-equal 'countdown (race-phase (core-race)))
+    (assert-equal 'time-trial (race-mode (core-race)))
+    (assert-equal 0 (length (race-rivals (core-race))))
     (core-param! "card=1"))
   (test "after a TIME TRIAL, a new boot's RUN has the session's rivals; a rivals param moves them"
     (fresh!)
-    ;; the TIME TRIAL above left rivals 0 in the tuning, which lives across boots
-    (assert-equal 0.0 (tuning-ref (core-tuning) 'rivals))
+    ;; the TIME TRIAL above left the session's field in the tuning, which
+    ;; lives across boots: race-new emptied the race, not the tuning
+    (assert-equal 5.0 (tuning-ref (core-tuning) 'rivals))
     (core-param! "card=0")
     (core-boot! 'desktop)
     (frames 3)

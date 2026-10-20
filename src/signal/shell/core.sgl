@@ -36,7 +36,7 @@
           (signal flow)
           (signal flow draw)
           (signal flow save)
-          (only (signal flow tierdata) tier-race-tuning)
+          (only (signal flow tierdata) tier-race-tuning tier-race-mode)
           (signal shell audio)
           (signal fx beat)
           (signal fx state)
@@ -717,13 +717,12 @@
       (set! *tuning* (tier-race-tuning (tuning-set *tuning* 'track (track-index-of (flow-track *flow*)))
                                        *flow-base* (flow-mode *flow*) (flow-tier *flow*))))
     ;; The one place the flow builds a race (its restarts go through
-    ;; race-start, which keeps what race-new was given). INTEGRATION SEAM:
-    ;; once race-new takes tier: and mode: ((signal tiers)), this becomes
-    ;;   (race-new *tuning* tier: (flow-tier *flow*)
-    ;;             mode: (tier-race-mode (flow-mode *flow*)))
-    ;; The flow never sets a number from the tier: the race's tier data
-    ;; owns pace and ICE; see (signal flow tierdata).
-    (define (flow-race-new) (race-new *tuning*))
+    ;; race-start, which keeps what race-new was given): the flow's tier and
+    ;; mode go to race-new. The flow never sets a number from the tier: the
+    ;; race's tier data ((signal tiers)) owns pace, ICE and handling, and
+    ;; race-new's time-trial empties the field and the ICE.
+    (define (flow-race-new)
+      (race-new *tuning* tier: (flow-tier *flow*) mode: (tier-race-mode (flow-mode *flow*))))
     ;; A param, a knob or a song request rebuilding the race: in a flow,
     ;; through the seam, so the race keeps the flow's mode and tier.
     (define (race-rebuild) (if (flow-active? *flow*) (flow-race-new) (race-new *tuning*)))
