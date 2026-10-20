@@ -82,9 +82,8 @@
                               y PALE))
                   (centred! "PLACE AND A CLEAN BROADCAST EARN POINTS." (+ y 11) LABEL))
                  ((trial)
-                  ;; "NO RIVALS AND NO ICE." once race-new's time-trial (the tooling
-                  ;; branch) clears the static ICE; until then the road keeps it
-                  (centred! "NO RIVALS. JUST THE ROAD AND THE CLOCK." y PALE)
+                  ;; race-new's time-trial empties the field and clears the ICE
+                  (centred! "NO RIVALS AND NO ICE." y PALE)
                   (centred! "YOUR BEST LAP RACES YOU AS A GHOST." (+ y 11) LABEL))))
              (hints!))
             ((tier)
