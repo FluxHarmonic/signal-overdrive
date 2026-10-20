@@ -1043,6 +1043,7 @@
                        " resync-requests " (number->string *resync-requests*)
                        " resyncs " (number->string (list-ref m 7))
                        " resync-cancels " (number->string (list-ref m 9))
+                       " resync-replans " (number->string (list-ref m 10))
                        " dropped-ms " (r1 (* 1000.0 (clock-dropped *clock*)))
                        " tier " (symbol->string (music-tier))
                        (theme-text))))
@@ -1220,6 +1221,13 @@
                                                      (* 1.0 (jiffies-per-second)))))
                            interval))
              (c (race-song *race*))
+             ;; A song at tick zero waits for its device to start: the
+             ;; simulation does not pass the ear until the first tick, for
+             ;; at most START-HOLD-CAP s after the opening.
+             (hold-ear (and opened (music-running?) (not (core-paused?)) (music-audible-seconds)))
+             (since-open (if opened (/ (- *frame-jiffy* opened) (* 1.0 (jiffies-per-second))) 0.0))
+             (holding (start-holding? (conductor-tick c) hold-ear since-open))
+             (interval (start-hold-interval interval (conductor-tick c) hold-ear (clock-acc *clock*) since-open))
              ;; With the song playing, a long frame catches up to the
              ;; catchup-ticks knob (the ring's depth by default); without
              ;; it, Substratic's six-tick cap.
@@ -1236,7 +1244,7 @@
         (set! *skip-interval* #f)
         (set! *frame-ear* ear)
         (set! *pacing* (pace-frame *pacing* interval sim (or ear sim)
-                                 (music-running?) (core-paused?) (conductor-bar c)
+                                 (and (music-running?) (not holding)) (core-paused?) (conductor-bar c)
                                  in-flight: (music-resync-in-flight?)))
         (when (pacing-resync? *pacing*)
           (set! *resync-requests* (+ *resync-requests* 1))

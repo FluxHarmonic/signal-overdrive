@@ -147,6 +147,22 @@ export function percentile(values, fraction) {
   return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * fraction) - 1)];
 }
 
+// The lock is the measurement, so losing it is RED, never dropped rows.
+// Every normal music-only capture saved from earlier gates acquired at
+// 0.866 or better. An acquisition under ACQUIRE_FLOOR means the lag was
+// not one steady value across the count-in into lap1: a race start heard
+// 590 ms late until a resync closed the gap at 4.8 s acquired at 0.70,
+// and tracking 120 ms around that lock scored it as 141 ms. After a weak
+// acquisition the windows are also searched WIDE_SEARCH either side, so
+// the late windows score at their true lag. LOST_WINDOWS consecutive
+// windows under 0.5 mean the capture cannot be aligned there. Both rules
+// judge music-only captures only. In the full mix the engine and one-shots
+// mask the music by design: saved full-mix companions acquired at 0.57 to
+// 0.86 and every one had 4 to 22 consecutive windows under 0.5 (5 of them
+// from song 49.6-50 s). For a full-mix capture only an acquisition under
+// 0.5 (no lock at all) is lost; its longest weak run is reported.
+export const ACQUIRE_FLOOR = 0.8, LOST_WINDOWS = 3, WIDE_SEARCH = 1.0;
+
 export function assess(errors, coverage) {
   const absolute = errors.map(Math.abs);
   const p95 = percentile(absolute, 0.95), worst = Math.max(...absolute);
@@ -224,7 +240,8 @@ export function classifyCapture(arm, analysis, signature) {
   if (d && (d.longest_ms > DROPOUT_LIMITS.longest_ms || d.total_ms > DROPOUT_LIMITS.total_ms))
     return { status: "SETUP-FAILED", gate, reason: `device dropouts ${d.count} / ${d.total_ms} ms (longest ${d.longest_ms} ms) with no game underruns; re-run` };
   if (arm === "normal")
-    return { status: analysis.pass ? "PASS" : "FAIL", gate, reason: `normal gate ${gate}` };
+    return { status: analysis.pass ? "PASS" : "FAIL", gate,
+      reason: `normal gate ${gate}${analysis.lock_failure ? ` (lock lost: ${analysis.lock_failure})` : ""}` };
   if (analysis.pass) return { status: "FAIL", gate, reason: `${arm} arm GREEN: the gate missed the defect` };
   return signature?.matched
     ? { status: "PASS", gate, reason: `${arm} arm RED for its own defect (${signature.expected})` }
@@ -255,8 +272,12 @@ export function analyze(run) {
   if (required.some(mark => !trace.jumps.some(j => j.mark === mark))) throw new Error("race did not visit every intended section");
   const cap = envelope(path.join(run, "capture.pcm"), "s16");
   const metaPath = path.join(run, "meta.json");
-  const referenceRate = fs.existsSync(metaPath)
-    ? JSON.parse(fs.readFileSync(metaPath, "utf8")).reference_sample_rate ?? RATE : RATE;
+  const meta = fs.existsSync(metaPath) ? JSON.parse(fs.readFileSync(metaPath, "utf8")) : {};
+  const referenceRate = meta.reference_sample_rate ?? RATE;
+  // The full mix (engine and one-shots over the music) correlates lower by
+  // nature, so ACQUIRE_FLOOR and LOST_WINDOWS judge music-only captures only.
+  const fullMix = meta.music_only === false;
+  const acquireFloor = fullMix ? 0.5 : ACQUIRE_FLOOR;
   const ref = envelope(path.join(run, "reference.pcm"), "f32", referenceRate);
   if (!(cap.rms > 1e-4)) return { pass: false, reason: "silent actual-game capture", rms: cap.rms };
   const observations = fs.readFileSync(path.join(run, "capclock.txt"), "utf8").trim().split("\n")
@@ -314,6 +335,8 @@ export function analyze(run) {
   // the aliases that then win score about 0.55.) The long window must lie
   // inside the analyzed race: past it the capture is silence.
   const VERIFY_EVERY = 8, VERIFY_SECONDS = 8, VERIFY_SEARCH = 2, RELOCK_MARGIN = 0.15, RELOCK_FLOOR = 0.7;
+  const weakAcquisition = !acquisition || !(acquisition.norm >= acquireFloor);
+  let lost = weakAcquisition, candidate = null;
   const relocks = [];
   let windowIndex = 0;
   for (let song = 2; song < end; song += 60 / 140) {
@@ -357,13 +380,49 @@ export function analyze(run) {
     // this, tracking walked one half-beat (214 ms) at a time onto them.
     const acquiring = trackedOffset === null;
     const preferred = Math.round(center * ENVELOPE_RATE) - from;
-    const peak = correlate(ref.values.subarray(refFrom, refFrom + length), cap.values.subarray(from, to), preferred);
-    const heard = start + (from + peak.lag) / ENVELOPE_RATE * 1000;
-    rows.push({ song, norm: peak.norm, error_ms: wall - heard, heard_ms: heard, ...(acquiring ? { acquired: true } : {}) });
+    const window = ref.values.subarray(refFrom, refFrom + length);
+    let peak = correlate(window, cap.values.subarray(from, to), preferred);
+    let heard = start + (from + peak.lag) / ENVELOPE_RATE * 1000;
+    // After a weak acquisition, until the first window matches, each
+    // window is also searched WIDE_SEARCH either side. A lag found there
+    // replaces the tracked one by the re-verification's rule (more than
+    // 60 ms away, at least RELOCK_FLOOR, RELOCK_MARGIN over the best near
+    // the tracked lag), and only when the window before found the same lag
+    // (within 30 ms) by that rule too: a 1.5 s window in repetitive music
+    // can score a beat alias that high once. A lag that moved further
+    // than 120 ms (a startup gap a resync later closes) is then scored
+    // where it is, not as a weak peak near the stale lag.
+    let widened = false;
+    if (lost && !acquiring) {
+      const wFrom = Math.max(0, Math.floor((center - WIDE_SEARCH) * ENVELOPE_RATE));
+      const wTo = Math.min(cap.values.length, Math.ceil((center + 2 * halfWindow + WIDE_SEARCH) * ENVELOPE_RATE));
+      const wide = correlate(window, cap.values.subarray(wFrom, wTo));
+      const wideHeard = start + (wFrom + wide.lag) / ENVELOPE_RATE * 1000;
+      const found = wide.norm >= RELOCK_FLOOR && wide.norm - peak.norm >= RELOCK_MARGIN && Math.abs(wideHeard - heard) > 60;
+      const offset = wideHeard - wall;
+      if (found && candidate !== null && Math.abs(offset - candidate) <= 30) {
+        peak = wide; heard = wideHeard; widened = true;
+      }
+      candidate = found ? offset : null;
+    }
+    rows.push({ song, norm: peak.norm, error_ms: wall - heard, heard_ms: heard, ...(acquiring ? { acquired: true } : {}), ...(widened ? { widened: true } : {}) });
     if (peak.norm >= 0.5) trackedOffset = (heard - wall) / 1000;
+    if (peak.norm >= 0.5) lost = false;
   }
   const good = rows.filter(r => r.norm >= 0.5 && Number.isFinite(r.error_ms));
   const verdict = assess(good.map(r => r.error_ms), good.length / rows.length);
+  // A lost lock is RED, never rows dropped from the score.
+  let lowRun = 0, longest = { length: 0, song: null };
+  for (const r of rows) {
+    lowRun = r.norm >= 0.5 ? 0 : lowRun + 1;
+    if (lowRun > longest.length) longest = { length: lowRun, song: r.song - (lowRun - 1) * 60 / 140 };
+  }
+  const lockFailure = weakAcquisition
+    ? `acquisition correlated ${acquisition ? acquisition.norm.toFixed(3) : "nowhere"}, under ${acquireFloor}`
+    : !fullMix && longest.length >= LOST_WINDOWS
+      ? `${longest.length} consecutive windows under 0.5 from song ${longest.song.toFixed(2)} s`
+      : null;
+  if (lockFailure) verdict.pass = false;
   const costs = clocks.map(c => +c.metrics["music-ms"]).filter(Number.isFinite);
   // Diagnostic only; the verdict above does not read it.
   const raceTo = clocks.at(-1).wall;
@@ -414,7 +473,7 @@ export function analyze(run) {
   // Since music started: the counter keeps closed streams' counts, so this
   // includes the title (a startup stall drains the ring before the race).
   const musicUnderrunsTotal = clocks.length ? underrunCount(clocks.at(-1)) : null;
-  return { ...verdict, windows: rows.length, correlated: good.length, capture_rms: cap.rms,
+  return { ...verdict, lock_failure: lockFailure, longest_unmatched_run: longest.length, windows: rows.length, correlated: good.length, capture_rms: cap.rms,
     reference_sample_rate: referenceRate, reference_rms: ref.rms,
     correlation_search: "8 s acquisition from song 2 (count-in into lap1), then 120 ms around the last correlated lag; among peaks within 0.05 of the best, the one nearest the tracked (or nominal) lag",
     acquisition,

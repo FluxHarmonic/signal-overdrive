@@ -268,3 +268,71 @@
     (let ((c (clock-advance-capped (clock-new) 0.4 CATCH-UP-STEPS)))
       (assert-equal 15 (clock-steps c))
       (assert-true (< (abs (- (clock-dropped c) 0.15)) 1e-9)))))
+
+;; A race start's device that starts pulling START seconds after the
+;; stream opened (#f: never), with 35 ms of output latency: 60 Hz frames
+;; for SECONDS, the simulation held by start-hold-interval (or not, HOLD
+;; #f). Returns (ticks gap-at-end first-tick-wall), the gap ear less
+;; simulation in seconds.
+(define (late-device start seconds hold)
+  (let loop ((frame 0) (c (clock-new)) (first #f))
+    (let* ((wall (* frame (/ 1.0 60.0)))
+           (ear (if (and start (> wall start)) (- wall start 0.035) -0.035))
+           (tick (clock-ticks c)))
+      (if (>= wall seconds)
+          (list tick (- ear (+ (/ tick 60.0) (clock-acc c))) first)
+          (let* ((interval (if hold
+                               (start-hold-interval (/ 1.0 60.0) tick ear (clock-acc c) wall)
+                               (/ 1.0 60.0)))
+                 (next (clock-advance-capped c interval CATCH-UP-STEPS)))
+            (loop (+ frame 1) next
+                  (or first (and (> (clock-ticks next) 0) wall))))))))
+
+(test-group "conductor: a race start waits for its device"
+  (test "the simulation holds at tick 0 until the ear passes it"
+    ;; nothing heard yet: no time passes
+    (assert-equal 0.0 (start-hold-interval (/ 1.0 60.0) 0 -0.035 0.0 0.2))
+    (assert-true (start-holding? 0 -0.035 0.2))
+    ;; heard 10 ms of song: 10 ms pass, not the frame's 16.7
+    (assert-true (< (abs (- (start-hold-interval (/ 1.0 60.0) 0 0.010 0.0 0.3) 0.010)) 1e-12))
+    ;; muted (no ear), after the first tick, or past the cap: no hold
+    (assert-equal (/ 1.0 60.0) (start-hold-interval (/ 1.0 60.0) 0 #f 0.0 0.2))
+    (assert-equal (/ 1.0 60.0) (start-hold-interval (/ 1.0 60.0) 1 -0.035 0.0 0.2))
+    (assert-equal (/ 1.0 60.0) (start-hold-interval (/ 1.0 60.0) 0 -0.035 0.0 START-HOLD-CAP))
+    (assert-false (start-holding? 0 -0.035 START-HOLD-CAP)))
+
+  ;; gate5's Carrier: the device pulled nothing for 0.73 s, the simulation
+  ;; ran on from the opening, and the race was heard 0.76 s late.
+  (test "a device starting 0.73 s late starts the race on time, not 0.76 s ahead"
+    (let ((held (late-device 0.73 3.0 #t))
+          (free (late-device 0.73 3.0 #f)))
+      (assert-true (< (abs (cadr held)) (/ 1.0 60.0)))
+      ;; the first tick waits for the first sample heard
+      (assert-true (> (caddr held) 0.75))
+      ;; the unheld clock is the bug: 765 ms ahead of the ear
+      (assert-true (< (cadr free) -0.7))))
+
+  (test "a device that never starts is waited for START-HOLD-CAP seconds, then the race starts"
+    (let ((r (late-device #f 3.0 #t)))
+      ;; it starts at all
+      (assert-true (number? (caddr r)))
+      (assert-true (> (caddr r) (- START-HOLD-CAP 0.02)))
+      (assert-true (< (caddr r) (+ START-HOLD-CAP 0.05)))
+      ;; and runs on wall time after it
+      (assert-true (> (car r) (* 60 (- 3.0 START-HOLD-CAP 0.05))))))
+
+  (test "a device that starts at once holds only its output latency"
+    (let ((r (late-device 0.0 1.0 #t)))
+      ;; the latency, a tick and a frame
+      (assert-true (< (caddr r) (+ 0.035 (/ 2.0 60.0))))
+      (assert-true (< (abs (cadr r)) (/ 1.0 60.0)))))
+
+  ;; The splice is sized at the request and runs a bar later.
+  (test "a drop splice is planned again when the gap outgrew its room by more than RESYNC-GAP"
+    ;; gate5's Carrier: asked at about -70 ms (room 120 ms), run at -733 ms
+    (assert-true (splice-outgrown? -0.733 0.12))
+    ;; 30 ms left over is the nudge's to close
+    (assert-false (splice-outgrown? -0.15 0.12))
+    (assert-false (splice-outgrown? -0.7 0.72))
+    ;; the ear ahead is an insert, never outgrown
+    (assert-false (splice-outgrown? 0.5 0.12))))
