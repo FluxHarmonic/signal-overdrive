@@ -4,7 +4,7 @@
 //
 //   node scripts/art/gen-lut.mjs [OUT-DIR]
 //
-// Writes OUT-DIR/lut-embers.png and OUT-DIR/lut-crash.png (default
+// Writes OUT-DIR/lut-embers.png, lut-crash.png and lut-docklands.png (default
 // assets/signal), each 512x512: the colour bin (r, g, b), each 0..63 (a
 // channel value v in 0..255 is bin floor(v / 4)), is the texel
 // (r + 64 * (b mod 8), g + 64 * floor(b / 8)). A bin's colour is the palette
@@ -34,7 +34,7 @@ function palette(name) {
   return [...m[1].matchAll(/"#([0-9A-Fa-f]{6})"/g)].map((x) => [0, 2, 4].map((k) => parseInt(x[1].slice(k, k + 2), 16)));
 }
 
-for (const name of ["embers", "crash"]) {
+for (const name of ["embers", "crash", "docklands"]) {
   const pal = palette(name);
   const px = new Uint8Array(512 * 512 * 4);
   for (let b = 0; b < 64; b++) for (let g = 0; g < 64; g++) for (let r = 0; r < 64; r++) {

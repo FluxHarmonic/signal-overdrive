@@ -1,16 +1,21 @@
 // gen-track.mjs - a track: a closed spline painted texel by texel into a
-// 4096x4096 world, cut into 32x32 tiles, deduplicated into an atlas, and
+// per-track rectangular world, cut into 32x32 tiles, deduplicated into an atlas, and
 // described for the game.
 //
-//   node scripts/art/gen-track.mjs [--track oval|loop] [--preview]
+//   node scripts/art/gen-track.mjs [--track ID | --file tracks/ID.json]
+//     [--preview] [--seed N] [--output DIR]
+//   --draft requires an isolated --output directory and retains red reports.
 //
 // With no --track, every track in TRACKS. Per track NAME, writes:
 //   assets/signal/NAME-atlas.png   the unique tiles, 64 per row (2048 wide)
-//   assets/signal/NAME-map.png     128x128, one texel per tile: R + 256*G is
+//   assets/signal/NAME-map.png     world.width/32 by world.height/32: R + 256*G is
 //                                 the tile's index in the atlas
-//   assets/signal/NAME-avg.png     the atlas at one texel per tile (each
-//                                 tile's average colour): what the ground
-//                                 shader fades to far away, against shimmer
+//   assets/signal/NAME-avg.png     each tile's mip levels 1 to 5 (16x16 down
+//                                 to 1x1, the last its average colour), in
+//                                 a 24x16 cell per tile, 64 cells per row in
+//                                 the atlas's order (MIP_CELL, MIP_OFFSETS in
+//                                 lib.mjs): what the ground shader filters
+//                                 with far away, against shimmer
 //   src/signal/track/NAME-data.sgl the centreline the game drives on (one
 //                                 sample per 16 texels: x y tx ty half-width
 //                                 racing-line offset), and the zones
@@ -31,129 +36,62 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { Canvas, C, ramp, bayerOn, BAYER4, rng } from "./lib.mjs";
+import { Canvas, C, DOCK, DOCKLANDS, EMBERS, ramp, bayerOn, BAYER4, rng, MIP_CELL, MIP_OFFSETS } from "./lib.mjs";
+import { sampleDefinition, trackDefinition } from "../track/geometry.mjs";
+import { loadTrack } from "../track/format.mjs";
+import { geometryGates, tileGate } from "../track/gates.mjs";
+import { liveContract, contractList, sigilData } from "../track/schedule.mjs";
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
-const WORLD = 4096, TILE = 32, MAP = WORLD / TILE;
+const SOURCE_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
+const option = name => {
+  const index = process.argv.indexOf(name);
+  if (index < 0) return null;
+  if (!process.argv[index + 1] || process.argv[index + 1].startsWith("--")) throw new Error(`missing ${name} value`);
+  return process.argv[index + 1];
+};
+const ROOT = option("--output") ? path.resolve(option("--output")) : SOURCE_ROOT;
+const DRAFT = process.argv.includes("--draft");
+if (DRAFT && ROOT === SOURCE_ROOT) throw new Error("--draft requires an isolated --output directory");
+const SEED = Number(option("--seed") ?? 0);
+const TILE = 32;
 const STEP = 16;              // centreline sample spacing, texels
 const BARRIER = 14;           // barrier band beyond the road edge
 const RUNOFF = 12;            // dithered run-off beyond the barrier
+const APRON = 48;             // a quay's concrete between the run-off and the water
+const WATER = 50;             // the effects code of a water texel (the shader mirrors the sky in it)
 const PREVIEW = process.argv.includes("--preview");
-const ONLY = (() => { const i = process.argv.indexOf("--track"); return i >= 0 ? process.argv[i + 1] : null; })();
+const ONLY = option("--track");
+const INPUT = option("--file");
+if (ONLY && INPUT) throw new Error("choose --track or --file");
 
-// A stadium: two straights joined by half circles, sampled as control
-// points for the spline (the same machinery as any other track). It runs
-// east along the bottom straight (y down), so it goes anticlockwise on the
-// map and its bends are left turns.
-function stadium(cx, cy, straight, radius, n) {
-  const pts = [];
-  const per = Math.PI * radius;
-  const total = 2 * straight + 2 * per;
-  for (let k = 0; k < n; k++) {
-    let s = (k / n) * total;
-    if (s < straight) { pts.push([cx - straight / 2 + s, cy + radius]); continue; }
-    s -= straight;
-    if (s < per) { const a = Math.PI / 2 - s / radius; pts.push([cx + straight / 2 + radius * Math.cos(a), cy + radius * Math.sin(a)]); continue; }
-    s -= per;
-    if (s < straight) { pts.push([cx + straight / 2 - s, cy - radius]); continue; }
-    s -= straight;
-    const a = -Math.PI / 2 - s / radius;
-    pts.push([cx - straight / 2 + radius * Math.cos(a), cy + radius * Math.sin(a)]);
-  }
-  return pts;
-}
-
-const TRACKS = {
-  // the test track: wide and gentle, two straights and two long bends
-  oval: {
-    hw: 92,
-    control: stadium(2048, 2048, 1900, 740, 40),
-    boost: [[0.10, -0.5, 0.1], [0.58, -0.1, 0.5]],
-    repair: [0.86, 0.98, -1.0, -0.45],
-    // ICE: a glitch patch on the top straight's left half (there is room to dodge it)
-    ice: [[0.60, 0.645, -0.95, -0.05]],
-    puddles: 60,
-  },
-  // the first track, widened: curves of every tightness and the hairpin
-  loop: {
-    hw: 78,
-    control: [
-      [700, 3560], [1500, 3580], [2300, 3560], [2950, 3480],
-      [3420, 3200], [3620, 2720], [3560, 2250],          // long right-hander, north
-      [3220, 1960], [3320, 1560], [3660, 1180],          // the S
-      [3640, 640], [3260, 380], [2780, 470],             // sweeping left over the top
-      [2520, 820], [2440, 1350], [2330, 1720],           // south toward the hairpin
-      [2120, 1860], [1920, 1720], [1880, 1350],          // the hairpin
-      [1860, 900], [1640, 540], [1180, 420],             // back north, then west
-      [720, 560], [470, 1000], [560, 1520],              // down the west side
-      [940, 1830], [1060, 2240], [760, 2620],            // the chicane
-      [440, 2980], [430, 3360],                          // the last bend onto the straight
-    ],
-    boost: [[0.050, -0.55, 0.05], [0.205, -0.10, 0.55], [0.560, -0.30, 0.30], [0.760, 0.00, 0.60]],
-    repair: [0.905, 0.985, -1.0, -0.42],
-    ice: [[0.33, 0.355, 0.0, 0.9], [0.70, 0.725, -0.9, 0.0]],
-    puddles: 70,
-  },
-};
-
-// ---- the spline -------------------------------------------------------------------------
-
-// Centripetal Catmull-Rom, closed.
-function catmull(p0, p1, p2, p3, t) {
-  const d = (a, b) => Math.pow(Math.hypot(b[0] - a[0], b[1] - a[1]), 0.5) || 1e-6;
-  const t0 = 0, t1 = t0 + d(p0, p1), t2 = t1 + d(p1, p2), t3 = t2 + d(p2, p3);
-  const u = t1 + (t2 - t1) * t;
-  const lerp = (a, b, ta, tb) => [0, 1].map((k) => ((tb - u) * a[k] + (u - ta) * b[k]) / (tb - ta));
-  const a1 = lerp(p0, p1, t0, t1), a2 = lerp(p1, p2, t1, t2), a3 = lerp(p2, p3, t2, t3);
-  const b1 = lerp(a1, a2, t0, t2), b2 = lerp(a2, a3, t1, t3);
-  return lerp(b1, b2, t1, t2);
-}
-
-// Resample at exactly STEP texels of arc (the last gap is whatever closes
-// the loop, within STEP).
-function resample(pts) {
-  const out = [pts[0]];
-  let carry = 0;
-  for (let i = 0; i < pts.length; i++) {
-    const a = pts[i], b = pts[(i + 1) % pts.length];
-    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    let s = STEP - carry;
-    while (s <= len) {
-      const t = s / len;
-      out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
-      s += STEP;
-    }
-    carry = len - (s - STEP);
-  }
-  const last = out[out.length - 1];
-  if (Math.hypot(last[0] - out[0][0], last[1] - out[0][1]) < STEP * 0.5) out.pop();
-  return out;
-}
+// Track sources live in tracks/; retired layouts remain regression fixtures.
+const TRACKS = Object.fromEntries(
+  (INPUT ? [path.resolve(INPUT)] : fs.readdirSync(path.join(SOURCE_ROOT, "tracks"))
+    .filter(file => file.endsWith(".json")).sort().map(file => path.join(SOURCE_ROOT, "tracks", file)))
+    .map(file => {
+      const source = loadTrack(file);
+      return [source.id, { ...trackDefinition(source, SEED), source }];
+    })
+);
 
 function build(name, def) {
-  const HW = def.hw;
-  const n = def.control.length;
-  const dense = [];
-  for (let i = 0; i < n; i++) {
-    const p = (k) => def.control[(i + k + n) % n];
-    for (let j = 0; j < 200; j++) dense.push(catmull(p(-1), p(0), p(1), p(2), j / 200));
-  }
-  const P = resample(dense);
-  const N = P.length;
-  const S = [0];
-  for (let i = 1; i <= N; i++) S.push(S[i - 1] + Math.hypot(P[i % N][0] - P[i - 1][0], P[i % N][1] - P[i - 1][1]));
-  const LENGTH = S[N];
-  const TAN = P.map((_, i) => {
-    const a = P[(i - 1 + N) % N], b = P[(i + 1) % N];
-    const l = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    return [(b[0] - a[0]) / l, (b[1] - a[1]) / l];
-  });
-  // curvature: + turning right on the map (clockwise), smoothed; the racing
-  // line sits toward the inside of each bend (+ offset is right of travel)
-  const CURV = P.map((_, i) => { const a = TAN[(i - 1 + N) % N], b = TAN[(i + 1) % N]; return (a[0] * b[1] - a[1] * b[0]) / (2 * STEP); });
-  const smooth = (arr, r) => arr.map((_, i) => { let s = 0; for (let k = -r; k <= r; k++) s += arr[(i + k + N) % N]; return s / (2 * r + 1); });
-  const CURV_S = smooth(smooth(CURV, 12), 12);
-  const LINE = smooth(CURV_S.map((k) => Math.max(-0.62, Math.min(0.62, k * 260))), 20);
+  const { width: WIDTH, height: HEIGHT } = def.world;
+  const MAP_W = WIDTH / TILE, MAP_H = HEIGHT / TILE;
+  const sampled = sampleDefinition(def);
+  const { P, N, S, LENGTH, TAN, CURV_S, LINE, HW } = sampled;
+  const gates = geometryGates(def.source, sampled);
+  const schedule = liveContract(def.source, sampled);
+  const reportDir = path.join(ROOT, "build/track");
+  fs.mkdirSync(reportDir, { recursive: true });
+  const writeReport = () => fs.writeFileSync(path.join(reportDir, `${name}-generated.json`),
+    JSON.stringify({ id: name, seed: def.seed, world: def.world,
+      canvasBytes: WIDTH * HEIGHT * 4, mapTiles: { width: MAP_W, height: MAP_H },
+      memory: { maxRSSKiB: process.resourceUsage().maxRSS, externalBytes: process.memoryUsage().external },
+      selectedLayouts: def.selectedLayouts, liveICE: schedule,
+      draft: DRAFT, gates }, null, 2) + "\n");
+  writeReport();
+  const failed = Object.entries(gates).filter(([, gate]) => !gate.pass).map(([key]) => key);
+  if (failed.length && !DRAFT) throw new Error(`${name}: gates failed: ${failed.join(", ")}; see ${reportDir}`);
 
   // ---- checks: the loop must be drivable --------------------------------------------
   const minR = Math.min(...CURV_S.map((k) => Math.abs(k) > 1e-9 ? 1 / Math.abs(k) : 1e9));
@@ -165,7 +103,7 @@ function build(name, def) {
     const d = Math.hypot(P[i][0] - P[j][0], P[i][1] - P[j][1]);
     if (d < clear) throw new Error(`${name}: samples ${i} and ${j} are ${d.toFixed(0)} apart (< ${clear})`);
   }
-  for (const [x, y] of P) if (x < HW + 200 || y < HW + 200 || x > WORLD - HW - 200 || y > WORLD - HW - 200)
+  for (const [x, y] of P) if (x < HW + 200 || y < HW + 200 || x > WIDTH - HW - 200 || y > HEIGHT - HW - 200)
     throw new Error(`${name}: the track leaves the world at ${x.toFixed(0)},${y.toFixed(0)}`);
   console.log(`${name}: ${N} samples, length ${LENGTH.toFixed(0)}, half-width ${HW}, tightest radius ${minR.toFixed(0)}`);
 
@@ -179,17 +117,17 @@ function build(name, def) {
   const inZone = (z, s, u) => { let ds = s - z[0]; if (ds < 0) ds += LENGTH; return ds <= z[1] - z[0] && u >= z[2] && u <= z[3]; };
 
   // ---- the nearest sample, fast ---------------------------------------------------------
-  const CELL = 128, GRID = WORLD / CELL;
-  const buckets = Array.from({ length: GRID * GRID }, () => []);
+  const CELL = 128, GRID_W = Math.ceil(WIDTH / CELL), GRID_H = Math.ceil(HEIGHT / CELL);
+  const buckets = Array.from({ length: GRID_W * GRID_H }, () => []);
   for (let i = 0; i < N; i++) {
     const gx = Math.floor(P[i][0] / CELL), gy = Math.floor(P[i][1] / CELL);
     for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
       const x = gx + dx, y = gy + dy;
-      if (x >= 0 && y >= 0 && x < GRID && y < GRID) buckets[y * GRID + x].push(i);
+      if (x >= 0 && y >= 0 && x < GRID_W && y < GRID_H) buckets[y * GRID_W + x].push(i);
     }
   }
   function locate(x, y) {
-    const b = buckets[Math.floor(y / CELL) * GRID + Math.floor(x / CELL)];
+    const b = buckets[Math.floor(y / CELL) * GRID_W + Math.floor(x / CELL)];
     if (!b || b.length === 0) return null;
     let best = -1, bd = Infinity;
     for (const i of b) { const d = (P[i][0] - x) ** 2 + (P[i][1] - y) ** 2; if (d < bd) { bd = d; best = i; } }
@@ -205,12 +143,45 @@ function build(name, def) {
     return res;
   }
 
+  // ---- water (the district look): areas of the floor, a row at a time ------------------
+  // Each area fills spans between its scanline crossings; "outside" is the
+  // complement of the closed centreline's own spans. A texel is water when an
+  // area covers it and it is at least the apron's width beyond the run-off.
+  const DOCKS = def.district === "docklands";
+  const areas = def.water.map((a) => a.region === "outside" ? { outside: true, poly: P } : { poly: a.polygon });
+  const rowMask = new Uint8Array(WIDTH);
+  function waterRow(y) {
+    rowMask.fill(0);
+    const yc = y + 0.5;
+    for (const a of areas) {
+      const xs = [], q = a.poly;
+      for (let i = 0; i < q.length; i++) {
+        const [x0, y0] = q[i], [x1, y1] = q[(i + 1) % q.length];
+        if ((y0 <= yc) !== (y1 <= yc)) xs.push(x0 + (yc - y0) / (y1 - y0) * (x1 - x0));
+      }
+      xs.sort((p, r) => p - r);
+      const fill = (from, to) => { for (let x = Math.max(0, Math.ceil(from - 0.5)); x < Math.min(WIDTH, Math.ceil(to - 0.5)); x++) rowMask[x] = 1; };
+      if (a.outside) {
+        let prev = 0;
+        for (let k = 0; k + 1 < xs.length; k += 2) { fill(prev, xs[k]); prev = xs[k + 1]; }
+        fill(prev, WIDTH);
+      } else for (let k = 0; k + 1 < xs.length; k += 2) fill(xs[k], xs[k + 1]);
+    }
+  }
+  const isWater = new Uint8Array(WIDTH * HEIGHT);
+  // the water's own texture: deep water with world-aligned ripple dashes
+  // (period 32, so open water deduplicates to one tile); the shader adds the
+  // mirrored sky over it
+  const waterTex = (x, y) => ((y & 7) === 0 && ((x + (y >> 3) * 11) & 31) < 9) ? DOCK.HARBOUR : DOCK.HARBOUR_DEEP;
+  // the apron: dark concrete slabs, world-aligned
+  const apron = (x, y) => ((x & 31) === 0 || (y & 31) === 0) ? C.BAR_B : (bayerOn(0.2, x, y) ? C.SLATE : C.BAR_A);
+
   // ---- paint ---------------------------------------------------------------------------
-  const world = new Canvas(WORLD, WORLD);
+  const world = new Canvas(WIDTH, HEIGHT);
   const R = rng(7);
   const PUDDLES = [];
   while (PUDDLES.length < def.puddles) {
-    const x = 150 + R() * (WORLD - 300), y = 150 + R() * (WORLD - 300);
+    const x = 150 + R() * (WIDTH - 300), y = 150 + R() * (HEIGHT - 300);
     const l = locate(x, y);
     if (l && Math.abs(l.d) < HW + BARRIER + 90) continue;
     PUDDLES.push({ x, y, rx: 26 + R() * 46, ry: 10 + R() * 18, hue: R() < 0.5 ? "pink" : "cyan" });
@@ -226,7 +197,8 @@ function build(name, def) {
     for (const p of PUDDLES) {
       const e = ((x - p.x) / p.rx) ** 2 + ((y - p.y) / p.ry) ** 2;
       if (e < 1) {
-        const glow = p.hue === "pink" ? [C.PLUM, C.PLUM_MID, C.HIGHLIGHT] : [C.TEAL_DARK, C.TEAL, C.SELECTED];
+        const glow = p.hue === "pink" ? [C.PLUM, C.PLUM_MID, C.HIGHLIGHT]
+          : DOCKS ? [C.WIRE_DARK, DOCK.REFLECT_COLD, C.COLD] : [C.TEAL_DARK, C.TEAL, C.SELECTED];
         const streak = ((y + Math.floor(x / 9)) % 5 === 0) && ((x * 7 + y * 3) % 11 < 6);
         const v = (1 - e) * 0.9;
         c = streak ? ramp(glow, v + 0.25, x, y) : ramp([C.BG, glow[0]], v, x, y);
@@ -234,6 +206,13 @@ function build(name, def) {
       }
     }
     return c;
+  }
+  // off the road: water, a quay's apron, or the floor; l is locate's answer
+  function ground(x, y, l) {
+    if (!rowMask[x]) return floor(x, y);
+    if (l && Math.abs(l.d) < HW + BARRIER + RUNOFF + APRON) return apron(x, y);
+    isWater[y * WIDTH + x] = 1;
+    return waterTex(x, y);
   }
   function road(x, y) {
     // world-aligned 64-texel plates in two close tones, chequered, with a
@@ -243,14 +222,20 @@ function build(name, def) {
     if (px === 1 || py === 1) return C.STATIC_B;
     if ((px === 5 || px === 59) && (py === 5 || py === 59)) return C.SLATE_MID;
     const odd = ((x >> 6) + (y >> 6)) & 1;
-    return bayerOn(0.28, x, y) ? (odd ? C.SIDE_DARK : C.SLATE) : (odd ? C.SLATE : C.SIDE_DARK);
+    const dark = DOCKS ? DOCK.WET_ASPHALT : C.SIDE_DARK;
+    return bayerOn(0.28, x, y) ? (odd ? dark : C.SLATE) : (odd ? C.SLATE : dark);
   }
   const jitter = (x, y) => (BAYER4[((y & 3) << 2) | (x & 3)] + 0.5) / 16 - 0.5;
 
-  for (let y = 0; y < WORLD; y++) {
-    for (let x = 0; x < WORLD; x++) {
+  for (let y = 0; y < HEIGHT; y++) {
+    waterRow(y);
+    for (let x = 0; x < WIDTH; x++) {
       const l = locate(x + 0.5, y + 0.5);
-      if (!l || Math.abs(l.d) > HW + BARRIER + RUNOFF + 2) { world.set(x, y, floor(x, y)); continue; }
+      if (!l || Math.abs(l.d) > HW + BARRIER + RUNOFF + 2) {
+        const c = ground(x, y, l);
+        world.set(x, y, c, isWater[y * WIDTH + x] ? 255 - WATER : 255);
+        continue;
+      }
       const s = l.s, u = l.d / HW;
       // the distance that picks the band, dithered: smooth edges in palette colours
       const ad = Math.abs(l.d) + jitter(x, y);
@@ -299,16 +284,31 @@ function build(name, def) {
         if (k >= 2 && k < 10) code = 1 + (Math.floor(s / 24) % 16) + (l.d < 0 ? 0 : 16);
       } else {
         const v = (ad - HW - BARRIER) / RUNOFF;
-        c = bayerOn(v, x, y) ? floor(x, y) : C.BAR_A;
+        c = bayerOn(v, x, y) ? ground(x, y, l) : C.BAR_A;
       }
       world.set(x, y, c, 255 - code);
     }
   }
-  world.checkPalette(name);
+  // the quay's lip: the two water texels next to land, a lit concrete edge
+  // and its shadow (left as water, so the sky still shows in it, darker)
+  let waterTexels = 0;
+  for (let y = 0; y < HEIGHT; y++) for (let x = 0; x < WIDTH; x++) {
+    if (!isWater[y * WIDTH + x]) continue;
+    waterTexels++;
+    let near = 3;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) for (let k = 1; k <= 2; k++) {
+      const xx = x + dx * k, yy = y + dy * k;
+      if (xx >= 0 && yy >= 0 && xx < WIDTH && yy < HEIGHT && !isWater[yy * WIDTH + xx]) near = Math.min(near, k);
+    }
+    if (near === 1) world.set(x, y, C.SLATE_MID, 255);
+    else if (near === 2) world.set(x, y, C.BG, 255 - WATER);
+  }
+  if (def.water.length) console.log(`${name}: ${waterTexels} water texels (${(100 * waterTexels / (WIDTH * HEIGHT)).toFixed(1)}% of the world)`);
+  world.checkPalette(name, DOCKS ? DOCKLANDS : EMBERS);
 
   // ---- tiles ------------------------------------------------------------------------------
   const tiles = new Map(), order = [];
-  const index = new Uint16Array(MAP * MAP);
+  const index = new Uint16Array(MAP_W * MAP_H);
   const keyOf = (cv, ox, oy, w) => {
     const rows = [];
     for (let j = 0; j < TILE; j++) rows.push(Buffer.from(cv.px.buffer, ((oy + j) * w + ox) * 4, TILE * 4).toString("base64"));
@@ -316,38 +316,56 @@ function build(name, def) {
   };
   // tile 0: the plain floor (the shader draws it beyond the map's edge)
   const plain = new Canvas(TILE, TILE);
-  for (let j = 0; j < TILE; j++) for (let i = 0; i < TILE; i++)
-    plain.set(i, j, i === 0 || j === 0 ? C.TEAL_DARK : i === 16 && j === 16 ? C.BAR_C : C.BG);
+  for (let j = 0; j < TILE; j++) for (let i = 0; i < TILE; i++) {
+    if (def.beyond === "water") plain.set(i, j, waterTex(i, j), 255 - WATER);
+    else plain.set(i, j, i === 0 || j === 0 ? C.TEAL_DARK : i === 16 && j === 16 ? C.BAR_C : C.BG);
+  }
   tiles.set(keyOf(plain, 0, 0, TILE), 0); order.push({ canvas: plain });
-  for (let ty = 0; ty < MAP; ty++) for (let tx = 0; tx < MAP; tx++) {
-    const key = keyOf(world, tx * TILE, ty * TILE, WORLD);
+  for (let ty = 0; ty < MAP_H; ty++) for (let tx = 0; tx < MAP_W; tx++) {
+    const key = keyOf(world, tx * TILE, ty * TILE, WIDTH);
     let id = tiles.get(key);
     if (id === undefined) { id = order.length; tiles.set(key, id); order.push({ tx, ty }); }
-    index[ty * MAP + tx] = id;
+    index[ty * MAP_W + tx] = id;
   }
   const PER_ROW = 64, ROWS = Math.ceil(order.length / PER_ROW);
+  gates.tiles = tileGate(order.length);
+  writeReport();
+  if (!gates.tiles.pass) throw new Error(`${name}: ${order.length} unique tiles exceed the 4096 tile budget`);
   if (ROWS * TILE > 2048) throw new Error(`${name}: ${order.length} tiles need an atlas ${ROWS * TILE} tall, over WebGL2's guaranteed 2048`);
-  const atlas = new Canvas(PER_ROW * TILE, ROWS * TILE), avg = new Canvas(PER_ROW, ROWS);
+  const atlas = new Canvas(PER_ROW * TILE, ROWS * TILE), avg = new Canvas(PER_ROW * MIP_CELL[0], ROWS * MIP_CELL[1]);
   order.forEach((t, id) => {
     const ax = (id % PER_ROW) * TILE, ay = Math.floor(id / PER_ROW) * TILE;
-    let r = 0, g = 0, b = 0;
+    const tilePx = [];
     for (let j = 0; j < TILE; j++) for (let i = 0; i < TILE; i++) {
       const p = t.canvas ? t.canvas.get(i, j) : world.get(t.tx * TILE + i, t.ty * TILE + j);
-      atlas.set(ax + i, ay + j, p.slice(0, 3), p[3]); r += p[0]; g += p[1]; b += p[2];
+      atlas.set(ax + i, ay + j, p.slice(0, 3), p[3]); tilePx.push(p);
     }
-    avg.set(id % PER_ROW, Math.floor(id / PER_ROW), [Math.round(r / 1024), Math.round(g / 1024), Math.round(b / 1024)]);
+    // the tile's mip levels 1 to 5, each texel the rounded mean of its
+    // 2^L x 2^L block of the tile itself (not of the rounded level above),
+    // so level 5 is exactly the tile's average as 0.1 wrote it
+    const cx = (id % PER_ROW) * MIP_CELL[0], cy = Math.floor(id / PER_ROW) * MIP_CELL[1];
+    for (let L = 1; L <= 5; L++) {
+      const s = 1 << L, n = TILE >> L, [ox, oy] = MIP_OFFSETS[L];
+      for (let v = 0; v < n; v++) for (let u = 0; u < n; u++) {
+        let r = 0, g = 0, b = 0;
+        for (let j = 0; j < s; j++) for (let i = 0; i < s; i++) {
+          const p = tilePx[(v * s + j) * TILE + u * s + i]; r += p[0]; g += p[1]; b += p[2];
+        }
+        avg.set(cx + ox + u, cy + oy + v, [Math.round(r / (s * s)), Math.round(g / (s * s)), Math.round(b / (s * s))]);
+      }
+    }
   });
-  const map = new Canvas(MAP, MAP);
-  for (let k = 0; k < MAP * MAP; k++) map.set(k % MAP, Math.floor(k / MAP), [index[k] & 255, index[k] >> 8, 0]);
+  const map = new Canvas(MAP_W, MAP_H);
+  for (let k = 0; k < MAP_W * MAP_H; k++) map.set(k % MAP_W, Math.floor(k / MAP_W), [index[k] & 255, index[k] >> 8, 0]);
   fs.mkdirSync(path.join(ROOT, "assets/signal"), { recursive: true });
   atlas.save(path.join(ROOT, `assets/signal/${name}-atlas.png`));
   map.save(path.join(ROOT, `assets/signal/${name}-map.png`));
   avg.save(path.join(ROOT, `assets/signal/${name}-avg.png`));
-  console.log(`${name}: ${order.length} unique tiles of ${MAP * MAP} (atlas ${atlas.w}x${atlas.h})`);
+  console.log(`${name}: ${order.length} unique tiles of ${MAP_W}x${MAP_H} (atlas ${atlas.w}x${atlas.h})`);
 
   if (PREVIEW) {
     fs.mkdirSync(path.join(ROOT, "docs"), { recursive: true });
-    const k = 8, pv = new Canvas(WORLD / k, WORLD / k);
+    const k = 8, pv = new Canvas(WIDTH / k, HEIGHT / k);
     for (let y = 0; y < pv.h; y++) for (let x = 0; x < pv.w; x++) pv.set(x, y, world.get(x * k + 3, y * k + 3).slice(0, 3));
     for (let i = 0; i < N; i++) {
       const rx = -TAN[i][1], ry = TAN[i][0];
@@ -377,7 +395,6 @@ function build(name, def) {
 ;;; half-width. Its textures are assets/signal/${name}-{atlas,map,avg}.png.
 
 (define-library (signal track ${name}-data)
-  (import (sigil core))
   (export ${name}-track-data)
   (begin
     (define CHUNKS
@@ -395,15 +412,17 @@ ${body}        ))
                     (vector-set! v (+ k i) (vector-ref c i))
                     (copy (+ i 1))))
                 (loop (cdr cs) (+ k (vector-length c))))))))
-    ;; (name samples step boost repair ice)
+    ;; (name samples step boost repair ice world-width world-height district schedule)
     (define (${name}-track-data)
       (list '${name} (join CHUNKS) ${f(STEP)}
             '(${ZONES.boost.map(zone).join(" ")})
             '(${ZONES.repair.map(zone).join(" ")})
-            '(${ZONES.ice.map(zone).join(" ")})))))
+            '(${ZONES.ice.map(zone).join(" ")}) ${WIDTH} ${HEIGHT} '${def.district}
+            '${sigilData(contractList(schedule))}))))
 `;
   fs.mkdirSync(path.join(ROOT, "src/signal/track"), { recursive: true });
   fs.writeFileSync(path.join(ROOT, `src/signal/track/${name}-data.sgl`), src);
+  writeReport();
 }
 
 // 3x5 hex digits stamped along the repair lane, read along the direction of travel.
@@ -418,4 +437,5 @@ function glyph(zs, lane) {
   return digit[(4 - gy) * 3 + (2 - gx)] === "1";
 }
 
+if (ONLY && !TRACKS[ONLY]) throw new Error(`unknown track ${ONLY}`);
 for (const [name, def] of Object.entries(TRACKS)) if (!ONLY || ONLY === name) build(name, def);

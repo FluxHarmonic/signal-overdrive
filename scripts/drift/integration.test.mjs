@@ -33,7 +33,7 @@ const drums = Float32Array.from({ length: frames }, (_, i) => {
 });
 
 const marks = ["grid", "lap1", "lap2", "hold", "fill", "traced", "uplink", "results"];
-function fixture(arm, offset, clockRate = 1, referenceRate = RATE, source = wave, noisyFrom = null, noisyTo = null, delayFrom = null, delay = 0) {
+function fixture(arm, offset, clockRate = 1, referenceRate = RATE, source = wave, noisyFrom = null, noisyTo = null, delayFrom = null, delay = 0, opts = {}) {
   const run = path.join(root, arm); fs.mkdirSync(run);
   let rendered = reference;
   if (referenceRate !== RATE) {
@@ -43,8 +43,10 @@ function fixture(arm, offset, clockRate = 1, referenceRate = RATE, source = wave
       const value = wave[a] * (1 - fraction) + wave[Math.min(a + 1, frames - 1)] * fraction;
       rendered.writeFloatLE(value, i * 8); rendered.writeFloatLE(value, i * 8 + 4);
     }
-    fs.writeFileSync(path.join(run, "meta.json"), JSON.stringify({ reference_sample_rate: referenceRate }));
   }
+  // opts.meta adds fields to the run's meta.json (music_only: false is a full-mix capture).
+  if (referenceRate !== RATE || opts.meta)
+    fs.writeFileSync(path.join(run, "meta.json"), JSON.stringify({ ...(referenceRate !== RATE ? { reference_sample_rate: referenceRate } : {}), ...opts.meta }));
   if (source !== wave) {
     rendered = Buffer.alloc(frames * 8);
     for (let i = 0; i < frames; i++) { rendered.writeFloatLE(source[i], i * 8); rendered.writeFloatLE(source[i], i * 8 + 4); }
@@ -55,14 +57,19 @@ function fixture(arm, offset, clockRate = 1, referenceRate = RATE, source = wave
   let blockGain = 1;
   for (let i = 0; i < frames; i++) {
     // After delayFrom s of song, everything is heard delay frames later.
+    // Before opts.gapUntil s, everything is heard opts.gap frames late
+    // (a race start whose audio began late, until a resync closes it).
     const from = arm === "wrong-material" ? (i + Math.round(RATE * 12 / 7)) % frames
-      : delayFrom !== null && i >= delayFrom * RATE ? Math.max(0, i - delay) : i;
+      : delayFrom !== null && i >= delayFrom * RATE ? Math.max(0, i - delay)
+      : opts.gapUntil !== undefined && i < opts.gapUntil * RATE ? Math.max(0, i - opts.gap) : i;
+    // Over [opts.garbleFrom, opts.garbleTo) s, the capture holds unrelated noise.
+    const garbled = opts.garbleFrom !== undefined && i >= opts.garbleFrom * RATE && i < opts.garbleTo * RATE;
     // Noise in 64-sample blocks over [noisyFrom, noisyTo) s of song, so it
     // survives the 16-sample envelope: the true lag there scores under a
     // clean copy of the same bar elsewhere.
     const noisy = noisyFrom !== null && i >= noisyFrom * RATE && i < noisyTo * RATE;
     if (noisy && i % 64 === 0) blockGain = 1 + 0.6 * (random() - 0.5);
-    const sample = arm === "wrong-material" ? wave[from] : source[from] * (noisy ? blockGain : 1);
+    const sample = garbled ? (random() - 0.5) * 0.8 : arm === "wrong-material" ? wave[from] : source[from] * (noisy ? blockGain : 1);
     const value = Math.max(-32768, Math.min(32767, Math.round(sample * 32767)));
     capture.writeInt16LE(value, (i + lead) * 4);
     capture.writeInt16LE(value, (i + lead) * 4 + 2);
@@ -104,10 +111,39 @@ try {
   assert.ok(beatLate.p95_ms > 400, JSON.stringify({ p95: beatLate.p95_ms }));
   const drumsOnTime = fixture("drums", 0.007, 1, RATE, drums);
   assert.ok(drumsOnTime.pass, JSON.stringify({ p95: drumsOnTime.p95_ms, coverage: drumsOnTime.coverage }));
+  // A late race start: heard 590 ms late until a resync at 4.8 s. The
+  // capture is RED for the lock, and the late windows score the true lag.
+  const lateStart = fixture("late-start", 0.007, 1, RATE, wave, null, null, null, 0, { gapUntil: 4.8, gap: Math.round(0.59 * RATE) });
+  assert.ok(!lateStart.pass);
+  assert.ok(lateStart.lock_failure, JSON.stringify({ acquisition: lateStart.acquisition, lock: lateStart.lock_failure }));
+  assert.ok(lateStart.worst_ms > 560 && lateStart.worst_ms < 620, JSON.stringify({ worst: lateStart.worst_ms }));
+  // The same late start as a full-mix companion: its acquisition (under
+  // 0.8, over 0.5) is not a lost lock, since the floor judges music-only
+  // captures only.
+  const lateMix = fixture("late-start-mix", 0.007, 1, RATE, wave, null, null, null, 0, { gapUntil: 4.8, gap: Math.round(0.59 * RATE), meta: { music_only: false } });
+  assert.ok(lateMix.acquisition.norm > 0.5 && lateMix.acquisition.norm < 0.8, JSON.stringify(lateMix.acquisition));
+  assert.doesNotMatch(lateMix.lock_failure ?? "", /acquisition/);
+  // Unrelated material for 3 s mid-race: windows there cannot be aligned,
+  // and three in a row is a lost lock, RED, not windows dropped.
+  const garbled = fixture("garbled", 0.007, 1, RATE, wave, null, null, null, 0, { garbleFrom: 14, garbleTo: 17 });
+  assert.ok(!garbled.pass);
+  assert.match(garbled.lock_failure ?? "", /consecutive windows under 0.5/);
+  assert.ok(garbled.worst_ms < 20, JSON.stringify({ worst: garbled.worst_ms }));
+  // A shorter stretch (1.6 s) leaves exactly 3 windows under 0.5: a lost
+  // lock in a music-only capture, but in the full mix, where the engine
+  // masks the music by design, a weak run that is reported and not RED.
+  const shortGarble = { garbleFrom: 14, garbleTo: 15.6 };
+  const weakRun = fixture("weak-run", 0.007, 1, RATE, wave, null, null, null, 0, shortGarble);
+  assert.ok(!weakRun.pass);
+  assert.match(weakRun.lock_failure ?? "", /3 consecutive windows under 0.5/);
+  const weakRunMix = fixture("weak-run-mix", 0.007, 1, RATE, wave, null, null, null, 0, { ...shortGarble, meta: { music_only: false } });
+  assert.equal(weakRunMix.longest_unmatched_run, 3);
+  assert.equal(weakRunMix.lock_failure, null);
+  assert.ok(weakRunMix.pass, JSON.stringify({ coverage: weakRunMix.coverage, worst: weakRunMix.worst_ms, reason: weakRunMix.reason }));
   const skew = fixture("skew", 0, 1.01);
   assert.ok(!skew.pass);
   assert.ok(skew.p95_ms > 100);
   console.log(JSON.stringify({ normal: { p95: normal.p95_ms, worst: normal.worst_ms, coverage: normal.coverage }, count_in_p95: countInRun.p95_ms,
-    depth_p95: depth.p95_ms, wrong_material_p95: wrong.p95_ms, skew_p95: skew.p95_ms }));
-  console.log("Synthetic PCM and dated-clock integration: normal, count-in and on-time drums GREEN; depth, wrong material, skew and a beat lost mid-race RED");
+    depth_p95: depth.p95_ms, wrong_material_p95: wrong.p95_ms, skew_p95: skew.p95_ms, late_start_worst: lateStart.worst_ms, late_start_lock: lateStart.lock_failure, late_start_mix_lock: lateMix.lock_failure, garbled_lock: garbled.lock_failure, weak_run_lock: weakRun.lock_failure, weak_run_mix: { pass: weakRunMix.pass, run: weakRunMix.longest_unmatched_run } }));
+  console.log("Synthetic PCM and dated-clock integration: normal, count-in and on-time drums GREEN; depth, wrong material, skew, a beat lost mid-race, a late start (at its true lag) and a lost lock RED; a full-mix weak run reported, not RED");
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

@@ -1,0 +1,425 @@
+;;; (song uplink) - "Uplink": the round-1 sketch grown into an area track
+;;;
+;;; The slow burn. Carrier's call at half speed, darkened (its hopeful B
+;;; natural is B-flat, over G minor, then E-flat), in Carrier's own hollow
+;;; lead; the main theme's overdriven lead answers. In the chorus and the
+;;; drop the overdriven lead takes the call itself and the B natural comes
+;;; back over G major. Written for a district under the highways: half-time
+;;; drums and a Reese bass (two detuned, driven saws) in the verse and the
+;;; breakdown; Carrier's own groove, 16th grit bass and arp when the call
+;;; turns hopeful.
+;;;
+;;; Its melody: the call (four bars at half speed), then the answer (three
+;;; bars, falling in steps to the leading tone, C sharp). The D that would
+;;; resolve it is withheld until the uplink, as Carrier's is (P13): every
+;;; answer is followed by a bar with no D in the lead.
+;;;
+;;;   mark     bars  loops     chords                          here
+;;;   calm      8    all 8     Bb Gm Eb Eb | Bb C Dm A         pad, Reese, the dark call far off
+;;;   grid      4    -         Dm Dm Dm A                      the carrier tone, the count-in
+;;;   lap1     16    9 to 16   Bb Gm Eb Eb | Bb C Dm|A A  x2   half time: the dark call, the answer
+;;;   lap2      8    all 8     Bb C Dm|A A | Bb G Eb Eb        Carrier's groove: the answer, then the hopeful call
+;;;   hold      7    bar 7     Eb Eb Bb Bb Gm A, A             half time again, the call's head; riser
+;;;   fill      2    -         A A                             the snare roll, the bass climbing to D
+;;;   traced   16    9 to 16   Bb G Eb Eb | Bb C Dm|A Eb  x2   the drop: Gibson takes the empty bar
+;;;   uplink    8    -         Bb G Eb Eb | Bb C Dm|A Dm       the melody whole, landing on D
+;;;   results   8    all 8     Bb Gm Eb Eb | Bb C Dm A         the groove without the lead
+;;;
+;;;   (uplink-text) (uplink-cues-text) UPLINK-SECTIONS
+
+(define-library (song uplink)
+  (import (sigil core) (sigil string) (sigil list)
+          (theme notation)
+          (only (theme sketches) line)
+          (song kit))
+  (export uplink-text uplink-cues-text UPLINK-SECTIONS)
+  (begin
+    (define UPLINK-SECTIONS
+      '((calm 8 (0 . 8) #f) (grid 4 #f lap1) (lap1 16 (8 . 16) #f) (lap2 8 (0 . 8) #f)
+        (hold 7 (6 . 7) #f) (fill 2 #f traced) (traced 16 (8 . 16) #f)
+        (uplink 8 #f results) (results 8 (0 . 8) #f)))
+    (define (start mark) (section-start UPLINK-SECTIONS mark))
+    (define (take-n xs n) (if (or (= n 0) (null? xs)) (quote ()) (cons (car xs) (take-n (cdr xs) (- n 1)))))
+
+    ;; ------------------------------------------------------------
+    ;; Instruments: the race bank, the overdriven lead, the Reese bass
+    ;; ------------------------------------------------------------
+    (define I-HOT 14) (define I-REESE 15)
+    (define SIGNAL-PATCH
+      (string-append
+       "fm4-lead alg: 2 amp-attack: 0.003 amp-decay: 0.45 amp-release: 0.22 amp-sustain: 0.72 chorus-mix: 0 fb: 0.15 index: 1.7"
+       " op1: (1 1 0.002 0.35 0.75 0.15) op2: (2 0.55 0.002 0.3 0.35 0.15) op3: (2 0.35 0.002 0.12 0.2 0.1) op4: (3.5 0.45 0.001 0.04 0 0.05) unison: 1 vel-depth: 0.35"))
+    (define (bank)
+      (race-bank-text
+       (string-append
+        "    (instrument id: 14 name: \"overdrive\" patch: (saw-reese attack: 0.003 decay: 0.3 sustain: 0.85 release: 0.12 cutoff: 3400 resonance: 0.18 drive: 3 spread: 10 index: 0.001 index-motion: 0.0005 motion-rate: 0.3)"
+        " volume: 40 gain: 0.5 send: 0.2 pan: 0 layers: ((" SIGNAL-PATCH " octave: 0 volume: 0.3)))\n"
+        ;; 15: the Reese: two saws 18 cents apart, slowly beating, driven,
+        ;; a resonant low-pass high enough (1.3 kHz) that its movement reads
+        ;; over the engine; a sine an octave under it for weight
+        "    (instrument id: 15 name: \"reese\" patch: (saw-reese attack: 0.006 decay: 0.4 sustain: 0.85 release: 0.1 cutoff: 1300 resonance: 0.3 drive: 0.9 spread: 18 index: 0.002 index-motion: 0.0015 motion-rate: 0.25)"
+        " volume: 40 gain: 0.55 pan: 0 layers: ((chip-sub drive: 0.3 octave: -1 volume: 0.35)))\n")))
+
+    ;; ------------------------------------------------------------
+    ;; The melody. Entries are (bar pos len letter octave vol [bend from-letter
+    ;; from-octave speed]); bars from the phrase's start.
+    ;; ------------------------------------------------------------
+    (define (phrase-bars ch inst at entries)
+      (cat (lambda (e) (line ch inst (+ at (at-bar (car e))) (list (cdr e)))) entries))
+    ;; Carrier's call at half speed (3+3+2 is now 6+6+4), its B flattened
+    (define CALL-DARK
+      '((0 0 6 D 5 44) (0 6 6 A 5 42) (0 12 4 C 6 44) (1 0 12 Bb 5 46) (1 12 4 A 5 40) (2 0 20 G 5 44)))
+    ;; and hopeful: the B natural, bent up into from A
+    (define CALL-HOPE
+      '((0 0 6 D 5 46) (0 6 6 A 5 42) (0 12 4 C 6 44) (1 0 12 B 5 48 bend A 5 4) (1 12 4 A 5 40) (2 0 20 G 5 44)))
+    ;; the answer, in the call's rhythm, falling to the leading tone: its
+    ;; third bar is a cadence bar, F over D minor, then E and C sharp over A
+    (define ANSWER
+      '((0 0 6 F 5 44) (0 6 6 G 5 42) (0 12 4 A 5 44) (1 0 12 G 5 46 bend F 5 4) (1 12 4 E 5 40)
+        (2 0 8 F 5 44) (2 8 4 E 5 42) (2 12 4 Cs 5 42)))
+    (define ANSWER-HIGH
+      '((0 0 6 F 5 44) (0 6 6 G 5 42) (0 12 4 A 5 44) (1 0 12 C 6 46 bend Bb 5 4) (1 12 4 A 5 40)
+        (2 0 8 F 5 44) (2 8 4 E 5 44) (2 12 4 Cs 6 46)))
+
+    (define (dark at vol) (phrase-bars 6 I-LEAD at (map (lambda (e) (append (take-n e 5) (list (+ vol (list-ref e 5))) (list-tail e 6))) CALL-DARK)))
+    (define (hot-line at entries) (phrase-bars 6 I-HOT at entries))
+
+    ;; ------------------------------------------------------------
+    ;; Bass
+    ;; ------------------------------------------------------------
+    ;; the Reese in half time: a long root, the octave on beat 3's "and",
+    ;; a slide back down into the next bar
+    (define (reese-bar at r next-r vol)
+      (append (note 4 at 6 r I-REESE (+ vol 6))
+              (note 4 (+ at 6) 4 r I-REESE (- vol 2))
+              (note 4 (+ at 10) 4 (+ r 12) I-REESE (+ vol 2))
+              (if (= r next-r)
+                  (note 4 (+ at 14) 2 (+ r 7) I-REESE (- vol 2))
+                  (note 4 (+ at 14) 2 (+ next-r (if (> next-r r) -1 1)) I-REESE (- vol 2)))))
+    (define (reese-long at r vol) (note 4 at 16 r I-REESE vol))
+
+    ;; ------------------------------------------------------------
+    ;; Drums
+    ;; ------------------------------------------------------------
+    (define HALF-KICK '((0 46) (10 30)))
+    (define HALF-KICK-PUSH '((0 46) (10 30) (14 34)))
+    (define HALF-SNARE '((8 46)))
+    (define HALF-SNARE-GHOST '((8 46) (11 12) (15 14)))
+    (define EIGHTHS '(0 2 4 6 8 10 12 14))
+    (define (half-time at b)
+      (let ((k (modulo b 4)))
+        (append (kick at (if (= k 3) HALF-KICK-PUSH HALF-KICK))
+                (snare at (if (odd? k) HALF-SNARE-GHOST HALF-SNARE))
+                (ticks-on at EIGHTHS '(0 4 8 12) 24 14))))
+
+    (define KICK-A '((0 46) (6 40) (10 44)))
+    (define KICK-B '((0 46) (3 36) (8 44) (11 40)))
+    (define KICK-PUSH '((0 46) (6 40) (10 44) (13 30) (14 42)))
+    (define BACKBEAT '((4 44) (12 46)))
+    (define SNARE-FILL-LONG '((4 44) (8 26) (10 30) (12 34) (13 36) (14 38) (14.5 40) (15 42) (15.5 46)))
+    (define (carrier-groove at b crash?)
+      (let ((k (modulo b 4)))
+        (append (kick at (cond ((= k 3) KICK-PUSH) ((odd? k) KICK-B) (else KICK-A)))
+                (snare at (cond (crash? '((12 46)))
+                                ((= k 3) (append BACKBEAT '((14 30) (15 36))))
+                                ((odd? k) (append BACKBEAT '((7 14) (9 12))))
+                                (else BACKBEAT)))
+                (ticks-on at (range 16) ACCENTS 30 14))))
+
+    (define (arp-bar at c vol)
+      (let* ((r (midi (car c) 4)) (tones (append (chord-tones c r) (list (+ r 12)))))
+        (cat (lambda (i) (note 7 (+ at i) 0.75 (list-ref tones (modulo i 4)) I-ARP
+                               (if (= 0 (modulo i 4)) (+ vol 4) vol)))
+             (range 16))))
+    (define (arp-sweep at c vol0 vol1 limit)
+      (let* ((r (midi (car c) 4))
+             (tones (append (chord-tones c r) (chord-tones c (+ r 12)) (list (+ r 24)))))
+        (cat (lambda (i)
+               (let ((beat (quotient i 4)) (k (modulo i 4)))
+                 (note 7 (+ at i) 0.75 (list-ref tones (+ beat k)) I-ARP
+                       (+ vol0 (quotient (* (- vol1 vol0) i) 15)))))
+             (range limit))))
+
+    ;; ------------------------------------------------------------
+    ;; Chords. An eight-bar phrase: the call over four, the answer over
+    ;; three (its last a cadence bar, D minor then A), and the bar where the
+    ;; D would be.
+    ;; ------------------------------------------------------------
+    (define DARK '((Bb . M) (G . m) (Eb . M) (Eb . M) (Bb . M) (C . M) (D . m) (A . M)))
+    (define HOPE '((Bb . M) (G . M) (Eb . M) (Eb . M) (Bb . M) (C . M) (D . m) (A . M)))
+    (define (root c) (bass-root (car c)))
+    (define CADENCE-BAR 6)                 ; within the phrase: D minor, then A
+
+    ;; the stab that anticipates the next bar's chord on its last 8th; not
+    ;; into G major, whose B would sit a minor ninth under the call's held C
+    (define (push-stab at next) (if (equal? next '(G . M)) '() (stab at 14 2 next 24)))
+
+    ;; the cadence bar's harmony: pad or stabs D minor, then A
+    (define (cadence-harmony at stabs?)
+      (if stabs?
+          (append (stab at 0 4 '(D . m) 30) (stab at 8 2 '(A . M) 28))
+          (append (pad at 8 '(D . m) 30) (pad (+ at 8) 8 '(A . M) 30))))
+
+    ;; ------------------------------------------------------------
+    ;; calm
+    ;; ------------------------------------------------------------
+    (define (calm-part s)
+      (cat (lambda (b)
+             (let* ((at (at-bar (+ s b))) (c (list-ref DARK b)))
+               (append (pad at 16 c 28)
+                       (reese-long at (root c) 26)
+                       (ticks-on at EIGHTHS '(0 8) 14 6)
+                       (if (even? b) (kick at '((0 30))) '())
+                       (if (= b 0) (dark at -14) '()))))
+           (range 8)))
+
+    ;; ------------------------------------------------------------
+    ;; grid: the carrier tone in the hollow lead, the Reese, the count-in
+    ;; ------------------------------------------------------------
+    (define (grid-part s)
+      (let ((at (lambda (b) (at-bar (+ s b)))) (D2 (midi 'D 2)) (A1 (midi 'A 1)))
+        (append
+         (note 6 (at 0) 32 (midi 'D 5) I-LEAD 30)
+         (pad (at 0) 48 '(D . m) 26)
+         (reese-long (at 0) D2 30) (reese-bar (at 1) D2 D2 32) (reese-bar (at 2) D2 A1 34)
+         (carrier-bass-bar (at 3) A1 D2 38)
+         (ticks-on (at 0) EIGHTHS '(0 8) 18 8) (ticks-on (at 1) EIGHTHS '(0 8) 20 9)
+         (ticks-on (at 2) (range 16) ACCENTS 22 10) (ticks-on (at 3) (range 16) ACCENTS 26 12)
+         (kick (at 2) '((0 38) (10 30)))
+         (kick (at 3) '((0 42) (4 44) (8 46) (12 48)))
+         (snare (at 2) '((8 40)))
+         (snare (at 3) '((4 36) (8 40) (12 44)))
+         (stab (at 3) 4 2 '(A . M) 26) (stab (at 3) 8 2 '(A . M) 28) (stab (at 3) 12 2 '(A . M) 30))))
+
+    ;; ------------------------------------------------------------
+    ;; lap1: half time, 16 bars, the loop is bars 9-16. The dark call in
+    ;; Carrier's hollow lead, the overdriven lead's answer, the empty bar;
+    ;; twice. Bars 1-8 are sparser: no ghost snares, the pad alone.
+    ;; ------------------------------------------------------------
+    (define (lap1-part s)
+      (append
+       (cat (lambda (b)
+              (let* ((at (at-bar (+ s b))) (pb (modulo b 8)) (c (list-ref DARK pb))
+                     (next (list-ref DARK (modulo (+ pb 1) 8))) (second? (>= b 8)))
+                (append
+                 (if (= pb CADENCE-BAR)
+                     (append (half (reese-bar at (root '(D . m)) (root '(A . m)) 36) at #t)
+                             (note 4 (+ at 8) 6 (bass-root 'A) I-REESE 38) (note 4 (+ at 14) 2 (midi 'Cs 2) I-REESE 34)
+                             (cadence-harmony at #f))
+                     (append (reese-bar at (root c) (root next) (if second? 38 34))
+                             (pad at 16 c (if second? 30 28))))
+                 (if second?
+                     (if (= b 15)
+                         (append (kick at HALF-KICK-PUSH) (snare at '((8 46) (12 30) (13 34) (14 38) (15 42)))
+                                 (ticks-on at EIGHTHS '(0 4 8 12) 24 14))
+                         (half-time at b))
+                     (append (kick at (if (= pb 7) HALF-KICK-PUSH HALF-KICK)) (snare at HALF-SNARE)
+                             (ticks-on at EIGHTHS '(0 8) 20 10)))
+                 (if (memv b '(0 8)) (crash at 36) '()))))
+            (range 16))
+       (dark (at-bar s) 0) (hot-line (at-bar (+ s 4)) ANSWER)
+       (dark (at-bar (+ s 8)) 0) (hot-line (at-bar (+ s 12)) ANSWER)))
+
+    ;; ------------------------------------------------------------
+    ;; lap2: Carrier's groove kicks in. The overdriven lead takes the call,
+    ;; with its B natural over G major; the answer an octave higher at its
+    ;; peak; the empty bar; 8 bars, all of them loop.
+    ;; ------------------------------------------------------------
+    ;; The chorus opens on the answer, so a jump from lap1 (whose answers
+    ;; end on C sharp) never lands on the call's D: the answer, the empty
+    ;; bar on A, then the hopeful call, which the loop answers again.
+    (define CHORUS (append (list-tail HOPE 4) (take-n HOPE 4)))
+    (define CHORUS-CADENCE 2)
+    (define (lap2-part s)
+      (append
+       (cat (lambda (b)
+              (let* ((at (at-bar (+ s b))) (c (list-ref CHORUS b)) (next (list-ref CHORUS (modulo (+ b 1) 8))))
+                (append
+                 (if (= b CHORUS-CADENCE)
+                     (append (half (carrier-bass-bar at (root '(D . m)) (root '(A . m)) 40) at #t)
+                             (half (carrier-bass-bar at (root '(A . m)) (root next) 40) at #f)
+                             (cadence-harmony at #t)
+                             (half (arp-bar at '(D . m) 24) at #t) (half (arp-bar at '(A . M) 24) at #f))
+                     (append (carrier-bass-bar at (root c) (root next) 40)
+                             (stab at 0 4 c 30) (stab at 6 2 c 26) (push-stab at next)
+                             ;; the arp enters a bar in: its B-flat chord would put a D
+                             ;; straight after the C sharp of a lap1 answer
+                             (if (= b 0) (quote ()) (arp-bar at c 24))))
+                 (carrier-groove at b (= b 0))
+                 (if (= b 0) (crash at 38) '()))))
+            (range 8))
+       (hot-line (at-bar s) ANSWER-HIGH) (hot-line (at-bar (+ s 4)) CALL-HOPE)))
+
+    ;; ------------------------------------------------------------
+    ;; hold: half time again. A breath, then the call's head (D A C) in the
+    ;; hollow lead, twice, over E-flat and B-flat; the Reese alone at first;
+    ;; the kit returns. Bar 7, the riser, loops until the fill is aimed.
+    ;; ------------------------------------------------------------
+    (define HOLD '((Eb . M) (Eb . M) (Bb . M) (Bb . M) (G . m) (A . M) (A . M)))
+    (define HEAD '((0 0 6 D 5 40) (0 6 6 A 5 38) (0 12 4 C 6 40) (1 0 16 Bb 5 42)))
+
+    (define (hold-part s)
+      (let ((at (lambda (b) (at-bar (+ s b)))))
+        (append
+         (cat (lambda (b)
+                (let ((c (list-ref HOLD b)) (next (list-ref HOLD (+ b 1))))
+                  (append (pad (at b) 16 c 30)
+                          (if (< b 4) (reese-long (at b) (root c) 32) (reese-bar (at b) (root c) (root next) 36))
+                          (cond ((< b 2) (ticks-on (at b) '(0 8) '(0 8) 16 16))
+                                ((< b 4) (ticks-on (at b) EIGHTHS '(0 8) 20 8))
+                                (else (half-time (at b) b)))
+                          (cond ((< b 2) '())
+                                ((< b 4) (kick (at b) '((0 38))))
+                                (else '())))))
+              (range 6))
+         (phrase-bars 6 I-LEAD (at 1) HEAD) (phrase-bars 6 I-LEAD (at 3) HEAD)
+         (riser (at 6)))))
+
+    (define (riser at)
+      (let ((A1 (midi 'A 1)))
+        (append (pad at 16 '(A . M) 30)
+                (carrier-bass-bar at A1 A1 40)
+                (ticks-on at (range 16) ACCENTS 28 14)
+                (kick at '((0 44) (4 40) (8 44) (12 42)))
+                (snare at '((0 22) (2 24) (4 27) (6 29) (8 32) (10 34) (12 37) (13 39) (14 42) (15 45)))
+                (arp-sweep at '(A . M) 22 30 16))))
+
+    ;; ------------------------------------------------------------
+    ;; fill: as Carrier's
+    ;; ------------------------------------------------------------
+    (define (fill-part s)
+      (let ((at0 (at-bar s)) (at1 (at-bar (+ s 1))) (A1 (midi 'A 1)))
+        (append
+         (pad at0 16 '(A . M) 32)
+         (carrier-bass-bar at0 A1 A1 42)
+         (cat (lambda (i) (note 4 (+ at1 i) 1
+                                (list-ref (list A1 (midi 'Bb 1) (midi 'C 2) (midi 'Cs 2)) (quotient i 4))
+                                I-BASS (+ 40 (quotient i 2))))
+              (range 14))
+         (ticks-on at0 (range 16) ACCENTS 30 15) (ticks-on at1 (range 14) ACCENTS 30 15)
+         (kick at0 '((0 46) (4 42) (8 46) (12 44)))
+         (kick at1 '((0 46) (4 44) (8 46) (10 40) (12 46) (13 42)))
+         (snare at0 (map (lambda (i) (list i (+ 26 i))) (range 16)))
+         (cat (lambda (k) (note 2 (+ at1 (* 0.5 k)) 0.5 SNARE-PITCH I-SNARE (+ 32 (quotient (* 20 k) 27))))
+              (range 28))
+         (arp-sweep at0 '(A . M) 26 32 16) (arp-sweep at1 '(A . M) 28 34 14)
+         (chirp at1 14 EB6 26))))
+
+    ;; ------------------------------------------------------------
+    ;; traced: the drop. The hopeful call, the answer up high, and in the
+    ;; bar where the D belongs, E-flat and Gibson's answer. Twice; the loop
+    ;; half opens the offbeats.
+    ;; ------------------------------------------------------------
+    (define TRACED (append (take-n HOPE 7) '((Eb . M))))
+    (define (traced-part s)
+      (append
+       (cat (lambda (b)
+              (let* ((at (at-bar (+ s b))) (pb (modulo b 8)) (c (list-ref TRACED pb))
+                     (next (if (= b 15) '(Bb . M) (list-ref TRACED (modulo (+ pb 1) 8))))
+                     (crash? (memv b '(0 8))) (k (modulo b 4)))
+                (append
+                 (if (= pb CADENCE-BAR)
+                     (append (half (carrier-bass-bar at (root '(D . m)) (root '(A . m)) 42) at #t)
+                             (half (carrier-bass-bar at (root '(A . m)) (root '(Eb . M)) 42) at #f)
+                             (cadence-harmony at #t)
+                             (half (arp-bar at '(D . m) 28) at #t) (half (arp-bar at '(A . M) 28) at #f))
+                     (append (carrier-bass-bar at (root c) (root next) 42)
+                             (stab at 0 4 c 30) (stab at 6 2 c 26) (push-stab at next)
+                             (arp-bar at c 28)))
+                 (if (>= b 8)
+                     (append (kick at (cond ((= k 3) KICK-PUSH) ((odd? k) KICK-B) (else KICK-A)))
+                             (snare at (if crash? '((12 46)) (append BACKBEAT '((15 16)))))
+                             (ticks-on at '(0 1 3 4 5 7 8 9 11 12 13 15) ACCENTS 30 15)
+                             (cat (lambda (p) (open-tick at p 18)) '(2 6 10 14)))
+                     (carrier-groove at b crash?))
+                 (if crash? (crash at 42) '())
+                 ;; Gibson: the tracer finds you, chirps, and takes the empty bar
+                 (cond ((= b 0) (cat (lambda (p) (ice at (car p) 1 EB6 (cdr p))) '((2 . 10) (6 . 14) (10 . 18) (14 . 22))))
+                       ((= pb 3) (append (chirp at 11 EB6 22) (ice at 14 1 D6 20)))
+                       ((= pb 5) (ice at 14 1 EB6 18))
+                       ((= pb 7) (steal at))
+                       (else '())))))
+            (range 16))
+       (hot-line (at-bar s) CALL-HOPE) (hot-line (at-bar (+ s 4)) ANSWER-HIGH)
+       (hot-line (at-bar (+ s 8)) CALL-HOPE) (hot-line (at-bar (+ s 12)) ANSWER-HIGH)))
+
+    ;; ------------------------------------------------------------
+    ;; uplink: the melody whole. The hopeful call, the answer, and the D
+    ;; at last, high, over D minor; Gibson's lock-on cut off as it lands.
+    ;; ------------------------------------------------------------
+    (define UPLINK (append (take-n HOPE 7) '((D . m))))
+    (define (uplink-part s)
+      (append
+       (cat (lambda (b)
+              (let* ((at (at-bar (+ s b))) (c (list-ref UPLINK b)) (next (list-ref UPLINK (min 7 (+ b 1))))
+                     (crash? (memv b '(0 7))))
+                (append
+                 (cond ((= b CADENCE-BAR)
+                        (append (half (carrier-bass-bar at (root '(D . m)) (root '(A . m)) 42) at #t)
+                                (half (carrier-bass-bar at (root '(A . m)) (root '(D . m)) 42 (midi 'Cs 2)) at #f)
+                                (cadence-harmony at #t)))
+                       ((= b 7) (append (note 4 at 8 (bass-root 'D) I-BASS 44) (pad at 16 '(D . m) 32)))
+                       (else (append (carrier-bass-bar at (root c) (root next) 42)
+                                     (stab at 0 4 c 30) (stab at 6 2 c 26) (push-stab at next))))
+                 (if (= b 7)
+                     (append (kick at '((0 46))) (ticks-on at EIGHTHS '(0 8) 24 10))
+                     (carrier-groove at b crash?))
+                 (if crash? (crash at 44) '())
+                 (case b
+                   ((1) (append (chirp at 11 EB6 22) (ice at 14 1 D6 20)))
+                   ((6) (lock-on at))
+                   (else '())))))
+            (range 8))
+       (hot-line (at-bar s) CALL-HOPE) (hot-line (at-bar (+ s 4)) ANSWER-HIGH)
+       (hot-line (at-bar (+ s 7)) '((0 0 16 D 6 48 bend Cs 6 4)))
+       (phrase 7 I-ARP (at-bar (+ s 7)) '((0 1 D 5 30) (1 1 F 5 28) (2 1 A 5 28) (3 13 D 6 30)) 0 0)))
+
+    ;; ------------------------------------------------------------
+    ;; results: the groove without the lead
+    ;; ------------------------------------------------------------
+    (define (results-part s)
+      (cat (lambda (b)
+             (let* ((at (at-bar (+ s b))) (c (list-ref DARK b)) (next (list-ref DARK (modulo (+ b 1) 8))))
+               (append (pad at 16 c 28)
+                       (reese-bar at (root c) (root next) 32)
+                       (ticks-on at EIGHTHS '(0 4 8 12) 22 9)
+                       (kick at HALF-KICK)
+                       (snare at '((8 32))))))
+           (range 8)))
+
+    ;; ------------------------------------------------------------
+    (define (uplink-events)
+      (append (calm-part (start 'calm)) (grid-part (start 'grid)) (lap1-part (start 'lap1))
+              (lap2-part (start 'lap2)) (hold-part (start 'hold)) (fill-part (start 'fill))
+              (traced-part (start 'traced)) (uplink-part (start 'uplink)) (results-part (start 'results))))
+
+    ;; answers end in the phrase's seventh bar (the cadence bar)
+    (define (answer-bars)
+      (append (map (lambda (b) (+ (start 'lap1) b)) '(6 14))
+              (map (lambda (b) (+ (start 'lap2) b)) (list CHORUS-CADENCE))
+              (map (lambda (b) (+ (start 'traced) b)) '(6 14))))
+
+    (define (uplink-text)
+      (let ((events (uplink-events)))
+        (check-p13! UPLINK-SECTIONS events (answer-bars) '(hold lap2))
+        (song-text "Uplink" UPLINK-SECTIONS events (race-bus-text) (bank)
+                   ;; channel 6 sounds as the overdriven lead: the dark call takes its send and pan
+                   (quote voices) (list (cons 6 I-HOT)))))
+
+    (define (cadence chords)
+      (map (lambda (c i) (if (= i CADENCE-BAR) '((D . m) (A . M)) c)) chords (range (length chords))))
+
+    (define (chords-of mark)
+      (case mark
+        ((calm results) DARK)
+        ((grid) '((D . m) (D . m) (D . m) (A . M)))
+        ((lap1) (append (cadence DARK) (cadence DARK)))
+        ((lap2) (map (lambda (c i) (if (= i CHORUS-CADENCE) '((D . m) (A . M)) c)) CHORUS (range 8)))
+        ((hold) HOLD)
+        ((fill) '((A . M) (A . M)))
+        ((traced) (let ((t (cadence TRACED))) (append t t)))
+        ((uplink) (cadence UPLINK))
+        (else (error "uplink: no chords for" mark))))
+
+    (define (uplink-cues-text)
+      (song-cues-text 'uplink UPLINK-SECTIONS chords-of "220.0" "293.664767917"))))

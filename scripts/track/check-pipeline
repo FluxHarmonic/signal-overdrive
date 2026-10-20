@@ -1,0 +1,75 @@
+#!/bin/sh
+# Run on Phantom under the caller's one-CPU/memory/deadline controls.
+set -eu
+cd "$(dirname "$0")/../.."
+track_run="$1"
+mkdir -p "$track_run"
+trap 'track_code=$?; printf "RESULT: pipeline exit %s; inspect STAGE and per-track JSON/status files\n" "$track_code" > "$track_run/RESULT"' EXIT
+track_sigil="$HOME/.sigil/versions/0.22.11/sigil"
+track_root="$(pwd)"
+# Within a project Sigil prepends its implicit src ahead of every -L.
+# Evaluate outside it so the freshly generated modules actually take priority.
+track_eval() (
+  track_script="$1"
+  shift
+  cd "$track_run"
+  exec timeout 180 "$track_sigil" -L "$track_run/art/src" -L "$track_root/src" \
+    eval -f "$track_root/scripts/track/$track_script" -- "$@"
+)
+printf 'gate and sabotage tests\n' > "$track_run/STAGE"
+node --test scripts/track/gates.test.mjs scripts/track/combined-ice.test.mjs scripts/track/schedule.test.mjs > "$track_run/tests.log" 2>&1
+printf 'runtime schedule parity\n' > "$track_run/STAGE"
+node scripts/track/schedule-parity.mjs "$track_run/parity.sgv" > "$track_run/parity-generation.log"
+"$track_sigil" -L src eval -f scripts/track/schedule-parity.sgl -- "$track_run/parity.sgv" > "$track_run/parity.log" 2>&1
+printf 'geometry reports\n' > "$track_run/STAGE"
+track_code=0
+node scripts/track/report.mjs "$track_run/current-gates.json" tracks/oval.json \
+  test/fixtures/tracks/scheduled/quayside.json test/fixtures/tracks/scheduled/basin.json \
+  > "$track_run/current-gates.log" 2>&1 || track_code="$?"
+printf '%s\n' "$track_code" > "$track_run/current-gates-status"
+printf 'song contract and preview\n' > "$track_run/STAGE"
+"$track_sigil" -L src eval -f scripts/track/song-contract.sgl \
+  > "$track_run/song-contract.json" 2> "$track_run/song-contract.log"
+node scripts/track/preview.mjs tracks/oval.json "$track_run/song-contract.json" "$track_run/preview" \
+  > "$track_run/oval-preview.log" 2>&1
+for track_file in tracks/oval.json test/fixtures/tracks/scheduled/quayside.json test/fixtures/tracks/scheduled/basin.json; do
+  track_id="$(basename "$track_file" .json)"
+  printf 'strict paint/atlas gate: %s\n' "$track_id" > "$track_run/STAGE"
+  track_code=0
+  node scripts/art/gen-track.mjs --file "$track_file" --output "$track_run/art" --preview --seed 0 \
+    > "$track_run/$track_id-art.log" 2>&1 || track_code="$?"
+  printf '%s\n' "$track_code" > "$track_run/$track_id-art-status"
+  printf 'AI three-lap probe: %s\n' "$track_id" > "$track_run/STAGE"
+  node scripts/track/runtime.mjs "$track_file" "$track_run/$track_id.sgv" 0
+  track_code=0
+  track_eval ai.sgl "$track_run/$track_id.sgv" \
+    > "$track_run/$track_id-ai.json" 2> "$track_run/$track_id-ai.log" || track_code="$?"
+  printf '%s\n' "$track_code" > "$track_run/$track_id-ai-status"
+  printf 'combined timed ICE gate: %s\n' "$track_id" > "$track_run/STAGE"
+  track_code=0
+  node scripts/track/combined-ice.mjs "$track_file" "$track_run/$track_id-ai.json" "$track_run/$track_id-combined.json" \
+    > "$track_run/$track_id-combined.log" 2>&1 || track_code="$?"
+  printf '%s\n' "$track_code" > "$track_run/$track_id-combined-status"
+done
+printf 'paint/probe runtime roundtrip\n' > "$track_run/STAGE"
+track_eval roundtrip.sgl "$track_run/oval.sgv" "$track_run/quayside.sgv" "$track_run/basin.sgv" \
+  > "$track_run/roundtrip.log" 2>&1
+node scripts/track/preview.mjs tracks/oval.json "$track_run/song-contract.json" "$track_run/preview" "$track_run/oval-ai.json" "$track_run/oval-combined.json" \
+  > "$track_run/oval-driven-preview.log" 2>&1
+printf 'stalled AI sabotage\n' > "$track_run/STAGE"
+track_code=0
+track_eval ai.sgl "$track_run/oval.sgv" stall \
+  > "$track_run/oval-stall.json" 2> "$track_run/oval-stall.log" || track_code="$?"
+printf '%s\n' "$track_code" > "$track_run/oval-stall-status"
+# A compiler/setup error or a timeout must not masquerade as a caught sabotage.
+test "$track_code" -eq 1
+node -e 'const fs=require("node:fs");const r=JSON.parse(fs.readFileSync(process.argv[1]));if(r.pass||r.threeLapsAllRacers)process.exit(1)' "$track_run/oval-stall.json"
+printf 'AI par sabotage: handling oval declared as a race\n' > "$track_run/STAGE"
+node --input-type=module -e 'import fs from "node:fs";import {runtimeData} from "./scripts/track/runtime.mjs";const source=JSON.parse(fs.readFileSync("tracks/oval.json"));source.role="race";fs.writeFileSync(process.argv[1],runtimeData(source));' "$track_run/too-short.sgv"
+track_code=0
+track_eval ai.sgl "$track_run/too-short.sgv" \
+  > "$track_run/too-short-ai.json" 2> "$track_run/too-short-ai.log" || track_code="$?"
+printf '%s\n' "$track_code" > "$track_run/too-short-ai-status"
+test "$track_code" -eq 1
+node scripts/track/verify.mjs "$track_run" > "$track_run/verify.log" 2>&1
+printf 'finished\n' > "$track_run/STAGE"

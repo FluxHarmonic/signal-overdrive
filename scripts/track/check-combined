@@ -1,0 +1,28 @@
+#!/bin/sh
+# Phantom-only execution during the task. Collect every counterexample before
+# returning red; an absent report/setup error must never look like a caught gate.
+set -eu
+cd "$(dirname "$0")/../.."
+track_run="$1"
+mkdir -p "$track_run"
+trap 'track_code=$?; printf "RESULT: combined ICE check exit %s; inspect STAGE, tests.log and per-track reports\n" "$track_code" > "$track_run/RESULT"' EXIT
+track_sigil="$HOME/.sigil/versions/0.22.11/sigil"
+printf 'combined union and transition sabotages\n' > "$track_run/STAGE"
+node --test scripts/track/gates.test.mjs scripts/track/combined-ice.test.mjs > "$track_run/tests.log" 2>&1
+track_failed=0
+for track_file in tracks/oval.json test/fixtures/tracks/reshaped/quayside.json test/fixtures/tracks/reshaped/basin.json; do
+  track_id="$(basename "$track_file" .json)"
+  printf 'actual lap timing: %s\n' "$track_id" > "$track_run/STAGE"
+  node scripts/track/runtime.mjs "$track_file" "$track_run/$track_id.sgv" 0
+  timeout 180 "$track_sigil" -L src eval -f scripts/track/ai.sgl -- "$track_run/$track_id.sgv" \
+    > "$track_run/$track_id-ai.json" 2> "$track_run/$track_id-ai.log"
+  printf 'combined hazards: %s\n' "$track_id" > "$track_run/STAGE"
+  track_code=0
+  node scripts/track/combined-ice.mjs "$track_file" "$track_run/$track_id-ai.json" "$track_run/$track_id-combined.json" \
+    > "$track_run/$track_id-combined.log" 2>&1 || track_code="$?"
+  printf '%s\n' "$track_code" > "$track_run/$track_id-combined-status"
+  test -f "$track_run/$track_id-combined.json"
+  if [ "$track_code" -ne 0 ]; then track_failed=1; fi
+done
+printf 'finished\n' > "$track_run/STAGE"
+exit "$track_failed"

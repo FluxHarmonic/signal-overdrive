@@ -1,0 +1,45 @@
+;;; Shared difficulty data for flow, racing and the live-ICE scheduler.
+;;; Density counts authored UP opportunities per layer, including its phase.
+;;; It removes eligible bars without adding down-bar activity or wider footprints.
+;;; Pace follows design section6. Other numbers are authoring parameters.
+(define-library (signal tiers)
+  (export TIERS tier-parameters tier-label tier-value)
+  (begin
+    (define TIERS '(learner courier elite))
+    (define PARAMETERS
+      '((learner
+          (label . "LEARNER")
+          (rival-pace . 0.92)
+          (ice-every-bars . 3)
+          (tracer-every-bars . 4)
+          (telegraph-bars . 2)
+          (damage-scale . 0.75))
+        (courier
+          (label . "COURIER")
+          (rival-pace . 0.97)
+          (ice-every-bars . 2)
+          (tracer-every-bars . 2)
+          (telegraph-bars . 1)
+          (damage-scale . 1.0))
+        (elite
+          (label . "ELITE")
+          (rival-pace . 1.02)
+          (ice-every-bars . 1)
+          (tracer-every-bars . 1)
+          (telegraph-bars . 1)
+          (damage-scale . 1.0))))
+
+    (define (tier-parameters tier)
+      (let ((entry (assq tier PARAMETERS)))
+        (if entry
+            (cdr entry)
+            (error "unknown Signal difficulty tier" tier))))
+
+    (define (tier-value tier key)
+      (let ((entry (assq key (tier-parameters tier))))
+        (if entry
+            (cdr entry)
+            (error "unknown Signal tier parameter" key))))
+
+    (define (tier-label tier)
+      (tier-value tier 'label))))

@@ -1,0 +1,116 @@
+;;; (signal flow cup) - The cups, and how a delivery scores (design P23).
+;;;
+;;; A cup is a district's deliveries in order: three in 0.2, Docklands'
+;;; Breakwater, Quayside and Turning Basin, fast to slow. Only the tracks the
+;;; build registers count (TRACKS, (signal track)), so a cup whose tracks are
+;;; missing is simply absent.
+;;;
+;;; Place earns points like an F-Zero cup, 10 7 5 3 2 1 for first to sixth.
+;;; The player's integrity at the line grades the broadcast on the tiers the
+;;; song is heard on: CLEAN (80 and up) +3, NOISY (30 to 79) +1, GARBLED (1
+;;; to 29) +0. A corrupt delivery (integrity 0) scores nothing, and the
+;;; rivals then share the places among themselves. Rivals carry no cargo, so
+;;; they score place points only. Finishing a cup in the top three overall
+;;; clears it.
+;;;
+;;; Pure: results and standings are lists, built from a finished race by
+;;; the flow.
+
+(define-library (signal flow cup)
+  (import (sigil core)
+          (sigil list)
+          (signal track))
+
+  (export CUPS cup-ids cup-name cup-tracks cup-length track-title
+          place-points grade-of grade-label grade-points delivery-points
+          standings-add standings-sorted standings-place standings-points
+          cleared-place? ordinal)
+
+  (begin
+    ;; (id name (tracks ...)), in unlock order.
+    (define CUP-TABLE
+      '((docklands "DOCKLANDS" (breakwater quayside basin))))
+
+    ;; Only cups whose every track is registered.
+    (define CUPS
+      (let keep ((cs CUP-TABLE))
+        (cond ((null? cs) '())
+              ((let all ((ts (caddr (car cs))))
+                 (or (null? ts) (and (memq (car ts) TRACKS) (all (cdr ts)))))
+               (cons (car cs) (keep (cdr cs))))
+              (else (keep (cdr cs))))))
+
+    (define (cup-ids) (map car CUPS))
+    (define (cup-entry id) (or (assq id CUPS) (car CUP-TABLE)))
+    (define (cup-name id) (cadr (cup-entry id)))
+    (define (cup-tracks id) (caddr (cup-entry id)))
+    (define (cup-length id) (length (cup-tracks id)))
+
+    (define (track-title name)
+      (case name
+        ((breakwater) "BREAKWATER")
+        ((quayside) "QUAYSIDE")
+        ((basin) "TURNING BASIN")
+        ((oval) "OVAL")
+        ((loop) "LOOP")
+        (else (let ((s (symbol->string name)))
+                (list->string (map char-upcase (string->list s)))))))
+
+    (define (ordinal n)
+      (string-append (number->string n) (case n ((1) "ST") ((2) "ND") ((3) "RD") (else "TH"))))
+
+    (define PLACE-POINTS '(10 7 5 3 2 1))
+    (define (place-points place)
+      (if (and (>= place 1) (<= place (length PLACE-POINTS))) (list-ref PLACE-POINTS (- place 1)) 0))
+
+    ;; clean noisy garbled corrupt
+    (define (grade-of integrity)
+      (cond ((<= integrity 0.0) 'corrupt)
+            ((>= integrity 80.0) 'clean)
+            ((>= integrity 30.0) 'noisy)
+            (else 'garbled)))
+    (define (grade-label g)
+      (case g
+        ((clean) "BROADCAST CLEAN.")
+        ((noisy) "BROADCAST NOISY.")
+        ((garbled) "BROADCAST GARBLED.")
+        (else "SIGNAL CORRUPT.")))
+    (define (grade-points g) (case g ((clean) 3) ((noisy) 1) (else 0)))
+
+    ;; The player's points for a delivery: place plus grade, 0 if corrupt.
+    (define (delivery-points place integrity)
+      (let ((g (grade-of integrity)))
+        (if (eq? g 'corrupt) 0 (+ (place-points place) (grade-points g)))))
+
+    ;; Standings: ((name . total) ...), in first-seen order. awards: ((name .
+    ;; points) ...) for one delivery.
+    (define (standings-add standings awards)
+      (let add ((st standings) (aw awards))
+        (if (null? aw)
+            st
+            (let* ((a (car aw))
+                   (e (assoc (car a) st)))
+              (add (if e
+                       (map (lambda (x) (if (equal? (car x) (car a)) (cons (car x) (+ (cdr x) (cdr a))) x)) st)
+                       (append st (list (cons (car a) (cdr a)))))
+                   (cdr aw))))))
+
+    ;; Highest total first; a tie keeps first-seen order. The flow seeds a
+    ;; cup's standings with the player, so a level total goes to the player.
+    (define (standings-sorted standings)
+      (let ins ((xs standings) (out '()))
+        (if (null? xs)
+            out
+            (ins (cdr xs)
+                 (let put ((o out))
+                   (cond ((null? o) (list (car xs)))
+                         ((> (cdr (car xs)) (cdr (car o))) (cons (car xs) o))
+                         (else (cons (car o) (put (cdr o))))))))))
+
+    (define (standings-place standings name)
+      (let loop ((xs (standings-sorted standings)) (k 1))
+        (cond ((null? xs) #f) ((equal? (caar xs) name) k) (else (loop (cdr xs) (+ k 1))))))
+    (define (standings-points standings name)
+      (let ((e (assoc name standings))) (if e (cdr e) 0)))
+
+    (define (cleared-place? place) (and place (<= place 3)))))

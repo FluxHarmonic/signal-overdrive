@@ -1,0 +1,99 @@
+(import (sigil test)
+        (sigil list)
+        (sigil string)
+        (motif tune)
+        (signal music compile)
+        (signal music scores)
+        (signal music song))
+
+;; The race songs the game carries beyond Carrier, and how a race picks
+;; one. Carrier's own score has its own tests (test-score).
+
+;; SCORES entries: #(id order-offsets tune-text sections onsets onset-masks)
+(define (score-entry id) (find (lambda (s) (eq? (vector-ref s 0) id)) SCORES))
+(define (song-dir id) (string-append "music/" (symbol->string id)))
+(define (fresh id)
+  (compile-score (read-tune-file (string-append (song-dir id) "/race.cts"))
+                 (read-score-cues (string-append (song-dir id) "/cues.sgl"))))
+(define MARKS '(calm grid lap1 lap2 hold fill traced uplink results))
+
+(test-group "songs: the race songs"
+  (test "the game carries Carrier first, then the three Docklands variations"
+    (assert-equal '(carrier carrier-a carrier-b carrier-c) (song-ids)))
+
+  (test "each song's runtime data exactly matches a fresh compile of its tune and cue sheet"
+    (for-each
+      (lambda (id)
+        (let ((data (fresh id)) (s (score-entry id)))
+          (assert-equal id (vector-ref s 0))
+          (assert-equal (score-field data 'order-offsets) (vector-ref s 1))
+          (assert-equal (score-field data 'tune-text) (vector-ref s 2))
+          (assert-equal (score-field data 'sections) (vector-ref s 3))
+          (assert-equal (score-field data 'onsets) (vector-ref s 4))
+          (assert-equal (score-field data 'onset-masks) (vector-ref s 5))))
+      '(carrier-a carrier-b carrier-c)))
+
+  (test "each song keeps the section contract: the nine marks, grid 4, fill 2, the automatic exits"
+    (for-each
+      (lambda (s)
+        (let ((sections (vector-ref s 3)))
+          (assert-equal MARKS (map (lambda (e) (vector-ref e 0)) sections))
+          (for-each (lambda (mark bars)
+                      (assert-equal bars (vector-ref (find (lambda (e) (eq? mark (vector-ref e 0))) sections) 2)))
+                    '(grid fill) '(4 2))
+          (for-each (lambda (mark next)
+                      (assert-equal next (vector-ref (find (lambda (e) (eq? mark (vector-ref e 0))) sections) 5)))
+                    '(grid fill uplink) '(lap1 traced results))))
+      SCORES))
+
+  ;; as test-score checks Carrier: a jump lands on a section's first row,
+  ;; a loop returns to its loop's first row
+  (test "every section and loop entry row of each song starts or releases all eight channels"
+    (for-each
+      (lambda (id)
+        (let ((t (read-tune-file (string-append (song-dir id) "/race.cts"))))
+          (for-each
+            (lambda (section)
+              (let ((from (vector-ref section 1)) (loop-from (vector-ref section 3)))
+                (for-each
+                  (lambda (pos)
+                    (let* ((pattern (tune-find-pattern t (list-ref (tune-order t) pos)))
+                           (channels (map cell-channel
+                                          (filter (lambda (c)
+                                                    (and (= 0 (cell-row c))
+                                                         (cell-note c)
+                                                         (not (and (number? (cell-note c))
+                                                                   (= 3 (fx-command (cell-fx c)))))))
+                                                  (tune-pattern-cells pattern)))))
+                      (assert-equal '(1 2 3 4 5 6 7 8) (list-sort < channels))))
+                  (if (and loop-from (> loop-from 0)) (list from (+ from loop-from)) (list from)))))
+            (vector-ref (score-entry id) 3))))
+      '(carrier-a carrier-b carrier-c)))
+
+  (test "selecting a song switches its sections, rows, onsets and tune"
+    (song-select! 'carrier-a)
+    (assert-equal 'carrier-a (song-id))
+    (assert-equal 7 (song-section-bars (song-section-ref 'hold)))
+    (assert-true (string-contains? (song-tune-text) "Carrier: Undertow"))
+    (assert-equal (vector-ref (vector-ref (score-entry 'carrier-a) 1) 12) (song-order-row 12))
+    (song-select! 'carrier-b)
+    (assert-true (string-contains? (song-tune-text) "Carrier: Night Shift"))
+    (song-select! 'carrier)
+    (assert-equal 'carrier (song-id))
+    (assert-equal 5 (song-section-bars (song-section-ref 'hold)))
+    (assert-error (song-select! 'no-such-song)))
+
+  (test "a track plays the song it binds, Carrier if none, and the override over both"
+    (for-each (lambda (b) (assert-equal (cdr b) (song-for-track (car b)))) TRACK-SONGS)
+    (assert-equal 'carrier (song-for-track 'no-such-track))
+    (song-override! 'carrier-b)
+    (assert-equal 'carrier-b (song-for-track 'no-such-track))
+    (song-select-for-track! 'oval)
+    (assert-equal 'carrier-b (song-id))
+    (song-override! #f)
+    (song-select-for-track! 'no-such-track)
+    (assert-equal 'carrier (song-id))
+    (assert-error (song-override! 'no-such-song)))
+
+  (test "every track's binding names a song the game carries"
+    (for-each (lambda (b) (assert-true (memq (cdr b) (song-ids)))) TRACK-SONGS)))

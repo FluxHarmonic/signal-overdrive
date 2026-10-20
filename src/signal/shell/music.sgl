@@ -7,7 +7,7 @@
           (sigil time)
           (sigil audio sink)
           (motif tune)
-          (signal music score)
+          (signal music song)
           (signal music conductor)
           (signal music clock)
           (signal music transport)
@@ -29,6 +29,8 @@
     (define *opened-once* #f)     ; a stream has opened in this session
     (define *playback* #f)
     (define *tune* #f)
+    (define *tune-id* #f)         ; the race song *tune* is
+    (define *tunes* (quote ()))   ; ((id . tune) ...): each song parsed once
     (define *rate* 44100)
     (define *depth-ms* 250)
     (define *latency* (cond-expand (wasm 0.0) (else 0.035)))
@@ -37,6 +39,7 @@
     (define *resync-pending* #f)
     (define *resyncs* 0)
     (define *resync-cancels* 0)
+    (define *replans* 0)          ; splices planned again for a gap that outgrew their room
     (define *last-resync-bar* -1)
     (define *subtract-depth* #t)
     (define *handoff-mode* 'planned)
@@ -93,7 +96,7 @@
       (when *stream*
         (let ((g (env-gain heard)))
           (when (and (number? *env*) (>= g 1.0)) (set! *env* 'done))
-          (let ((g (* g (dip-gain))))
+          (let ((g (* g (dip-gain) (if *dead-air* 0.0 1.0))))
             (unless (eqv? g *volume*)
               (set-audio-stream-volume! *stream* g)
               (set! *volume* g))))))
@@ -107,6 +110,8 @@
     ;;   (music-fade-out! seconds)    CORRUPT: to nothing, and it stays
     ;;                                there until the next song starts
     (define *dip* #f)             ; (end-jiffy . level)
+    ;; Continuous contact mute. Samples keep flowing, preserving song time.
+    (define *dead-air* #f)
     (define *fade-out* #f)        ; (start-jiffy . seconds)
     (define (dip-gain)
       (let ((now (current-jiffy)) (per (* 1.0 (jiffies-per-second))))
@@ -201,8 +206,15 @@
 
     ;; The score, parsed ahead of the sound: on the web the start is a
     ;; gesture's work, and the frame after it pays for every millisecond.
+    ;; The current race song's: a race on another track's song parses that
+    ;; one (once), so call this when the race changes, ahead of its start.
     (define (music-prepare!)
-      (unless *tune* (set! *tune* (read-tune-string SCORE-TUNE-TEXT))))
+      (let ((id (song-id)))
+        (unless (eq? id *tune-id*)
+          (let ((cached (assq id *tunes*)))
+            (set! *tune* (if cached (cdr cached) (read-tune-string (song-tune-text))))
+            (unless cached (set! *tunes* (cons (cons id *tune*) *tunes*)))
+            (set! *tune-id* id)))))
 
     ;; The player built ahead of the session's first sound, #(playback rate
     ;; mode): on the web's start gate, once the context gives its rate.
@@ -220,7 +232,7 @@
         (let ((rate (audio-context-sample-rate ctx)))
           (set! *prepared*
             (vector (playback-open *tune* rate c MUSIC-INSERTS mode: *handoff-mode*)
-                    rate *handoff-mode*)))))
+                    rate *handoff-mode* *tune-id*)))))
     (define (drop-prepared!)
       (when *prepared*
         (playback-close! (vector-ref *prepared* 0))
@@ -228,7 +240,9 @@
     (define (start-playback c)
       (let ((p *prepared*))
         (set! *prepared* #f)
-        (if (and p (= (vector-ref p 1) *rate*) (eq? (vector-ref p 2) *handoff-mode*))
+        ;; a player prepared for another song (the race changed track) is dropped
+        (if (and p (= (vector-ref p 1) *rate*) (eq? (vector-ref p 2) *handoff-mode*)
+                 (eq? (vector-ref p 3) *tune-id*))
             (playback-seek-start! (vector-ref p 0) c)
             (begin
               (when p (playback-close! (vector-ref p 0)))
@@ -384,9 +398,17 @@
            (set! *resync-pending* #f)
            (set! *resync-cancels* (+ *resync-cancels* 1))
            0)
+          ((splice-outgrown? gap (/ (- line (playback-rendered *playback*) SPLICE-FRAMES) (* 1.0 *rate*)))
+           ;; The gap outgrew the room planned at the request: plan again,
+           ;; at the bar line with room for all of it. The request stays in
+           ;; flight, so pacing does not ask a second time.
+           (plan-splice! gap)
+           (set! *replans* (+ *replans* 1))
+           0)
           ((< gap 0)
            ;; drop: A is what would play now, B what leads into the bar
-           ;; line; the frames between are rendered and dropped
+           ;; line; the frames between are rendered and dropped, never
+           ;; more than the gap measured now
            (let* ((room (- line (playback-rendered *playback*) SPLICE-FRAMES))
                   (d (max SPLICE-FRAMES (min (exact (round (* (- gap) *rate*))) room)))
                   (at *delivered*))
@@ -472,11 +494,12 @@
 
     (define (music-frame! c paused?
                           (keys: (clock-fraction 0.0) (frame-jiffy #f)
-                                 (integrity #f) (boost 'keep)))
+                                 (integrity #f) (boost 'keep) (dead-air 'keep)))
       ;; a caller with no say (a focus change, F5) keeps what the last
       ;; frame passed: a resume primes its queue at the real damage
       (when integrity (set! *integrity* integrity))
       (unless (eq? boost 'keep) (set! *boost* boost))
+      (unless (eq? dead-air 'keep) (set! *dead-air* (and dead-air #t)))
       (let ((t0 (current-jiffy)))
         ;; A new song (a restart) lifts a CORRUPT fade-out; a resume keeps it.
         (when (and *first-log*
@@ -530,7 +553,7 @@
           (set! *last-tick* (conductor-tick c)))
         (set! *cost-ms* (/ (* 1000.0 (- (current-jiffy) t0)) (jiffies-per-second)))))
 
-    ;; (running target-ms queued-ms sounding-underruns all-underruns cost-ms missed resyncs pending? cancels)
+    ;; (running target-ms queued-ms sounding-underruns all-underruns cost-ms missed resyncs pending? cancels replans)
     (define (music-readout)
       (list (and (music-running?) #t)
             *depth-ms*
@@ -539,4 +562,4 @@
             (+ *underruns-all* (if *stream* (audio-stream-underruns *stream*) 0))
             *cost-ms*
             (if *playback* (playback-missed *playback*) 0)
-            *resyncs* *resync-pending* *resync-cancels*))))
+            *resyncs* *resync-pending* *resync-cancels* *replans*))))

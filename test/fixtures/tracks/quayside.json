@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "id": "quayside",
+  "title": "Quayside",
+  "district": "docklands",
+  "role": "race",
+  "geometry": {
+    "type": "catmull-rom",
+    "halfWidth": 88,
+    "control": [
+      [700,3580], [1500,3590], [2300,3590], [3000,3590],
+      [3350,3590], [3520,3560], [3610,3470], [3640,3300], [3650,3080],
+      [3700,2600], [3700,2000], [3690,1400],
+      [3620,900], [3350,560], [2900,440],
+      [2300,440], [1700,440], [1150,440],
+      [720,500], [460,780], [440,1200],
+      [560,1600], [1000,1800], [1700,1820], [2450,1820],
+      [2950,1960], [3170,2300], [3020,2640], [2580,2780],
+      [1900,2780], [1250,2780], [780,2840],
+      [500,3060], [440,3380]
+    ]
+  },
+  "zones": {
+    "boost": [
+      [0.045,-0.8,-0.3], [0.045,0.3,0.8],
+      [0.215,-0.75,-0.25], [0.215,0.25,0.75],
+      [0.425,-0.7,-0.2], [0.425,0.2,0.7],
+      [0.655,-0.8,-0.3], [0.655,0.3,0.8]
+    ],
+    "repair": [0.08,0.135,-1,-0.45],
+    "ice": [[0.26,0.28,0.1,0.9], [0.86,0.88,-0.9,-0.1]]
+  },
+  "iceLayers": [
+    {"id":"harbour-wall", "layouts":[
+      {"id":"left", "zones":[[0.44,0.475,-1,0.2]]},
+      {"id":"right", "zones":[[0.44,0.475,-0.2,1]]}
+    ]},
+    {"id":"back-basin", "layouts":[
+      {"id":"left", "zones":[[0.675,0.705,-1,0.2]]},
+      {"id":"right", "zones":[[0.675,0.705,-0.2,1]]},
+      {"id":"none", "zones":[]}
+    ]}
+  ],
+  "sections": [
+    {"id":"quay", "from":0, "to":0.16, "label":"The quay"},
+    {"id":"quay-end", "from":0.16, "to":0.2, "label":"Quay End"},
+    {"id":"crane-row", "from":0.2, "to":0.33, "label":"Crane Row"},
+    {"id":"harbour-wall", "from":0.33, "to":0.52, "label":"Harbour wall"},
+    {"id":"west-stacks", "from":0.52, "to":0.62, "label":"West stacks"},
+    {"id":"back-basin", "from":0.62, "to":0.92, "label":"Back basin and the Hook"},
+    {"id":"last-bend", "from":0.92, "to":1, "label":"Slipway bend"}
+  ],
+  "song": {
+    "id":"carrier-a", "cues":"music/carrier-a/cues.sgl", "bpm":140,
+    "sections": [
+      {"mark":"lap1", "lap":1, "at":0},
+      {"mark":"lap2", "lap":2, "at":0},
+      {"mark":"hold", "lap":2, "at":0.5},
+      {"mark":"fill", "targetLap":3, "targetAt":0, "leadBars":2},
+      {"mark":"traced", "lap":3, "at":0},
+      {"mark":"uplink", "lap":4, "at":0}
+    ]
+  },
+  "musicZones": [
+    {"id":"quay-drop", "kind":"drop", "from":0, "to":0.02, "sections":["traced"]},
+    {"id":"back-basin-lights", "kind":"searchlights", "from":0.5, "to":0.92, "sections":["hold"]},
+    {"id":"harbour-wall-firewall", "kind":"firewall", "from":0.44, "to":0.475, "sections":["traced"]},
+    {"id":"back-basin-firewall", "kind":"firewall", "from":0.675, "to":0.705, "sections":["traced"]}
+  ],
+  "decoration": {"puddles":60}
+}

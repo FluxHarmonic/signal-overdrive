@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "id": "loop",
+  "title": "Docklands",
+  "district": "docklands",
+  "role": "race",
+  "geometry": {
+    "type": "catmull-rom",
+    "halfWidth": 78,
+    "control": [
+      [700,3560], [1500,3580], [2300,3560], [2950,3480],
+      [3420,3200], [3620,2720], [3560,2250],
+      [3220,1960], [3320,1560], [3660,1180],
+      [3640,640], [3260,380], [2780,470],
+      [2520,820], [2440,1350], [2330,1720],
+      [2120,1860], [1920,1720], [1880,1350],
+      [1860,900], [1640,540], [1180,420],
+      [720,560], [470,1000], [560,1520],
+      [940,1830], [1060,2240], [760,2620],
+      [440,2980], [430,3360]
+    ]
+  },
+  "zones": {
+    "boost": [[0.05,-0.55,0.05], [0.205,-0.1,0.55], [0.56,-0.3,0.3], [0.76,0,0.6]],
+    "repair": [0.905,0.985,-1,-0.42],
+    "ice": [[0.33,0.355,0,0.9], [0.7,0.725,-0.9,0]]
+  },
+  "iceLayers": [],
+  "sections": [
+    {"id":"start", "from":0, "to":0.2, "label":"Uplink straight"},
+    {"id":"north", "from":0.2, "to":0.45, "label":"North docks"},
+    {"id":"hairpin", "from":0.45, "to":0.7, "label":"Inner docks"},
+    {"id":"return", "from":0.7, "to":1, "label":"Return chicane"}
+  ],
+  "song": {
+    "id":"carrier", "cues":"music/carrier/cues.sgl", "bpm":140,
+    "sections": [
+      {"mark":"lap1", "lap":1, "at":0},
+      {"mark":"lap2", "lap":2, "at":0},
+      {"mark":"hold", "lap":2, "at":0.5},
+      {"mark":"fill", "targetLap":3, "targetAt":0, "leadBars":2},
+      {"mark":"traced", "lap":3, "at":0},
+      {"mark":"uplink", "lap":4, "at":0}
+    ]
+  },
+  "musicZones": [
+    {"id":"uplink-drop", "kind":"drop", "from":0, "to":0.02, "sections":["traced"]},
+    {"id":"hold-docks", "kind":"searchlights", "from":0.5, "to":0.8, "sections":["hold"]}
+  ],
+  "decoration": {"puddles":70}
+}

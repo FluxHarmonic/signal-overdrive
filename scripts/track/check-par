@@ -1,0 +1,52 @@
+#!/bin/sh
+# Phantom-only, bounded by the caller. Isolate duration sabotages from geometry.
+set -eu
+cd "$(dirname "$0")/../.."
+track_run="$1"
+mkdir -p "$track_run"
+trap 'track_code=$?; printf "RESULT: par verification exit %s; inspect STAGE and reports\n" "$track_code" > "$track_run/RESULT"' EXIT
+track_sigil="$HOME/.sigil/versions/0.22.11/sigil"
+printf 'gate and sabotage tests\n' > "$track_run/STAGE"
+node --test scripts/track/gates.test.mjs scripts/track/combined-ice.test.mjs > "$track_run/tests.log" 2>&1
+for track_file in test/fixtures/tracks/retired-loop.json test/fixtures/tracks/reshaped/quayside.json test/fixtures/tracks/reshaped/basin.json; do
+  track_id="$(basename "$track_file" .json)"
+  if [ "$track_id" = retired-loop ]; then track_id=loop; fi
+  printf 'actual par: %s\n' "$track_id" > "$track_run/STAGE"
+  node scripts/track/runtime.mjs "$track_file" "$track_run/$track_id.sgv" 0
+  timeout 180 "$track_sigil" -L src eval -f scripts/track/ai.sgl -- "$track_run/$track_id.sgv" \
+    > "$track_run/$track_id-ai.json" 2> "$track_run/$track_id-ai.log"
+done
+printf 'actual approximately20s/40s duration sabotages\n' > "$track_run/STAGE"
+# Scaling this handling fixture creates isolated duration probes; they are
+# deliberately not accepted as world-bounded authoring candidates.
+node --input-type=module - "$track_run" <<'JS'
+import fs from "node:fs";
+import { loadTrack } from "./scripts/track/format.mjs";
+import { runtimeData } from "./scripts/track/runtime.mjs";
+for (const [id, scale] of [["par20", 1.3], ["par40", 2.6]]) {
+  const source = loadTrack("tracks/oval.json");
+  source.id = id;
+  source.role = "race";
+  source.geometry.straight *= scale;
+  source.geometry.radius *= scale;
+  fs.writeFileSync(`${process.argv[2]}/${id}.sgv`, runtimeData(source));
+}
+JS
+for track_id in par20 par40; do
+  track_code=0
+  timeout 180 "$track_sigil" -L src eval -f scripts/track/ai.sgl -- "$track_run/$track_id.sgv" \
+    > "$track_run/$track_id-ai.json" 2> "$track_run/$track_id-ai.log" || track_code="$?"
+  test "$track_code" -eq 1
+  node --input-type=module - "$track_run/$track_id-ai.json" <<'JS'
+import fs from "node:fs";
+import assert from "node:assert/strict";
+import { parGate } from "./scripts/track/gates.mjs";
+const report = JSON.parse(fs.readFileSync(process.argv[2]));
+assert.equal(report.threeLapsAllRacers, true);
+assert.equal(report.parGate, false);
+assert.equal(report.pass, false);
+assert.equal(parGate({id: report.id, role: "race"}, report).pass, false);
+assert.ok(report.id === "par20" ? report.bestLapSeconds < 25 : report.bestLapSeconds > 35);
+JS
+done
+printf 'finished\n' > "$track_run/STAGE"

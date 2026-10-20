@@ -24,13 +24,23 @@
           (sigil list)
           (signal track)
           (signal handling)
+          (signal tiers)
+          (signal ice runtime)
+          (signal ice collision)
+          (signal rivals turns)
+          (signal rivals tactics)
+          (signal rivals wake)
           (signal music conductor)
-          (signal music progress))
+          (signal music progress)
+          (only (signal music song) song-select-for-track!))
 
   (export race race? race-new race-step race-start race-track
+          race-tier race-mode race-seed race-ice race-wake
           race-phase race-tick race-player race-rivals race-clock race-countdown race-events race-start-tick race-song
           racer racer? racer-machine racer-lap racer-lap-start racer-last-lap racer-best-lap
           racer-halfway racer-finished racer-place racer-name racer-colour racer-progress
+          racer-pace racer-ice-locks racer-dead-air
+          racer-attack-plan race-pair-attacker race-rival-attacking? race-null-flare?
           race-laps race-place-of race-tuning-ref RACE-DEFAULTS
           ai-input)
 
@@ -65,12 +75,20 @@
       (colour default: 0)
       (pace default: 1.0)
       (lane default: 0.0)
+      (ice-locks default: '())
+      (dead-air default: #f)
+      (attack-plan default: #f)
       (progress default: 0.0))
 
     ;; clock: ticks since the start (the race's time). events: this
     ;; tick's, as (who . event) pairs; who is 'player or a rival's index.
     (define-struct race
       (track default: #f)
+      (tier default: 'courier)
+      (mode default: 'run)
+      (seed default: 0)
+      (ice default: #f)
+      (wake default: #f)
       (phase default: 'title)
       (tick default: 0)
       (clock default: 0)
@@ -84,7 +102,8 @@
 
     (define (race-laps tuning) (exact (round (race-tuning-ref tuning 'laps))))
 
-    (define RIVAL-NAMES '("VEX" "NULL" "KESTREL" "SPOOL" "HALCYON"))
+    (define RIVAL-NAMES '("VEX" "KESTREL" "SPOOL" "HALCYON" "RELAY"))
+    (define PAIR-NAMES '("NULL" "VOID" "VEX" "KESTREL" "SPOOL"))
 
     ;; The grid: two columns behind the line, the player in the second row
     ;; on the right, rivals ahead and beside.
@@ -96,15 +115,25 @@
         ;; heading from the tangent: forward is (sin h, -cos h)
         (machine (make-machine (car p) (cadr p) heading) hint: (track-index-at t s) s: s)))
 
-    ;; The track the tuning names (the track knob: 0 the oval, 1 the loop).
+    ;; The track the tuning names, clamped to the current playable catalog.
     (define (tuning-track tuning)
       (let ((i (exact (round (race-tuning-ref tuning 'track)))))
         (track-named (list-ref TRACKS (max 0 (min (- (length TRACKS) 1) i))))))
 
-    (define (race-new tuning)
-      (let* ((t (tuning-track tuning))
-             (n (max 0 (min 5 (exact (round (race-tuning-ref tuning 'rivals))))))
-             (pace (race-tuning-ref tuning 'rival-pace))
+    ;; A race plays the song its track binds: selected here, before the
+    ;; conductor below reads the song's sections.
+    (define (race-new tuning (keys: (tier 'courier) (mode 'run) (seed 0)))
+      (unless (memq mode '(run time-trial)) (error "unknown race mode" mode))
+      (unless (and (exact-integer? seed) (>= seed 0)) (error "invalid race seed" seed))
+      (let* ((base (tuning-track tuning))
+             (t (if (eq? mode 'time-trial) (track base ice: '() ice-schedule: '()) base))
+             (_ (song-select-for-track! (track-name t)))
+             (n (if (eq? mode 'time-trial) 0
+                    (max 0 (min 5 (exact (round (race-tuning-ref tuning 'rivals)))))))
+             ;; The flow passes only tier; no tuning-alist scale may apply it
+             ;; a second time. This data is the sole pace mapping.
+             (pace (tier-value tier 'rival-pace))
+             (names (if (eq? (track-name t) 'basin) PAIR-NAMES RIVAL-NAMES))
              (slots '((0 . 0) (0 . 1) (1 . 0) (2 . 0) (2 . 1)))
              (rivals (let loop ((i 0) (acc '()))
                        (if (= i n)
@@ -112,20 +141,21 @@
                            (let ((slot (list-ref slots i)))
                              (loop (+ i 1)
                                    (cons (racer machine: (grid-machine t (car slot) (cdr slot))
-                                                name: (list-ref RIVAL-NAMES i)
+                                                name: (list-ref names i)
                                                 colour: (modulo i 3)
                                                 ;; each a little different
                                                 pace: (* pace (- 1.0 (* 0.012 i)))
                                                 lane: (* 0.25 (- (modulo (* i 7) 3) 1)))
                                          acc)))))))
-        (race track: t
+        (race track: t tier: tier mode: mode seed: seed
+              ice: (ice-new (track-ice-schedule t) tier seed t)
               song: (conductor-new 'calm)
               player: (racer machine: (grid-machine t 1 1) name: "ZERO")
               rivals: rivals
               phase: 'title)))
 
     (define (race-start tuning r)
-      (race (race-new tuning)
+      (race (race-new tuning tier: (race-tier r) mode: (race-mode r) seed: (race-seed r))
             phase: 'countdown countdown: (song-bar->tick 4)
             song: (conductor-new 'grid) tick: (race-tick r)))
 
@@ -171,6 +201,56 @@
                    (u (/ (machine-d pm) (track-hw t i))))
               (max -0.7 (min 0.7 (- u (track-line t i)))))
             (racer-lane x))))
+
+    (define (race-pair-attacker r)
+      (pair-attacker (conductor-bar (race-song r))))
+
+    (define (race-rival-attacking? r x)
+      (rival-attacking? (racer-name x)
+        (and (eq? (race-mode r) 'run)
+             (eq? (race-phase r) 'race)
+             (eq? (track-name (race-track r)) 'basin))
+        (conductor-bar (race-song r))))
+
+    (define (race-null-flare? r x)
+      (let ((plan (racer-attack-plan x)))
+        (and (race-rival-attacking? r x)
+             plan
+             (null-plan-pending plan)
+             (< (conductor-tick (race-song r)) (null-plan-flare-until plan)))))
+
+    (define (null-wanted-lane t x player clock)
+      (let* ((m (racer-machine x))
+             (s (machine-s m))
+             (repair (and (pair? (track-repair t)) (car (track-repair t))))
+             (repair-ahead (and repair (s-ahead t s (car repair))))
+             (on-repair (and repair (zone-hit? t repair s (/ (machine-d m)
+                                                           (track-hw t (track-index-at t s)))))))
+        (if (and repair (> clock 180)
+                 (or on-repair (and (> repair-ahead 0.0) (< repair-ahead 600.0))))
+            (max -0.7 (min 0.7 (- (* 0.5 (+ (caddr repair) (cadddr repair)))
+                                   (track-line t (track-index-at t s)))))
+            (block-lane t x player clock))))
+
+    (define (rival-plan-step t r x)
+      (if (not (string=? (racer-name x) "NULL"))
+          x
+          (let* ((tick (conductor-tick (race-song r)))
+                 (beat (quotient (tick->song-row tick) 8))
+                 (start (song-bar->tick (/ beat 4.0)))
+                 (next (song-bar->tick (/ (+ beat 1) 4.0)))
+                 (plan (null-step (or (racer-attack-plan x) (null-plan))
+                         (race-rival-attacking? r x) tick start next
+                         (null-wanted-lane t x (racer-machine (race-player r)) (race-clock r)))))
+            (racer x attack-plan: plan))))
+
+    (define (rival-lane t r x)
+      (cond
+        ((and (string=? (racer-name x) "NULL") (race-rival-attacking? r x))
+         (null-plan-lane (racer-attack-plan x)))
+        ((or (string=? (racer-name x) "NULL") (string=? (racer-name x) "VOID"))
+         (racer-lane x))
+        (else (block-lane t x (racer-machine (race-player r)) (race-clock r)))))
 
     ;; --- laps ------------------------------------------------------------------------------
 
@@ -291,28 +371,104 @@
                  r)))
           (else (drive tuning t r controls #t)))))
 
+    (define (tier-handling tuning tier)
+      (let ((scale (tier-value tier 'damage-scale)))
+        (handling-set
+          (handling-set tuning 'wall-damage (* scale (handling-ref tuning 'wall-damage)))
+          'boost-cost (* scale (handling-ref tuning 'boost-cost)))))
+
+    (define (with-live-contact t x m ice tier)
+      (let* ((zones (ice-state-active ice))
+             (contact (ice-contact-step (ice-state-contract ice) zones m
+                        (racer-ice-locks x) (track-hw t (track-index-at t (machine-s m)))
+                        (tier-value tier 'damage-scale) DT)))
+        (racer x machine: (ice-contact-machine contact)
+                 ice-locks: (ice-contact-locks contact)
+                 dead-air: (ice-contact-dead-air contact))))
+
+    ;; Only observed crossings: runtime never predicts a future lap to obtain
+    ;; a tracer reservation. All values use the simulation-song epoch.
+    (define (observe-crossings crossings old-player new-player tick)
+      (let ((index (cond
+                     ((and (not (racer-finished old-player)) (racer-finished new-player)) 3)
+                     ((> (racer-lap new-player) (racer-lap old-player))
+                      (- (racer-lap new-player) 1))
+                     (else #f))))
+        (if (not index)
+            crossings
+            (let loop ((remaining crossings) (i 0))
+              (if (null? remaining)
+                  '()
+                  (cons (if (= i index) tick (car remaining))
+                        (loop (cdr remaining) (+ i 1))))))))
+
+    (define (void-racer r)
+      (let find ((remaining (race-rivals r)))
+        (cond
+          ((null? remaining) #f)
+          ((string=? (racer-name (car remaining)) "VOID") (car remaining))
+          (else (find (cdr remaining))))))
+
     ;; Every machine one tick on: the player by its controls, the rivals by
     ;; the line (a finished machine coasts on the line).
     (define (drive tuning t r controls racing?)
       (let* ((tick (race-tick r))
+             (song-tick (conductor-tick (race-song r)))
+             (physics (tier-handling tuning (race-tier r)))
              (laps (race-laps tuning))
              (boost-lap (race-tuning-ref tuning 'boost-lap))
              (p (race-player r))
+             (old-ice (or (race-ice r)
+                          (ice-new (track-ice-schedule t) (race-tier r) (race-seed r) t)))
+             (pm-old (racer-machine p))
+             (void (and racing? (void-racer r)))
+             (void-attacking? (and void (race-rival-attacking? r void)))
+             (old-wake (and void-attacking? (race-wake r)))
+             (wake-extra (if (and old-wake (< song-tick (wake-reserved-until old-wake)))
+                             (list (wake-zone old-wake)) '()))
+             (ice (if racing?
+                      (ice-step old-ice song-tick (ice-state-crossings old-ice)
+                                (machine-s pm-old)
+                                (/ (machine-d pm-old)
+                                   (track-hw t (track-index-at t (machine-s pm-old))))
+                                wake-extra)
+                      (ice-state old-ice active: '() telegraphs: '() tracer: #f
+                                 reservations: '() events: '())))
+             (wake (and void
+                        (let ((m (racer-machine void)))
+                          (wake-step old-wake t ice (race-seed r) song-tick void-attacking?
+                                     (machine-s m)
+                                     (/ (machine-d m)
+                                        (track-hw t (track-index-at t (machine-s m))))))))
+             (ice (ice-state ice
+                    active: (if (wake-live? wake song-tick)
+                                (cons (wake-zone wake) (ice-state-active ice))
+                                (ice-state-active ice))
+                    telegraphs: (if (wake-warning? wake song-tick)
+                                    (cons (wake-zone wake) (ice-state-telegraphs ice))
+                                    (ice-state-telegraphs ice))))
              (p-in (if (racer-finished p)
                        (ai-input t (racer-machine p) 0.0 #f)
                        (input controls boost-ok: (>= (racer-lap p) boost-lap))))
-             (pm (machine-step tuning t (racer-machine p) p-in DT))
+             (pm (machine-step physics t (racer-machine p) p-in DT))
+             (planned-rivals (map (lambda (x) (rival-plan-step t r x)) (race-rivals r)))
              (rms (map (lambda (x)
-                         (let ((h (handling-set tuning 'top (* (racer-pace x) (handling-ref tuning 'top)))))
+                         (let ((h (handling-set physics 'top (* (racer-pace x) (handling-ref physics 'top)))))
                            (machine-step h t (racer-machine x)
-                                         (ai-input t (racer-machine x) (block-lane t x (racer-machine p) (race-clock r)) #f) DT)))
-                       (race-rivals r)))
+                                         (ai-input t (racer-machine x) (rival-lane t r x) #f) DT)))
+                       planned-rivals))
+             (p-contact (with-live-contact t p pm ice (race-tier r)))
+             (rs-contact (map (lambda (x m) (with-live-contact t x m ice (race-tier r)))
+                              planned-rivals rms))
+             (pm (racer-machine p-contact))
+             (rms (map racer-machine rs-contact))
              (bumped (bump-all tuning (cons pm rms)))
              (pm (car bumped))
              (rms (cdr bumped))
-             (p2 (lap-step t tick laps p pm (machine-s (racer-machine p))))
-             (rs2 (map (lambda (x m) (lap-step t tick laps x m (machine-s (racer-machine x))))
-                       (race-rivals r) rms))
+             (p2 (lap-step t tick laps p-contact pm (machine-s (racer-machine p))))
+             (rs2 (map (lambda (x m old)
+                         (lap-step t tick laps x m (machine-s (racer-machine old))))
+                       rs-contact rms (race-rivals r)))
              (all (places (cons p2 rs2)))
              (p2 (car all)) (rs2 (cdr all))
              (events (append (map (lambda (e) (cons 'player e)) (machine-events (racer-machine p2)))
@@ -327,7 +483,12 @@
                        (conductor-race-plan (race-song r) (racer-progress p2) forward
                                             (* laps (track-length t)))
                        (race-song r)))
-             (r (race r player: p2 rivals: rs2 song: song
+             (crossings (observe-crossings (ice-state-crossings ice) p p2 song-tick))
+             (ice (if (list-ref crossings 3)
+                      (ice-step ice song-tick crossings (machine-s pm) 0.0)
+                      (ice-state ice crossings: crossings)))
+             (r (race r player: p2 rivals: rs2 song: song ice: ice
+                      wake: (if (list-ref crossings 3) #f wake)
                       clock: (+ (race-clock r) (if racing? 1 0)) events: events)))
         (cond ((not racing?) r)
               ((<= (machine-integrity (racer-machine p2)) 0.0)

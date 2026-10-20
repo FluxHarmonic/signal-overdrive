@@ -10,8 +10,7 @@
 ;;; after all five have arrived, and then prints "signal-overdrive: ready".
 
 (define-library (signal shell web)
-  (import (sigil core)
-          (sigil string)
+  (import (sigil string)
           (sigil graphics)
           (sigil graphics image)
           (sigil browser gles3)
@@ -22,6 +21,7 @@
           (signal intro)
           (signal mode7 decal)
           (signal track)
+          (signal shell updates)
           (signal shell core))
 
   (export web-main web-dispatch)
@@ -30,12 +30,20 @@
     (define (track-files t)
       (let ((n (symbol->string t)))
         (list (string-append n "-atlas.png") (string-append n "-map.png") (string-append n "-avg.png"))))
-    (define NAMES (append (apply append (map track-files TRACKS)) '("sky.png" "machines.png" "lut-embers.png" "lut-crash.png" "title-logo.png" "fh-mark.png")))
+    (define NAMES (append (apply append (map track-files TRACKS)) '("sky.png" "machines.png" "lut-embers.png" "lut-crash.png" "lut-docklands.png" "title-logo.png" "fh-mark.png")))
     (define *fetches* '())
     (define *started* #f)
     (define *last-ms* #f)
     (define *frames* 0)
     (define *trace-touch* #f)
+    (define *pwa-locked* #f)
+
+    ;; Shell lifecycle only: a paused race is still a race. The page waits
+    ;; for boot textures and two rendered frames before registering a worker.
+    (define (pwa-state)
+      (cond ((or (not *started*) (< *frames* 2)) 0)
+            ((update-menu?) 1)
+            (else 2)))
 
     (define (say . parts) (display (apply string-append "signal-overdrive: " parts)) (newline))
 
@@ -67,7 +75,8 @@
               ((fetched?)
                (scene-init! (map (lambda (t) (cons t (map texture (track-files t)))) TRACKS)
                             (texture "sky.png") (texture "machines.png")
-                            (list (cons 'embers (texture "lut-embers.png")) (cons 'crash (texture "lut-crash.png"))))
+                            (list (cons 'embers (texture "lut-embers.png")) (cons 'crash (texture "lut-crash.png"))
+                           (cons 'docklands (texture "lut-docklands.png"))))
                (title-set-logo! (texture "title-logo.png"))
                (decal-init! VIEW-W VIEW-H)
                (intro-set-mark! (texture "fh-mark.png"))
@@ -92,8 +101,22 @@
             ((member type (quote ("keydown" "pointerdown" "touch" "tap"))) (core-audio-start!))))
 
     (define (web-dispatch type payload)
-      (gesture! type)
-      (cond ((string=? type "frame") (tick! payload) 0)
+      (unless *pwa-locked* (gesture! type))
+      (cond ((string=? type "pwa-state") (pwa-state))
+            ((string=? type "update")
+             (if (string=? payload "chosen?")
+                 (if (update-take-choice!) 1 0)
+                 (begin (update-notify! payload) 1)))
+            ((string=? type "pwa-unlock")
+             (set! *pwa-locked* #f)
+             (set! *last-ms* #f)
+             1)
+            ((string=? type "pwa-lock")
+             (if (= (pwa-state) 1)
+                 (begin (set! *pwa-locked* #t) 1)
+                 0))
+            (*pwa-locked* 0)
+            ((string=? type "frame") (tick! payload) 0)
             ((string=? type "param")
              (say "param " payload)
              (when (string=? payload "trace-touch") (set! *trace-touch* #t))
@@ -109,7 +132,7 @@
              (core-touch! payload) 1)
             ;; the touch check's question: what is the player doing now?
             ((string=? type "probe") (say (core-probe)) 1)
-            ((string=? type "tap") (core-tap!) 1)
+            ((string=? type "tap") (core-tap! payload) 1)
             ((string=? type "gesture") 1)
             ((string=? type "pointerdown") (core-tap!) 0)
             ((pad-dispatch! (core-pad) type payload) 1)

@@ -1,0 +1,14 @@
+#!/bin/sh
+# Phantom-only shared density regression and actual registered-cup driving.
+set -eu
+cd "$(dirname "$0")/../.."
+track_run="$1"
+mkdir -p "$track_run"
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'track_code=$?; printf "RESULT: phase-balanced density/cup exit %s; inspect suites and actual driving reports\n" "$track_code" > "$track_run/RESULT"' EXIT
+printf 'shared phase-density, admission, pair and race regressions\n' > "$track_run/STAGE"
+sh scripts/track/check-pair-wake "$track_run/suites"
+printf 'actual all-tier races on all three cup tracks\n' > "$track_run/STAGE"
+sh scripts/track/check-cup-tiers "$track_run/driving" "breakwater quayside basin"
+printf 'finished\n' > "$track_run/STAGE"

@@ -30,12 +30,22 @@
   ;; public from 0.1: robots.txt allows everything, no X-Robots-Tag on the
   ;; site, and only the 404 page asks not to be indexed
   indexing: index
-  ;; site/'s tracked files, whole
+  ;; one hook, two steps (scripts/stage-hook.mjs): news/*.md -> /news/, its
+  ;; feeds and the landing's latest post (Phantom Burn's build-news, Harkfell's
+  ;; D38 shape); then, as before, the PWA's final precache inventory, after
+  ;; stage-web has rewritten the wasm URL. No shared infrastructure needs a
+  ;; game-specific rule.
+  stage-hook: (argv: ("node" "scripts/stage-hook.mjs" "{dir}")
+               outputs: ("news/index.html" "news/feed.xml" "news/feed.json"
+                         "drive/sw.js" "drive/pwa-build.json")
+               inputs: ("news"))
+  ;; site/'s tracked files, whole; /news/ is generated
   site: (source: "site"
          copy: tracked
          required: ("index.html" "404.html" "robots.txt" "_headers" "_redirects" "style.css"
                     "logo.png" "logo-glitch.js" "favicon.png" "favicon.ico" "apple-touch-icon.png"
-                    "mark.png" "shots/og.png" "fonts/OFL.txt"))
+                    "mark.png" "shots/og.png" "fonts/OFL.txt")
+         refuse: ("news"))
   ;; the site's own legs of check-site: the landing, the disabled PLAY 0.1,
   ;; the phone width, the 404, the analytics, and the game path's isolation
   check: (arm: "scripts/check-site-arm.mjs"

@@ -67,15 +67,16 @@
       (assert-equal 'finished (race-phase R2))
       (assert-true (racer-finished p))
       (assert-true (racer-best-lap p))
-      ;; the default track is the oval, 8,448 texels: at most 560 texels/s,
-      ;; so never under 15 s, and the line should take less than 25
-      (assert-true (> (racer-best-lap p) (* 60 15)))
-      (assert-true (< (racer-best-lap p) (* 60 25)))))
+      ;; the default track is the cup's first (Breakwater): at most 560
+      ;; texels/s, so never under its length over top speed, and inside the
+      ;; 35 s par gate on the line
+      (assert-true (> (racer-best-lap p) (* 60 (/ (track-length (race-track R2)) 560.0))))
+      (assert-true (< (racer-best-lap p) (* 60 35)))))
 
-  (test "on the loop too, the autopilot and every rival complete a lap"
-    (let* ((tu (handling-set (handling-set T 'track 1.0) 'laps 1.0))
+  (test "an out-of-range track index clamps to the last track, the oval"
+    (let* ((tu (handling-set (handling-set T 'track 9.0) 'laps 1.0))
            (r (run tu (started tu) (* 60 50))))
-      (assert-equal 'loop (track-name (race-track r)))
+      (assert-equal 'oval (track-name (race-track r)))
       (assert-equal 'finished (race-phase r))
       (for-each (lambda (x) (assert-true (racer-finished x))) (race-rivals r))))
 
@@ -116,7 +117,8 @@
       (assert-true (< (racer-progress (race-player r2)) before))))
 
   (test "after the finish, laps the autopilot drives change no times"
-    (let* ((tu (handling-set T 'laps 1.0))
+    ;; on the oval, the short handling test, so one lap fits in 30 s
+    (let* ((tu (handling-set (handling-set T 'track (exact->inexact (track-index-of 'oval))) 'laps 1.0))
            (done (run tu (started tu) (* 60 30)))
            (p (race-player done))
            (later (run tu done (* 60 30)))
@@ -161,7 +163,7 @@
               (assert-equal 0 walls)))))))
 
 (test-group "race: song progression"
-  (test "a full three-lap loop race visits every race section and the coda"
+  (test "a full three-lap race visits every race section and the coda"
     (let* ((tu (handling-set (handling-set T 'track 1.0) 'laps 3.0))
            (r (run tu (started tu) (* 60 130)))
            (log (reverse (conductor-log (race-song r)))))

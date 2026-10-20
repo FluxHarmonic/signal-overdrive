@@ -1,0 +1,164 @@
+{
+  "id": "oval",
+  "seed": 0,
+  "world": {
+    "width": 5120,
+    "height": 5120
+  },
+  "canvasBytes": 104857600,
+  "mapTiles": {
+    "width": 160,
+    "height": 160
+  },
+  "memory": {
+    "maxRSSKiB": 219700,
+    "externalBytes": 116965873
+  },
+  "selectedLayouts": [],
+  "draft": false,
+  "gates": {
+    "radius": {
+      "pass": true,
+      "minimum": 732.891004741139,
+      "required": 147.20000000000002
+    },
+    "trueRadius": {
+      "pass": true,
+      "minimum": 483.1539541554686,
+      "required": 147.20000000000002,
+      "witness": {
+        "segment": 39,
+        "t": 0.005,
+        "point": [
+          890.6183866132479,
+          2758.3465936615085
+        ]
+      },
+      "method": "unsmoothed circumradius of consecutive dense spline samples (200 samples/control interval)"
+    },
+    "separation": {
+      "pass": true,
+      "minimum": 501.26080349312,
+      "required": 252
+    },
+    "world": {
+      "pass": true,
+      "width": 5120,
+      "height": 5120,
+      "margin": 358.14078069115635,
+      "required": 292
+    },
+    "readability": {
+      "pass": true,
+      "ahead": 1900,
+      "continuation": 96,
+      "curvatureThreshold": 0.0002,
+      "bends": 2,
+      "events": [
+        {
+          "sample": 108,
+          "s": 1727.9988963159471,
+          "fraction": 0.20453884560348165,
+          "direction": "left",
+          "observer": {
+            "x": 927.371321505454,
+            "y": 2767.5590317985284,
+            "tx": 0.9773134207654404,
+            "ty": 0.21179820016174256
+          },
+          "entrance": {
+            "x": 2825.9260531235605,
+            "y": 2788.4022193720816,
+            "tx": 0.9998304236700475,
+            "ty": 0.01841531709673629
+          },
+          "continuation": {
+            "x": 2921.9073878345694,
+            "y": 2790.231058123051,
+            "tx": 0.9999915438434219,
+            "ty": 0.004112449592338825
+          },
+          "entry": {
+            "x": 179.93520889344543,
+            "y": 86.3752170528063,
+            "depth": 1945.1859900197635,
+            "along": 1963.8975688818164,
+            "visible": true
+          },
+          "cue": {
+            "x": 179.8912804448296,
+            "y": 86.08435897134731,
+            "depth": 2038.1741039365143,
+            "along": 2058.088760193706,
+            "visible": true
+          },
+          "pass": true
+        },
+        {
+          "sample": 372,
+          "s": 5951.953434954233,
+          "fraction": 0.7045176286088471,
+          "direction": "left",
+          "observer": {
+            "x": 3168.804347425865,
+            "y": 1328.4767066777554,
+            "tx": -0.9772540006196248,
+            "ty": -0.21207220061323145
+          },
+          "entrance": {
+            "x": 1270.2531695666037,
+            "y": 1307.6011279226168,
+            "tx": -0.9998314658544335,
+            "ty": -0.01835864612042459
+          },
+          "continuation": {
+            "x": 1174.2718646753065,
+            "y": 1305.769775303396,
+            "tx": -0.9999910927302623,
+            "ty": -0.004220717964536384
+          },
+          "entry": {
+            "x": 179.85509618978327,
+            "y": 86.37555261544192,
+            "depth": 1945.08360960242,
+            "along": 1963.793863869741,
+            "visible": true
+          },
+          "cue": {
+            "x": 179.81108789818518,
+            "y": 86.08467845998837,
+            "depth": 2038.0670853850881,
+            "along": 2057.98035703951,
+            "visible": true
+          },
+          "pass": true
+        }
+      ],
+      "failed": 0,
+      "firstFailure": null,
+      "occlusion": "flat ground only; future terrain/crests require line-of-sight occlusion"
+    },
+    "freeLane": {
+      "pass": true,
+      "combinations": 1,
+      "required": 27,
+      "narrowest": 96.60000000000001,
+      "witness": {
+        "layouts": [],
+        "at": 0.6,
+        "active": [
+          [
+            -0.95,
+            -0.05
+          ]
+        ]
+      },
+      "scope": "static and authored seed layers only; complete acceptance also requires the time-aware combined ICE gate"
+    },
+    "tiles": {
+      "pass": true,
+      "count": 1437,
+      "maximum": 4096
+    }
+  }
+}

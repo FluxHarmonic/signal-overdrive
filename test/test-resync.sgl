@@ -6,6 +6,7 @@
         (motif tune)
         (motif tune player)
         (signal music score)
+        (only (signal music song) song-select!)
         (signal music conductor)
         (signal music transport)
         (signal music playback)
@@ -277,11 +278,29 @@
     (let ((out (make-bytevector (* 8 735) 0))
           (resyncs (list-ref (music-readout) 7))
           (cancels (list-ref (music-readout) 9)))
-      ;; one long frame the ring plays nothing of: the simulation is
-      ;; about 200 ms ahead of the ear after it (0.2 s less the nudge's
-      ;; 2% is 11 ticks and a remainder)
-      (core-headless-frame! 0.2)
-      (assert-equal 11 (conductor-tick (race-song (core-race))))
+      ;; The start hold caps simulation time at the audible position until
+      ;; the first tick, so a long frame at tick zero before the device
+      ;; plays no longer makes a lead (this test made its lead that way
+      ;; before the hold, and expected 11 ticks there; that is not to be
+      ;; restored). While it holds, pacing is not running either: no 2%
+      ;; nudge and no resync request before the device plays, since the
+      ;; hold itself keeps the simulation at the ear (a 0.2 s frame at tick
+      ;; zero with the clamp alone removed counts 12 ticks, not 11). Frames
+      ;; the ring plays start the clock, level with the ear, and the lead
+      ;; is made after them.
+      (let loop ((frame 0))
+        (when (< frame 8)
+          (%audio-stream-drain-for-test out 735 2)
+          (core-headless-frame! (/ 1.0 60.0))
+          (loop (+ frame 1))))
+      (let ((started (conductor-tick (race-song (core-race)))))
+        (assert-true (> started 0))
+        ;; then one long frame the ring plays nothing of: the simulation
+        ;; is about 200 ms ahead of the ear after it (0.2 s, less the
+        ;; nudge's 2% when it acts, is 11 or 12 ticks with the remainder)
+        (core-headless-frame! 0.2)
+        (let ((ticks (- (conductor-tick (race-song (core-race))) started)))
+          (assert-equal "11 or 12" (if (memv ticks '(11 12)) "11 or 12" (counts "ticks" ticks)))))
       (let loop ((frame 0))
         (when (< frame 480)
           (%audio-stream-drain-for-test out 735 2)
@@ -300,6 +319,9 @@
 ;; starting LEAD seconds into lap1 with the ear at its start, as in
 ;; shell-frames. Returns (samples . the splice's log entry or #f).
 (define (spliced lead frames)
+  ;; the stream plays the current song, and a boot selects track 0's; the
+  ;; comparison renders `tune`, so play its score
+  (song-select! SCORE-ID)
   (let* ((c0 (conductor-new 'lap1))
          (all (make-bytevector (* 8 735 frames) 0))
          (out (make-bytevector (* 8 735) 0)))
@@ -387,10 +409,18 @@
       (%audio-stream-drain-for-test out 6615 2)
       (wait-since (music-opened-jiffy) 0.15)
       (core-headless-frame! 0.15)
-      ;; 150 ms less the nudge's 2% is 8 ticks and a remainder; the first
-      ;; frame's real time since the opening can add one. Skipped, it was 0.
-      (let ((ticks (conductor-tick (race-song (core-race)))))
-        (assert-equal "8 or 9" (if (memv ticks '(8 9)) "8 or 9" (counts "ticks" ticks))))
+      ;; The ear is 35 ms behind the 150 ms played, and the start hold
+      ;; caps simulation time at the audible position until the first
+      ;; tick: 115 ms, 6 ticks and a remainder. Skipped (the bug this
+      ;; guards), it was 0. This test expected 8 or 9 before the start
+      ;; hold, the frame counted in full and the simulation up to 35 ms
+      ;; ahead of what the ear had heard; that is not to be restored.
+      (let ((ticks (conductor-tick (race-song (core-race))))
+            (heard (exact (floor (* 60.0 (music-audible-seconds))))))
+        (assert-equal "the ear's tick"
+                      (if (and (> ticks 0) (<= (abs (- ticks heard)) 1))
+                          "the ear's tick"
+                          (counts "ticks" ticks "heard" heard))))
       (assert-false (list-ref (music-readout) 8)))
     (music-close!)
     (assert-false (audio-initialized?)))
@@ -422,8 +452,18 @@
       (%audio-stream-drain-for-test out 6615 2)
       (wait-since (music-opened-jiffy) 0.15)
       (core-headless-frame! 0.15)
-      (let ((ticks (conductor-tick (race-song (core-race)))))
-        (assert-equal "8 or 9" (if (memv ticks '(8 9)) "8 or 9" (counts "ticks" ticks))))
+      ;; The ear is 35 ms behind the 150 ms played, and the start hold
+      ;; caps simulation time at the audible position until the first
+      ;; tick: 115 ms, 6 ticks and a remainder. Skipped (the bug this
+      ;; guards), it was 0. This test expected 8 or 9 before the start
+      ;; hold, the frame counted in full and the simulation up to 35 ms
+      ;; ahead of what the ear had heard; that is not to be restored.
+      (let ((ticks (conductor-tick (race-song (core-race))))
+            (heard (exact (floor (* 60.0 (music-audible-seconds))))))
+        (assert-equal "the ear's tick"
+                      (if (and (> ticks 0) (<= (abs (- ticks heard)) 1))
+                          "the ear's tick"
+                          (counts "ticks" ticks "heard" heard))))
       (assert-false (list-ref (music-readout) 8)))
     (music-close!)
     (assert-false (audio-initialized?))))
@@ -480,6 +520,136 @@
                     (counts "resyncs" (- (list-ref (music-readout) 7) resyncs)
                             "cancels" (- (list-ref (music-readout) 9) cancels))))
     (music-close!)
+    (assert-false (audio-initialized?))))
+
+;; A race start on PLATFORM, after half a second of the title's stream;
+;; then the new stream's device pulls nothing for LATE seconds of real
+;; time (#f: never) while the shell's frames run, then 735 frames a 60 Hz
+;; frame for FRAMES frames. Returns (ticks-while-silent ticks-at-end
+;; gap-at-end "requests R resyncs S"), the gap the ear less the
+;; simulation in seconds.
+(define (late-race-start platform late frames)
+  (set-store-root! "/tmp/signal-conductor-resync-test-store")
+  (core-param! "mute")
+  ;; the race song plays on the title only with the title off (the theme
+  ;; plays it otherwise): these streams are the race song's
+  (core-param! "title=0")
+  (core-boot! platform)
+  (let ((out (make-bytevector (* 8 735) 0)))
+    (music-start! 'offline-test-context (race-song (core-race)))
+    (let loop ((n 0))
+      (when (< n 30)
+        (%audio-stream-drain-for-test out 735 2)
+        (core-headless-frame! (/ 1.0 60.0))
+        (loop (+ n 1))))
+    (core-param! "start")
+    (core-headless-frame! (/ 1.0 60.0))
+    (assert-equal 'countdown (race-phase (core-race)))
+    (assert-equal 0 (conductor-tick (race-song (core-race))))
+    (let ((opened (music-opened-jiffy))
+          (resyncs (list-ref (music-readout) 7)))
+      ;; the device silent: real-time frames, nothing drained
+      (let silent ((k 1))
+        (when (< k (* 60 (or late 2.0)))
+          (wait-since opened (* k (/ 1.0 60.0)))
+          (core-headless-frame! (/ 1.0 60.0))
+          (silent (+ k 1))))
+      (let ((held (conductor-tick (race-song (core-race)))))
+        (let run ((k 0))
+          (when (< k frames)
+            (when late (%audio-stream-drain-for-test out 735 2))
+            (core-headless-frame! (/ 1.0 60.0))
+            (run (+ k 1))))
+        (let* ((c (race-song (core-race)))
+               (result (list held (conductor-tick c)
+                             (- (music-audible-seconds) (/ (conductor-tick c) 60.0))
+                             (counts "resyncs" (- (list-ref (music-readout) 7) resyncs)))))
+          (music-close!)
+          result)))))
+
+(test-group "resync: a race start's device starts late"
+  ;; gate5's Carrier: the race stream's device pulled nothing for 0.73 s
+  ;; while the simulation counted from the opening, and the race was heard
+  ;; 0.76 s late until two resyncs closed it at 4.8 s.
+  (test "the race holds at tick 0 while the device is silent, then runs with the ear"
+    (let ((r (late-race-start (quote desktop) 0.73 180)))
+      (assert-equal 0 (car r))
+      (assert-true (> (cadr r) 150))
+      (unless (< (abs (caddr r)) RESYNC-GAP) (assert-equal 'gap-closed r))
+      (assert-equal "resyncs 0" (list-ref r 3)))
+    (assert-false (audio-initialized?)))
+
+  (test "a device that never starts is waited for START-HOLD-CAP seconds, then the race starts"
+    (let ((r (late-race-start (quote desktop) #f 0)))
+      ;; 2 s of real-time frames, the cap at 1.5 s: about 30 ticks past it
+      (assert-true (> (car r) 20)))
+    (assert-false (audio-initialized?)))
+
+  ;; The web's race start is the same core path, its stream opened the same
+  ;; way; the gesture's start is mid-song (the title's ticks), never held.
+  (test "on the web a race start holds the same way"
+    (let ((r (late-race-start (quote web) 0.73 180)))
+      (assert-equal 0 (car r))
+      (unless (< (abs (caddr r)) RESYNC-GAP) (assert-equal 'gap-closed r))
+      (assert-equal "resyncs 0" (list-ref r 3)))
+    (assert-false (audio-initialized?)))
+
+  (test "on the web a mid-song start (the gesture's) is not held"
+    (set-store-root! "/tmp/signal-conductor-resync-test-store")
+    (core-param! "mute")
+    (core-param! "title=0")
+    (core-boot! (quote web))
+    (let loop ((n 0))
+      (when (< n 120) (core-headless-frame! (/ 1.0 60.0)) (loop (+ n 1))))
+    (let ((tick (conductor-tick (race-song (core-race))))
+          (out (make-bytevector (* 8 735) 0)))
+      (assert-true (> tick 100))
+      (music-start! 'offline-test-context (race-song (core-race)))
+      (wait-since (music-opened-jiffy) 0.25)
+      ;; nothing drained: a start mid-song does not wait for the device
+      (core-headless-frame! (/ 1.0 60.0))
+      (core-headless-frame! (/ 1.0 60.0))
+      (assert-true (> (conductor-tick (race-song (core-race))) tick)))
+    (music-close!)
+    (assert-false (audio-initialized?))))
+
+;; A resync asked for with a small gap whose device then stalls: the gap
+;; grows to about 0.5 s before the splice can run.
+(test-group "resync: a gap that outgrows its splice"
+  (test "one resync closes a gap that grew after it was asked for"
+    (let* ((c0 (conductor-new 'lap1))
+           (out (make-bytevector (* 8 735) 0))
+           (readout (lambda (i) (list-ref (music-readout) i)))
+           (resyncs (readout 7)))
+      (music-start! 'offline-test-context c0)
+      (music-frame! c0 #f)
+      ;; the simulation 80 ms ahead: a resync is asked for at once, its
+      ;; splice sized for 120 ms
+      (let loop ((frame 0) (s 0.08) (c (advance-to c0 5)) (p (pacing-new)) (requests 0))
+        (if (= frame 600)
+            (begin
+              (assert-equal "requests 1 resyncs 1" (counts "requests" requests "resyncs" (- (readout 7) resyncs)))
+              (unless (< (abs (pacing-gap p)) RESYNC-GAP) (assert-equal 'gap-closed (pacing-gap p)))
+              ;; it dropped the gap it measured, not more
+              (let ((entry (find (lambda (e) (and (eq? 'resync (vector-ref e 0)) (eq? 'drop (vector-ref e 1))))
+                                 (music-log))))
+                (assert-true entry)
+                (assert-true (> (vector-ref entry 3) (* 0.4 RATE)))
+                (assert-true (< (vector-ref entry 3) (* 0.62 RATE))))
+              (assert-true (>= (readout 10) 1))
+              (music-close!))
+            (begin
+              ;; the device stalls for frames 2 to 26: the ear stops, the
+              ;; simulation runs on
+              (unless (< 1 frame 27) (%audio-stream-drain-for-test out 735 2))
+              (let* ((dt (/ 1.0 60.0))
+                     (next (pace-frame p dt (+ s dt) (music-audible-seconds) #t #f (conductor-bar c)
+                                       in-flight: (music-resync-in-flight?)))
+                     (s (+ s (pacing-dt next)))
+                     (c (advance-to c (exact (floor (* s 60.0))))))
+                (when (pacing-resync? next) (music-request-resync!))
+                (music-frame! c #f clock-fraction: (- s (/ (conductor-tick c) 60.0)))
+                (loop (+ frame 1) s c next (if (pacing-resync? next) (+ requests 1) requests)))))))
     (assert-false (audio-initialized?))))
 
 ;; the knob is module state shared with later files in the suite

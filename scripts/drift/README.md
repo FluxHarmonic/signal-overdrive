@@ -70,6 +70,27 @@ the full mix is the workload players run.
    capture's own byte clock. A steady +11 ms is expected: the audible clock
    advances only when the device callback consumes a 1024-frame period
    (23.2 ms at 44.1 kHz), so it lags playback by half a period on average.
+5. **A lost lock is RED**, never windows dropped from the score:
+   - an acquisition correlating under 0.8 (every normal music-only capture
+     saved from earlier gates acquired at 0.866 or better);
+   - 3 or more consecutive windows under 0.5.
+
+   Both rules judge music-only captures only. In the full-mix companion
+   the engine and one-shots mask the music by design: saved companions
+   acquired at 0.57 to 0.86, and every one had 4 to 22 consecutive windows
+   under 0.5 (5 of them from song 49.6-50 s). For the full mix only an
+   acquisition under 0.5 (no lock at all) is lost; its RESULT line reports
+   the acquisition score and the longest weak run.
+
+   After a weak acquisition, until a window matches, each window is also
+   searched 1 s either side. A lag found there replaces the tracked one
+   by the re-verification's rule (more than 60 ms away, at least 0.7, and
+   0.15 over the best near the tracked lag), and only when the window
+   before found the same lag. A race start heard 590 ms late until a
+   resync at 4.8 s acquired at 0.70; tracking 120 ms around that lock
+   scored it as 141 ms and dropped most of the late windows as unmatched.
+   With the wider search it scores 588 ms, its true lag (Carrier's gate5
+   capture, and the `late-start` fixture).
 
 Each capture is then classified by cause:
 

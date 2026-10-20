@@ -6,7 +6,8 @@
           (substratic time clock))
   (export audible-seconds pacing pacing-new pace-frame
           pacing-dt pacing-gap pacing-resync? pacing-last-resync-bar
-          RESYNC-GAP jump-handoff-window clock-advance-capped CATCH-UP-STEPS)
+          RESYNC-GAP jump-handoff-window clock-advance-capped CATCH-UP-STEPS
+          START-HOLD-CAP start-holding? start-hold-interval splice-outgrown?)
   (begin
     ;; Delivered and queued are DEVICE frames, not Motif render frames.
     ;; Paused frames are frames explicitly inserted as silence on pause.
@@ -76,6 +77,37 @@
         (pacing p dt: (if paused? 0.0 (+ dt nudge))
                   gap: gap resync?: resync?
                   last-resync-bar: (if resync? bar (pacing-last-resync-bar p)))))
+
+    ;; A song starting at tick zero waits for the ear. A device can take
+    ;; most of a second to start pulling a new stream (a race start
+    ;; measured 0.73 s with nothing consumed), and a simulation counting
+    ;; from the opening ran that far ahead of the sound, for resyncs to
+    ;; close bars later. So until the song's first tick the simulation may
+    ;; not pass the ear: the interval is bounded by the song time heard
+    ;; (EAR, negative until the first sample is heard) less the clock's
+    ;; remainder (ACC). The race holds on the countdown's first frame, the
+    ;; start card with no count shown (the count is in grid bar 3). A
+    ;; device that has not started by START-HOLD-CAP seconds after the
+    ;; opening (SINCE-OPEN) is waited for no longer: the race starts and
+    ;; pacing resyncs. No stream (muted, EAR #f) holds nothing.
+    ;; While it holds, pacing neither nudges nor asks for a resync: the gap
+    ;; is the device's start, which the hold itself absorbs.
+    (define START-HOLD-CAP 1.5)
+    (define (start-holding? tick ear since-open)
+      (and ear (= tick 0) (< since-open START-HOLD-CAP)))
+    (define (start-hold-interval interval tick ear acc since-open)
+      (if (start-holding? tick ear since-open)
+          (min interval (max 0.0 (- ear acc)))
+          interval))
+
+    ;; A drop splice is sized when its resync is asked for, by the gap
+    ;; then (with at least twice RESYNC-GAP of room), and runs at a bar
+    ;; line later. If the ear fell further behind meanwhile, so that the
+    ;; room leaves more than RESYNC-GAP of the gap undropped, the splice is
+    ;; planned again with room for all of it: dropping just the room left
+    ;; a race start's 730 ms gap at 600 ms, for a second resync 2.8 s later.
+    (define (splice-outgrown? gap room-seconds)
+      (and (< gap 0) (> (- (- gap) room-seconds) RESYNC-GAP)))
 
     ;; Motif walks ahead of render. Hand over AFTER N-1's first row was
     ;; walked, BEFORE N's first row; the latter is a missed window, never

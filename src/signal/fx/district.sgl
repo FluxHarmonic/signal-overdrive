@@ -1,0 +1,61 @@
+;;; (signal fx district) - A district's look (design §4.2 and §5.2): the
+;;; palette the post pass snaps to, the fog and the sky's gradient, and its
+;;; weather, how hard it rains in each section of the song. A track names
+;;; its district in its file (`district`), and gen-track carries it into
+;;; the generated data, so (track-district t) picks the look.
+;;;
+;;; Docklands (0.2): embers plus seven harbour colours (the `docklands`
+;;; palette in (signal dither); scripts/art/check-palette.mjs checks them),
+;;; a cold harbour fog in place of 0.1's violet one, the sky's low end the
+;;; fog's colour so the horizon has no seam, and rain: steady through the
+;;; race, heaviest in `hold` (the breakdown), easing through `fill` and
+;;; `traced`. Every other district (none, for data made before 0.2) keeps
+;;; 0.1's look and no rain.
+;;;
+;;; Pure: tables and lookups only.
+
+(define-library (signal fx district)
+  (import (sigil core))
+
+  (export district-look look-district look-palette look-fog-color look-sky-top look-sky-low
+          look-rain section-rain rain-target)
+
+  (begin
+    ;; #(district palette fog-colour sky-top sky-low rain-by-section)
+    ;; Colours are 0..1. HARBOUR_FOG is #2B3A55.
+    (define HARBOUR-FOG '(0.169 0.227 0.333))
+    (define LOOKS
+      (list (vector 'docklands 'docklands HARBOUR-FOG '(0.051 0.039 0.102) HARBOUR-FOG
+                    '((calm . 0.3) (grid . 0.3) (lap1 . 0.25) (lap2 . 0.45) (hold . 1.0)
+                      (fill . 0.8) (traced . 0.6) (uplink . 0.35) (results . 0.3)))
+            (vector 'none 'embers '(0.18 0.11 0.30) '(0.05 0.04 0.10) '(0.18 0.11 0.30) '())))
+
+    ;; The look for a district (a symbol); an unknown one gets none's.
+    (define (district-look district)
+      (let loop ((ls LOOKS))
+        (cond ((null? (cdr ls)) (car ls))
+              ((eq? (vector-ref (car ls) 0) district) (car ls))
+              (else (loop (cdr ls))))))
+
+    (define (look-district l) (vector-ref l 0))
+    (define (look-palette l) (vector-ref l 1))
+    (define (look-fog-color l) (vector-ref l 2))
+    (define (look-sky-top l) (vector-ref l 3))
+    (define (look-sky-low l) (vector-ref l 4))
+    (define (look-rain l) (vector-ref l 5))
+
+    ;; How hard it rains in a section, 0..1 (0 for a section not listed).
+    (define (section-rain l section)
+      (let ((e (assq section (look-rain l))))
+        (if e (cdr e) 0.0)))
+
+    ;; The rain the effects step to this tick: the showcase's (a number, or
+    ;; #f when its solo forces none), else fx-weather's when forced (0..1;
+    ;; below 0 is off), else the district's for the section. (Not a cond
+    ;; with a test-only clause: Sigil gives such a clause #<undefined>, not
+    ;; the test's value, and the shell's first version of this passed that
+    ;; to fx-step from the showcase's REFLECTIONS solo on.)
+    (define (rain-target showcase forced l section)
+      (if (number? showcase)
+          showcase
+          (if (>= forced 0.0) forced (section-rain l section))))))

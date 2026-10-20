@@ -9,8 +9,7 @@
 ;;; prints it.
 
 (define-library (signal tuning)
-  (import (sigil core)
-          (sigil string)
+  (import (sigil string)
           (sigil list)
           (signal handling))
 
@@ -41,10 +40,11 @@
         (dither       look     0.0    1.0    1.0   1.0     "DITHER")
         (spread       look     0.0    64.0   4.0   8.0     "SPREAD")
         (lut          look     0.0    1.0    1.0   1.0     "DITHER BY LOOKUP")
-        (palette      look     0.0    1.0    1.0   0.0     "PALETTE")))
+        ;; 0 the district's own (Docklands' for Docklands; embers otherwise), 1 crash, 2 embers
+        (palette      look     0.0    2.0    1.0   0.0     "PALETTE (0 DISTRICT 1 CRASH 2 EMBERS)")))
 
     (define RACE-KNOBS
-      '((track        race     0.0    1.0    1.0   0.0     "TRACK (0 OVAL 1 LOOP)")
+      '((track        race     0.0    3.0    1.0   0.0     "TRACK (BREAKWATER QUAYSIDE BASIN OVAL)")
         (laps         race     1.0    9.0    1.0   3.0     "LAPS")
         (rivals       race     0.0    5.0    1.0   5.0     "RIVALS")
         (rival-pace   race     0.7    1.2    0.01  0.97    "RIVAL PACE")
@@ -60,7 +60,8 @@
 
     ;; The 0.1 effects (signal fx state): each an intensity, 0 off, 1 the
     ;; default. fx-solo shows one alone (1 dip, 2 pools, 3 chase, 4 sky,
-    ;; 5 glitch, 6 warp, 7 interference); fx-tier forces the integrity the
+    ;; 5 glitch, 6 warp, 7 interference, and 0.2's district look: 8
+    ;; reflections, 9 the wet ground, 10 rain); fx-tier forces the integrity the
     ;; effects see (-1: the cargo's own; the race is untouched); fx-speed
     ;; the speed the speed lines see, 0 to 1 of top (-1: the machine's own;
     ;; a still frame with the lines, for scripts/gate-motion);
@@ -75,11 +76,28 @@
         (fx-glitch    fx       0.0    1.0    0.1   1.0     "FX ICE GLITCH")
         (fx-warp      fx       0.0    1.0    0.1   1.0     "FX ICE WARP")
         (fx-interf    fx       0.0    1.0    0.1   1.0     "FX INTERFERENCE")
-        (fx-solo      fx       0.0    7.0    1.0   0.0     "FX SOLO (0 ALL)")
+        (fx-reflect   fx       0.0    1.0    0.1   1.0     "FX REFLECTIONS")
+        (fx-wet       fx       0.0    1.0    0.1   1.0     "FX WET GROUND")
+        (fx-rain      fx       0.0    2.0    0.1   1.0     "FX RAIN")
+        ;; the rain kept off the road ahead (0: the first look's, unguarded),
+        ;; and its debug view: what it touches, for the occlusion check
+        (fx-rain-guard fx      0.0    1.0    0.25  1.0     "FX RAIN GUARD")
+        (fx-rain-debug fx      0.0    1.0    1.0   0.0     "FX RAIN DEBUG VIEW")
+        ;; the far ground's filter (0.2, the look, but fx- so a change keeps the
+        ;; race): taps along the view (0 is 0.1's fade to the tile's average),
+        ;; the stretch they resolve, the mip level bias
+        (fx-ground-taps fx     0.0    8.0    1.0   4.0     "FX GROUND TAPS (0 0.1)")
+        (fx-ground-aniso fx    1.0    64.0   1.0   8.0     "FX GROUND STRETCH")
+        (fx-ground-bias fx     -2.0   2.0    0.25  0.0     "FX GROUND MIP BIAS")
+        ;; the rain forced, 0..1 (-1: the district's for the section)
+        (fx-weather   fx       -1.0   1.0    0.1   -1.0    "FX WEATHER (-1 SECTION)")
+        (fx-solo      fx       0.0    10.0   1.0   0.0     "FX SOLO (0 ALL)")
         (fx-tier      fx       -1.0   100.0  5.0   -1.0    "FX INTEGRITY (-1 REAL)")
         (fx-speed     fx       -1.0   1.0    0.1   -1.0    "FX SPEED (-1 REAL)")
         (fx-showcase  fx       0.0    1.0    1.0   0.0     "FX SHOWCASE")
         (fx-passes    fx       1.0    512.0  1.0   1.0     "FX GROUND PASSES")
+        ;; the post pass drawn that many times a frame (the rain's cost)
+        (fx-post-passes fx     1.0    512.0  1.0   1.0     "FX POST PASSES")
         (fx-hold      fx       0.0    1.0    1.0   0.0     "FX HOLD AT PEAK (COST)")))
 
     ;; The title screen ((signal title)): 0 skips it; the fades either side

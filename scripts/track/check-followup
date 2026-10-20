@@ -1,0 +1,63 @@
+#!/bin/sh
+# Phantom-only legacy refusal audit. Requires fresh current-pipeline artifacts.
+# Never convert a RED draft report to a PASS to make the acceptance job green.
+set -eu
+cd "$(dirname "$0")/../.."
+track_run="$1"
+track_cached="$2"
+track_timing="$3"
+mkdir -p "$track_run"
+trap 'track_code=$?; printf "RESULT: follow-up verification exit %s; inspect STAGE and evidence\n" "$track_code" > "$track_run/RESULT"' EXIT
+printf 'final gate and sabotage suite\n' > "$track_run/STAGE"
+node --test scripts/track/gates.test.mjs scripts/track/combined-ice.test.mjs > "$track_run/tests.log" 2>&1
+printf 'reuse unchanged atlas/coda/stall evidence from %s\n' "$track_cached" > "$track_run/PROVENANCE"
+cp -a "$track_cached/." "$track_run/cached-pipeline"
+cp "$track_timing/oval-ai.json" "$track_run/cached-pipeline/oval-ai.json"
+for track_id in quayside basin; do
+  cp "$track_timing/$track_id-ai.json" "$track_run/cached-pipeline/$track_id-ai.json"
+done
+track_pipeline="$track_run/cached-pipeline"
+node scripts/track/report.mjs "$track_pipeline/current-gates.json" tracks/oval.json \
+  test/fixtures/tracks/reshaped/quayside.json test/fixtures/tracks/reshaped/basin.json > "$track_run/geometry.log"
+for track_file in tracks/oval.json test/fixtures/tracks/reshaped/quayside.json test/fixtures/tracks/reshaped/basin.json; do
+  track_id="$(basename "$track_file" .json)"
+  printf 'combined ICE and preview: %s\n' "$track_id" > "$track_run/STAGE"
+  track_code=0
+  node scripts/track/combined-ice.mjs "$track_file" "$track_pipeline/$track_id-ai.json" "$track_pipeline/$track_id-combined.json" \
+    > "$track_run/$track_id-combined.log" 2>&1 || track_code="$?"
+  printf '%s\n' "$track_code" > "$track_pipeline/$track_id-combined-status"
+  if [ "$track_id" = oval ]; then test "$track_code" -eq 0; else test "$track_code" -eq 1; fi
+done
+node scripts/track/preview.mjs tracks/oval.json "$track_pipeline/song-contract.json" "$track_run/preview-pending" \
+  > "$track_run/preview-pending.log"
+node scripts/track/preview.mjs tracks/oval.json "$track_pipeline/song-contract.json" "$track_pipeline/preview" \
+  "$track_pipeline/oval-ai.json" "$track_pipeline/oval-combined.json" > "$track_run/preview-complete.log"
+rsvg-convert -w 1200 "$track_pipeline/preview/oval-preview.svg" -o "$track_run/oval-preview.png"
+printf 'final acceptance must reject unsafe combined drafts\n' > "$track_run/STAGE"
+track_code=0
+node scripts/track/verify.mjs "$track_pipeline" > "$track_run/reject-red.log" 2>&1 || track_code="$?"
+test "$track_code" -eq 1
+rg -q 'quayside combined live ICE process' "$track_run/reject-red.log"
+# Also prove the JSON verdict is checked, independently of process exit status.
+printf '0\n' > "$track_pipeline/quayside-combined-status"
+track_code=0
+node scripts/track/verify.mjs "$track_pipeline" > "$track_run/reject-red-json.log" 2>&1 || track_code="$?"
+printf '1\n' > "$track_pipeline/quayside-combined-status"
+test "$track_code" -eq 1
+rg -q 'quayside combined live ICE gate' "$track_run/reject-red-json.log"
+node --input-type=module - "$track_run" <<'JS'
+import fs from "node:fs";
+import assert from "node:assert/strict";
+const run = process.argv[2];
+const read = path => JSON.parse(fs.readFileSync(`${run}/${path}`));
+assert.deepEqual(read("preview-pending/oval-report.json").acceptance, {complete:false, pass:false});
+assert.equal(read("preview-pending/oval-report.json").par.complete, false);
+assert.deepEqual(read("cached-pipeline/preview/oval-report.json").acceptance, {complete:true, pass:true});
+for (const id of ["quayside", "basin"]) {
+  const report = read(`cached-pipeline/${id}-combined.json`);
+  assert.equal(report.pass, false);
+  assert.equal(report.rules[4].pass, false);
+  assert.equal(report.rules[4].firstFailure.reason, "opposite-side-swap-without-full-rest");
+}
+JS
+printf 'finished; oval fully checked; two unsafe hazard fixtures correctly RED\n' > "$track_run/STAGE"

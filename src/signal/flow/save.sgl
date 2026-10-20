@@ -1,0 +1,137 @@
+;;; (signal flow save) - The player's progress: what is unlocked and the
+;;; best times, kept in one datum under the store key "progress" ((substratic
+;;; store kv): localStorage on the web, a file under the user's data
+;;; directory natively).
+;;;
+;;; The datum is an association list:
+;;;   (version . 1)
+;;;   (cleared . ((cup . (tier ...)) ...))   cups finished in the top three, per tier
+;;;   (cups . (((cup . tier) place points) ...))   the best cup finish per tier
+;;;   (best . (((mode tier track) race lap) ...))  best times in ticks, or #f
+;;; TIME TRIAL's times are filed under (trial trial track).
+;;;
+;;; Unlocks run in order:
+;;;   - a tier is open once any cup has been cleared on the tier before it
+;;;     (LEARNER is always open);
+;;;   - a cup is open once the cup before it has been cleared on any tier
+;;;     (the first is always open).
+;;;
+;;; A datum that is not a save (a missing key, an older or damaged one)
+;;; reads as a new save, never an error. All updates are pure; save-store!
+;;; and save-load write and read.
+
+(define-library (signal flow save)
+  (import (sigil core)
+          (sigil list)
+          (substratic store kv)
+          (signal flow tierdata))
+
+  (export save-new save-load save-store! save-valid?
+          save-tier-open? save-cup-open? save-cleared? save-clear
+          save-cup-best save-record-cup save-best save-record-best save-unlock-all SAVE-KEY)
+
+  (begin
+    (define SAVE-KEY "progress")
+    (define VERSION 1)
+
+    (define (save-new) (list (cons 'version VERSION) (cons 'cleared '()) (cons 'cups '()) (cons 'best '())))
+
+    ;; Every entry is checked as well as the top level: the readers below
+    ;; take entries apart without looking.
+    (define (all? ok? xs) (or (null? xs) (and (ok? (car xs)) (all? ok? (cdr xs)))))
+    (define (ticks? x) (or (not x) (and (exact-integer? x) (>= x 0))))
+    (define (cleared-entry? e) (and (list? e) (pair? e) (all? symbol? e)))
+    (define (cup-entry? e)
+      (and (list? e) (= (length e) 3)
+           (pair? (car e)) (symbol? (caar e)) (symbol? (cdar e))
+           (exact-integer? (cadr e)) (exact-integer? (caddr e))))
+    (define (best-entry? e)
+      (and (list? e) (= (length e) 3)
+           (list? (car e)) (= (length (car e)) 3) (all? symbol? (car e))
+           (ticks? (cadr e)) (ticks? (caddr e))))
+    (define (save-valid? d)
+      (and (list? d)
+           (all? pair? d)
+           (let ((v (assq 'version d))) (and v (eqv? (cdr v) VERSION)))
+           (let ok ((ks (list (cons 'cleared cleared-entry?) (cons 'cups cup-entry?) (cons 'best best-entry?))))
+             (or (null? ks)
+                 (let ((e (assq (caar ks) d)))
+                   (and e (list? (cdr e)) (all? (cdar ks) (cdr e)) (ok (cdr ks))))))))
+
+    (define (save-load)
+      (let ((d (store-read-datum SAVE-KEY)))
+        (if (save-valid? d) d (save-new))))
+    ;; #t when the store took it.
+    (define (save-store! s) (and (store-write-datum! SAVE-KEY s) #t))
+
+    (define (field s k) (cdr (assq k s)))
+    (define (with s k v) (map (lambda (e) (if (eq? (car e) k) (cons k v) e)) s))
+
+    ;; --- unlocks -----------------------------------------------------------------
+
+    (define (save-cleared? s cup tier)
+      (let ((e (assq cup (field s 'cleared)))) (and e (memq tier (cdr e)) #t)))
+    (define (cleared-any-cup? s tier)
+      (let loop ((cs (field s 'cleared)))
+        (and (pair? cs) (or (and (memq tier (cdar cs)) #t) (loop (cdr cs))))))
+
+    (define (save-tier-open? s tier)
+      (let ((i (tier-index tier)))
+        (or (= i 0) (cleared-any-cup? s (list-ref TIER-IDS (- i 1))))))
+
+    ;; cups: the cup ids in order.
+    (define (save-cup-open? s cups cup)
+      (let loop ((cs cups) (prev #f))
+        (cond ((null? cs) #f)
+              ((eq? (car cs) cup)
+               (or (not prev) (let ((e (assq prev (field s 'cleared)))) (and e (pair? (cdr e))))))
+              (else (loop (cdr cs) (car cs))))))
+
+    (define (save-clear s cup tier)
+      (if (save-cleared? s cup tier)
+          s
+          (let ((e (assq cup (field s 'cleared))))
+            (with s 'cleared
+                  (if e
+                      (map (lambda (x) (if (eq? (car x) cup) (cons cup (append (cdr x) (list tier))) x)) (field s 'cleared))
+                      (append (field s 'cleared) (list (list cup tier))))))))
+
+    ;; Development: every tier cleared on the first cup, so every tier and
+    ;; the next cup are open. Never written to the store by the flow.
+    (define (save-unlock-all s cups)
+      (let loop ((s s) (cs cups))
+        (if (null? cs) s
+            (loop (let tiers ((s s) (ts TIER-IDS)) (if (null? ts) s (tiers (save-clear s (car cs) (car ts)) (cdr ts))))
+                  (cdr cs)))))
+
+    ;; --- the best cup finish per tier ---------------------------------------------
+
+    ;; (place points) or #f
+    (define (save-cup-best s cup tier)
+      (let ((e (assoc (cons cup tier) (field s 'cups)))) (and e (cdr e))))
+    ;; Better is a higher place, then more points.
+    (define (save-record-cup s cup tier place points)
+      (let ((old (save-cup-best s cup tier)))
+        (if (and old (or (< (car old) place) (and (= (car old) place) (>= (cadr old) points))))
+            s
+            (with s 'cups (cons (list (cons cup tier) place points)
+                                (filter (lambda (e) (not (equal? (car e) (cons cup tier)))) (field s 'cups)))))))
+
+    ;; --- best times -----------------------------------------------------------------
+
+    ;; (race lap), each ticks or #f; #f when nothing is recorded.
+    (define (save-best s mode tier track)
+      (let ((e (assoc (list mode tier track) (field s 'best)))) (and e (cdr e))))
+
+    ;; Keeps the lower of each; race #f for a run that did not finish.
+    ;; Returns (save new-race? new-lap?).
+    (define (save-record-best s mode tier track race lap)
+      (let* ((old (or (save-best s mode tier track) (list #f #f)))
+             (better (lambda (new old) (and new (or (not old) (< new old)))))
+             (nr (better race (car old)))
+             (nl (better lap (cadr old))))
+        (if (or nr nl)
+            (list (with s 'best (cons (list (list mode tier track) (if nr race (car old)) (if nl lap (cadr old)))
+                                      (filter (lambda (e) (not (equal? (car e) (list mode tier track)))) (field s 'best))))
+                  nr nl)
+            (list s #f #f))))))

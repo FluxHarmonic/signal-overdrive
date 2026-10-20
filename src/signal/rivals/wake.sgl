@@ -1,0 +1,62 @@
+;;; Void's dead-air wake. It is ICE: whole-stretch ownership, neighbour lane,
+;;; placement and checksum checks all use the same canonical gate procedures.
+;;; Hand-off to Null clears both the live strip and its pending warning.
+(define-library (signal rivals wake)
+  (import (sigil struct)
+          (signal track)
+          (signal ice schedule)
+          (signal ice placement)
+          (signal ice runtime)
+          (signal rivals turns))
+  (export wake wake? wake-step wake-zone wake-announced wake-arms wake-until
+          wake-reserved-until wake-stretch wake-live? wake-warning?)
+  (begin
+    (define-struct wake
+      (zone default: '())
+      (announced default: 0)
+      (arms default: 0)
+      (until default: 0)
+      (reserved-until default: 0)
+      (stretch default: 0))
+
+    (define (wake-live? state tick)
+      (and state (<= (wake-arms state) tick) (< tick (wake-until state))))
+
+    (define (wake-warning? state tick)
+      (and state (<= (wake-announced state) tick) (< tick (wake-arms state))))
+
+    ;; One160-texel strip,34 wide, behind Void. One bar live after a full
+    ;; telegraph (two for LEARNER), plus one bar of exclusive reservation.
+    ;; Lower-tier density removes eligible bars from the same fixed policy.
+    (define (wake-step previous t ice seed tick attacking? s u)
+      (let ((contract (ice-state-contract ice)))
+        (cond
+          ((or (not attacking?) (null? contract)) #f)
+          ((and previous (< tick (wake-reserved-until previous))) previous)
+          (else
+            (let* ((bar (ice-tick->bar contract tick))
+                   (rules (list-ref contract 4))
+                   (arms-bar (+ bar (list-ref rules 7)))
+                   (arms (ice-bar->tick contract arms-bar))
+                   (until (ice-bar->tick contract (+ arms-bar 1)))
+                   (reserved (ice-bar->tick contract (+ arms-bar 2)))
+                   (density (if (> (length contract) 8) (list-ref contract 8) 1))
+                   (half (/ 17.0 (list-ref contract 2)))
+                   (from (- s 180.0))
+                   (to (- s 20.0))
+                   (zone (list "$void-wake" "wake" "dead-air"
+                               (list from to (max -1.0 (- u half)) (min 1.0 (+ u half)))))
+                   (trace (ice-state-tracer ice))
+                   (extra (if trace (list (ice-tracer-zone contract trace)) '()))
+                   (crossings (ice-state-crossings ice)))
+              (and (= tick (ice-bar->tick contract bar))
+                   (= (modulo bar density) 0)
+                   (eq? (pair-attacker arms-bar) 'void)
+                   (not (list-ref crossings 3))
+                   (ice-straight? t from to)
+                   (ice-placement? t zone)
+                   (let ((slot (ice-zone-reservation contract crossings seed arms reserved
+                                 (list-ref zone 3) (ice-state-reservations ice) extra until)))
+                     (and slot
+                          (wake zone: zone announced: tick arms: arms until: until
+                                reserved-until: reserved stretch: (car slot))))))))))))

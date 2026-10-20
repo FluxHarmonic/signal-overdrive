@@ -1,0 +1,74 @@
+;;; Phantom-only native capture: real GL meshes, shader, cache and cleanup.
+(import (sigil test)
+        (sigil math)
+        (sigil fs)
+        (sigil desktop)
+        (sigil graphics)
+        (substratic image capture)
+        (signal track)
+        (signal ice runtime)
+        (signal ice draw)
+        (signal mode7 camera)
+        (signal mode7 render))
+
+(load "scripts/track/native-test-support.sgl")
+
+(define (curved-strip)
+  (let ((samples (make-vector (* 256 6) 0.0)))
+    (let loop ((i 0))
+      (when (< i 256)
+        (let ((angle (/ (* i 16.0) 3000.0)))
+          (for-each
+            (lambda (offset value)
+              (vector-set! samples (+ (* i 6) offset) value))
+            '(0 1 2 3 4 5)
+            (list (* 3000.0 (sin angle)) (* 3000.0 (- 1.0 (cos angle)))
+                  (cos angle) (sin angle) 100.0 0.0)))
+        (loop (+ i 1))))
+    (make-track samples 16.0 '() '() 'curved-mesh-fixture)))
+
+(define CAPTURES
+  '(("empty" () ())
+    ("warning" () (("wall" "firewall" "left" (1200.0 1900.0 -1.0 0.2))))
+    ("firewall" (("wall" "firewall" "left" (1200.0 1900.0 -1.0 0.2))) ())
+    ("drone" (("swarm" "drone" "left" (1200.0 1900.0 -1.0 -0.2))) ())
+    ("tracer" (("trace" "tracer" "target" (1200.0 2120.0 -0.34 0.34))) ())
+    ("wake" (("void" "wake" "left" (1200.0 1360.0 -0.7 -0.36))) ())
+    ("cleared" () ())))
+
+(test-group "live ICE native presentation"
+  (live-ice-native-test "test-ice-draw: active kinds, warnings, cache replacement and clear"
+    (lambda ()
+      (run-game "ICE mesh verification" 480 270
+        (lambda ()
+          (gfx-setup)
+          (set-viewport 480 270)
+          (mode7-init! 480 270)
+          (ice-draw-init!)
+          (let* ((t (curved-strip))
+                 (p (track-point t 1000.0 0.0))
+                 (heading (atan (cos (/ 1000.0 3000.0)) (- (sin (/ 1000.0 3000.0)))))
+                 (c (cam-behind (make-cam 0.0 0.0 40.0 heading 0.16 1.33 80.0 480 270)
+                                (car p) (cadr p) heading 104.0))
+                 (target (make-render-target 480 270 'nearest 'depth)))
+            (for-each
+              (lambda (scenario)
+                (let ((state (ice-state active: (cadr scenario) telegraphs: (caddr scenario))))
+                  ;; Repeated frames use the existing mesh; the next scenario
+                  ;; replaces it. The final empty frame frees the last mesh.
+                  (let frame ((i 0))
+                    (when (< i 3)
+                      (wait-frame)
+                      (ice-draw-prepare! t state)
+                      (with-3d-pass target '(0.02 0.02 0.04 1.0)
+                        (draw-live-ice! c))
+                      (with-frame
+                        (clear-screen 0.02 0.02 0.04 1.0)
+                        (draw-render-target target 0.0 0.0 480.0 270.0))
+                      (frame (+ i 1))))
+                  (let ((png (capture-frame-png 480 270)))
+                    (assert-true (bytevector? png))
+                    (write-file-bytes (string-append "build/ice-mesh-" (car scenario) ".png") png))))
+              CAPTURES)
+            (render-target-free! target))
+          (gfx-shutdown))))))

@@ -21,3 +21,15 @@
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Embedder-Policy: require-corp
   Cross-Origin-Resource-Policy: same-origin
+
+/drive/sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/drive/
+  Cache-Control: no-cache, must-revalidate
+
+/drive/index.html
+  Cache-Control: no-cache, must-revalidate
+
+/drive/assets/pwa/manifest.webmanifest
+  Cache-Control: public, max-age=300

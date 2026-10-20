@@ -1,0 +1,290 @@
+{
+  "version": 1,
+  "id": "basin",
+  "title": "Turning Basin",
+  "district": "docklands",
+  "role": "race",
+  "geometry": {
+    "type": "catmull-rom",
+    "halfWidth": 84,
+    "control": [
+      [963,380], [1379,380], [1794,380], [2209,380], [2625,380], [3040,380],
+      [3213,407], [3369,487], [3493,611], [3573,767], [3600,940], [3573,1113],
+      [3493,1269], [3369,1393], [3213,1473], [3040,1500], [2677,1500], [2314,1500],
+      [1951,1500], [1588,1500], [1225,1500], [1076,1520], [938,1577], [818,1668],
+      [727,1788], [670,1926], [650,2075], [670,2224], [727,2363], [818,2482],
+      [937,2573], [1076,2630], [1225,2650], [1593,2650], [1960,2650], [2328,2650],
+      [2695,2650], [3063,2650], [3430,2650], [3586,2714], [3650,2870], [3586,3026],
+      [3430,3090], [3037,3090], [2644,3090], [2251,3090], [1859,3090], [1466,3090],
+      [1073,3090], [680,3090], [540,3052], [438,2950], [400,2810], [400,2380],
+      [400,1950], [400,1520], [400,1090], [400,660], [438,520], [540,418],
+      [680,380]
+    ]
+  },
+  "zones": {
+    "boost": [
+      [
+        0.03,
+        -0.8,
+        -0.3
+      ],
+      [
+        0.03,
+        0.3,
+        0.8
+      ],
+      [
+        0.255,
+        -0.75,
+        -0.25
+      ],
+      [
+        0.255,
+        0.25,
+        0.75
+      ],
+      [
+        0.66,
+        -0.8,
+        -0.3
+      ],
+      [
+        0.66,
+        0.3,
+        0.8
+      ],
+      [
+        0.85,
+        -0.7,
+        -0.2
+      ],
+      [
+        0.85,
+        0.2,
+        0.7
+      ]
+    ],
+    "repair": [
+      0.5,
+      0.555,
+      0.42,
+      1
+    ],
+    "ice": [
+      [
+        0.07,
+        0.09,
+        -0.9,
+        -0.1
+      ],
+      [
+        0.71,
+        0.73,
+        0.1,
+        0.9
+      ]
+    ]
+  },
+  "iceLayers": [
+    {
+      "id": "gantry",
+      "kind": "firewall", "fromLap": 2, "phraseBars": 4,
+      "upBars": 1, "downBars": 1, "phaseBars": 0,
+      "layouts": [
+        {
+          "id": "left",
+          "zones": [
+            [
+              0.28,
+              0.315,
+              -1,
+              0.2
+            ]
+          ]
+        },
+        {
+          "id": "right",
+          "zones": [
+            [
+              0.28,
+              0.315,
+              -0.2,
+              1
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "west-road",
+      "kind": "firewall", "fromLap": 2, "phraseBars": 4,
+      "upBars": 1, "downBars": 1, "phaseBars": 1,
+      "layouts": [
+        {
+          "id": "left",
+          "zones": [
+            [
+              0.87,
+              0.91,
+              -1,
+              0.2
+            ]
+          ]
+        },
+        {
+          "id": "centre",
+          "zones": [
+            [
+              0.87,
+              0.91,
+              -0.6,
+              0.6
+            ]
+          ]
+        },
+        {
+          "id": "right",
+          "zones": [
+            [
+              0.87,
+              0.91,
+              -0.2,
+              1
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "id": "north-quay",
+      "from": 0,
+      "to": 0.118,
+      "label": "North quay"
+    },
+    {
+      "id": "carousel",
+      "from": 0.118,
+      "to": 0.243,
+      "label": "The carousel"
+    },
+    {
+      "id": "gantry",
+      "from": 0.243,
+      "to": 0.336,
+      "label": "Under the gantries"
+    },
+    {
+      "id": "crane-hook",
+      "from": 0.336,
+      "to": 0.463,
+      "label": "Crane Hook"
+    },
+    {
+      "id": "tug-lane",
+      "from": 0.463,
+      "to": 0.574,
+      "label": "Tug lane"
+    },
+    {
+      "id": "turning-basin",
+      "from": 0.574,
+      "to": 0.646,
+      "label": "Turning basin hairpin"
+    },
+    {
+      "id": "long-berth",
+      "from": 0.646,
+      "to": 0.785,
+      "label": "Long berth"
+    },
+    {
+      "id": "west-road",
+      "from": 0.785,
+      "to": 1,
+      "label": "West road"
+    }
+  ],
+  "song": {
+    "id": "carrier-b",
+    "cues": "music/carrier-b/cues.sgl",
+    "bpm": 140,
+    "sections": [
+      {
+        "mark": "lap1",
+        "lap": 1,
+        "at": 0
+      },
+      {
+        "mark": "lap2",
+        "lap": 2,
+        "at": 0
+      },
+      {
+        "mark": "hold",
+        "lap": 2,
+        "at": 0.5
+      },
+      {
+        "mark": "fill",
+        "targetLap": 3,
+        "targetAt": 0,
+        "leadBars": 2
+      },
+      {
+        "mark": "traced",
+        "lap": 3,
+        "at": 0
+      },
+      {
+        "mark": "uplink",
+        "lap": 4,
+        "at": 0
+      }
+    ]
+  },
+  "musicZones": [
+    {
+      "id": "north-quay-drop",
+      "kind": "drop",
+      "from": 0,
+      "to": 0.02,
+      "sections": [
+        "traced"
+      ]
+    },
+    {
+      "id": "basin-lights",
+      "kind": "searchlights",
+      "from": 0.5,
+      "to": 0.8,
+      "sections": [
+        "hold"
+      ]
+    },
+    {
+      "id": "gantry-firewall",
+      "kind": "firewall",
+      "from": 0.28,
+      "to": 0.315,
+      "sections": [
+        "lap2",
+        "traced"
+      ]
+    },
+    {
+      "id": "west-road-firewall",
+      "kind": "firewall",
+      "from": 0.87,
+      "to": 0.91,
+      "sections": [
+        "lap2",
+        "traced"
+      ]
+    }
+  ],
+  "decoration": {
+    "puddles": 60
+  }
+}

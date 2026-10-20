@@ -1,4 +1,5 @@
-;;; Offline reference from intended simulation landings. It never reads
+;;; Offline reference from intended simulation landings, in the current race
+;;; song (native: --song=ID before --music-reference). It never reads
 ;;; the player's diagnostic landing log and never opens an audio device.
 (define-library (signal music reference)
   (import (sigil math)
@@ -6,7 +7,6 @@
           (sigil io)
           (sigil fs)
           (motif tune)
-          (signal music score)
           (signal music song)
           (signal music conductor)
           (signal music playback)
@@ -51,7 +51,7 @@
       (unless (and (exact-integer? rate) (<= 8000 rate 192000))
         (error "invalid reference sample rate" rate))
       (let* ((plan (reference-validate (read (open-input-string (read-file-string plan-path)))))
-             (tune (read-tune-string SCORE-TUNE-TEXT))
+             (tune (read-tune-string (song-tune-text)))
              (b (playback-open tune rate (reference-conductor plan 0) MUSIC-INSERTS))
              (buffer (make-bytevector (* 8 256) 0))
              (port (open-binary-output-file output-path)))

@@ -38,12 +38,14 @@
                        (string-replace (string-replace page "__VERSION__" stamp)
                                        "__TITLE__" "Signal Overdrive"))
     (write-file-string (path-join out "build.txt") (string-append stamp "\n"))
+    (unless (= 0 (process-run "node" "scripts/prepare-pwa.mjs" out))
+      (error "PWA preparation failed"))
     (display "  web stamp ") (display stamp) (newline)
     ctx))
 
 (package
   name: "signal-overdrive"
-  version: "0.1.0"
+  version: "0.2.0"
   sigil: "0.22.11"
   description: "A Mode 7 racer in the spirit of F-Zero, set in the world of Crash The Stack"
   license: "GPL-3.0-or-later"

@@ -1,0 +1,97 @@
+#!/bin/sh
+# scripts/gate-rain [BUILD]   The rain doesn't hide the track (0.2, David:
+# "the raindrops obscure the track"). In a downpour, the rain may cover at
+# most 7% of the road ahead in any frame: the centreline from the machine
+# to 1,900 texels on, the readability rule's look-ahead.
+#
+# How: the web build (default build/web) on each Docklands track, on the
+# autopilot in a forced downpour (?fx-weather=1), running (not paused:
+# a pause freezes the rain, and 20 frames would be one), as the
+# threshold's captures were, with the rain's debug view on
+# (fx-rain-debug=1): the post pass paints the road ahead green and every
+# pixel a streak or splash touched red. scripts/rain-occlusion.mjs counts
+# them. Three arms a track, 20 frames each, 150 ms apart:
+#   guard   the rain as shipped (fx-rain-guard=1): every frame at most 7%
+#           (--max 7), its look-ahead band at least 40,000 px (--min-band:
+#           a missing band would pass any --max), and the rain still
+#           falling: at least 500 rain pixels a frame outside the band, on
+#           average (--min-rain: a guard that culled the rain to nothing
+#           would pass any --max; the band itself the guard keeps clear,
+#           of streaks and of splash rings)
+#   plant   the first look's rain (fx-rain-guard=0), the sabotage arm for
+#           --max: the gate must see it, so it must go RED, for its rain
+#           alone (each frame the debug view, its band all there, its
+#           worst over 7%). Measured 2026-10-19 on the Intel UHD 630, 90
+#           frames: 7.14% to 12.32%; the guard's 2.85% to 6.13%, its
+#           splash rings nearly all of it, until 2026-10-20 (Breakwater's
+#           new pads: 7.34%) when the guard kept the rings off the band
+#           too. Rain outside the band, the guard's: about 1,600 to 1,750
+#           px a frame.
+#   dry     the guard with the weather dry (fx-weather=0), the sabotage
+#           arm for --min-rain: RED, for the floor alone (every frame
+#           within --max and --min-band, in the debug view).
+# GREEN when every guard arm is GREEN and every plant and dry arm RED for
+# its own reason; RED otherwise. RAIN_OUT, if set, must be a new or empty
+# directory: old frames would pass the frame counts. The browser runs on the GPU: pin it (VK_ICD_FILENAMES) on a
+# machine with two, and check the renderer line.
+# Exit 0 GREEN, 1 RED, 2 setup.
+set -u
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+BUILD="${1:-$REPO/build/web}"
+OUT="${RAIN_OUT:-$(mktemp -d)}"
+MAX=7 MIN_BAND=40000 MIN_RAIN=500 N=20
+[ -f "$BUILD/signal-overdrive.wasm" ] || { echo "SETUP: $BUILD has no web build"; exit 2; }
+if [ -n "${RAIN_OUT:-}" ] && [ -e "$OUT" ] && [ -n "$(ls -A "$OUT")" ]; then echo "SETUP: RAIN_OUT $OUT is not empty"; exit 2; fi
+mkdir -p "$OUT"
+STEPS="$OUT/steps.json"
+node -e '
+const n = Number(process.argv[1]), s = [{ waitLine: "ready", ms: 60000, history: true }, { wait: 7000 }, { param: "fx-weather=1" }, { wait: 6000 },
+  { param: "fx-rain-debug=1" }];
+for (const [arm, g] of [["guard", 1], ["plant", 0]]) {
+  s.push({ param: `fx-rain-guard=${g}` }, { wait: 300 });
+  for (let i = 0; i < n; i++) s.push({ shot: `${arm}-${String(i).padStart(3, "0")}.png` }, { wait: 150 });
+}
+s.push({ param: "fx-rain-guard=1" }, { param: "fx-weather=0" }, { wait: 6000 });
+for (let i = 0; i < n; i++) s.push({ shot: `dry-${String(i).padStart(3, "0")}.png` }, { wait: 150 });
+require("fs").writeFileSync(process.argv[2], JSON.stringify(s));' "$N" "$STEPS" || { echo "SETUP: steps"; exit 2; }
+red=0
+for t in quayside basin breakwater; do
+  d="$OUT/$t"; mkdir -p "$d"
+  node "$REPO/scripts/fx-check.mjs" "$BUILD" "$STEPS" --gpu --scale 1 --query "dev&track=$t&start&autopilot&mute&laps=9&motion=full" \
+    --out "$d" --port 8573 --cdp 9573 > "$d/check.log" 2>&1
+  rc=$?
+  [ "$t" = quayside ] && grep "^renderer" "$d/check.log"
+  shots=$(ls "$d"/guard-*.png "$d"/plant-*.png "$d"/dry-*.png 2>/dev/null | wc -l)
+  if [ "$rc" != 0 ] || [ "$shots" != $((3 * N)) ]; then echo "$t: SETUP: fx-check rc=$rc, $shots of $((3 * N)) frames"; tail -5 "$d/check.log"; exit 2; fi
+  for a in guard plant dry; do
+    k=$(for f in "$d"/$a-*.png; do md5sum < "$f"; done | sort -u | wc -l)
+    [ "$k" -ge $((N / 2)) ] || { echo "$t $a: SETUP: only $k distinct frames of $N (the race or the rain is frozen)"; exit 2; }
+  done
+  for a in guard plant dry; do
+    node "$REPO/scripts/rain-occlusion.mjs" --max $MAX --min-band $MIN_BAND --min-rain $MIN_RAIN "$d"/$a-*.png > "$d/$a.txt"
+    echo $? > "$d/$a.rc"
+  done
+  g=$(cat "$d/guard.rc") p=$(cat "$d/plant.rc") y=$(cat "$d/dry.rc")
+  echo "$t guard: $(tail -2 "$d/guard.txt" | tr '\n' ' ')(want GREEN)"
+  echo "$t plant: $(tail -2 "$d/plant.txt" | tr '\n' ' ')(want RED)"
+  echo "$t dry: $(tail -2 "$d/dry.txt" | tr '\n' ' ')(want RED)"
+  [ "$g" = 0 ] || red=1
+  [ "$p" = 1 ] || { echo "$t: the plant arm was not RED: the gate cannot see the first look's rain"; red=1; }
+  [ "$y" = 1 ] || { echo "$t: the dry arm was not RED: the gate cannot see the rain gone"; red=1; }
+  # each RED for its own reason (the plants landed): every frame the debug
+  # view with its band all there; the plant's worst frame over the limit;
+  # the dry arm's frames all within it, and its mean under the floor
+  for a in plant dry; do
+    node -e '
+const [file, minBand] = process.argv.slice(1);
+const shots = require("fs").readFileSync(file, "utf8").split("\n").filter((l) => /\.png: band \d+ px,/.test(l));
+const bad = shots.filter((l) => l.includes("not the debug view") || Number(l.match(/\.png: band (\d+) px,/)[1]) < Number(minBand));
+process.exit(shots.length && !bad.length ? 0 : 1);' "$d/$a.txt" "$MIN_BAND" || { echo "$t: the $a arm's frames are not a measurable debug view"; red=1; }
+  done
+  w=$(sed -nE 's/.*worst ([0-9.]+)%.*/\1/p' "$d/plant.txt")
+  node -e 'process.exit(Number(process.argv[1]) > Number(process.argv[2]) ? 0 : 1)' "${w:-0}" "$MAX" || { echo "$t: the plant arm's worst frame ${w:-?}% is not over $MAX%"; red=1; }
+  if grep -q "<- RED" "$d/dry.txt" || ! grep -q "(under the floor)" "$d/dry.txt"; then echo "$t: the dry arm is not RED for the floor alone"; red=1; fi
+done
+if [ "$red" = 0 ]; then echo GREEN; [ -z "${RAIN_OUT:-}" ] && rm -rf "$OUT"; exit 0; fi
+echo "RED (frames in $OUT)"
+exit 1

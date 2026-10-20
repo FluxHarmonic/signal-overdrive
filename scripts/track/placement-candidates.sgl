@@ -1,0 +1,42 @@
+;;; Read-only candidate scan using the game's exact D37 placement predicate.
+(import (sigil io) (signal track) (signal ice placement))
+
+(define arguments
+  (let find ((rest (cdr (command-line))))
+    (cond ((null? rest) '())
+          ((string=? (car rest) "--") (cdr rest))
+          (else (find (cdr rest))))))
+(define data (call-with-input-file (car arguments) read))
+(define t (make-track (list->vector (cadr data)) (list-ref data 2) '() (list-ref data 3)))
+(define groups (list-ref data 4))
+(define step (list-ref data 5))
+
+(for-each
+  (lambda (group)
+    (let* ((owner (car group))
+           (kind (cadr group))
+           (templates (caddr group))
+           (span (apply max (map cadr templates)))
+           (starts
+             (let scan ((from 0) (legal '()))
+               (if (> (+ from span) (track-length t))
+                   (reverse legal)
+                   (let ((passes?
+                           (let check ((remaining templates))
+                             (or (null? remaining)
+                                 (let ((zone (car remaining)))
+                                   (and (ice-placement? t
+                                          (list owner kind "candidate"
+                                            (list (+ from (car zone)) (+ from (cadr zone))
+                                                  (caddr zone) (cadddr zone))))
+                                        (check (cdr remaining))))))))
+                     (scan (+ from step) (if passes? (cons from legal) legal)))))))
+      (display "{\"owner\":") (write owner)
+      (display ",\"starts\":[")
+      (let emit-candidates ((rest starts) (first? #t))
+        (unless (null? rest)
+          (unless first? (display ","))
+          (write (car rest))
+          (emit-candidates (cdr rest) #f)))
+      (display "]}") (newline)))
+  groups)

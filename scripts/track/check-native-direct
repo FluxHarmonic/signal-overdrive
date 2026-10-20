@@ -1,0 +1,22 @@
+#!/bin/sh
+# Phantom-only: the public builder links existing archives into the standard
+# test runtime. Test CLI dispatch cannot trigger a full dependency rebuild.
+set -eu
+cd "$(dirname "$0")/../.."
+track_run="$1"
+mkdir -p "$track_run"
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'track_code=$?; printf "RESULT: direct native presentation exit %s; inspect STAGE and logs\n" "$track_code" > "$track_run/RESULT"' EXIT
+track_sigil="$HOME/.sigil/versions/0.22.11/sigil"
+printf 'link standard test runtime against existing native archives\n' > "$track_run/STAGE"
+timeout 120 scripts/dev "$track_sigil" eval -f scripts/track/build-native-harness.sgl \
+  > "$track_run/link.log" 2>&1
+printf 'stage installed sources beside the standard runtime\n' > "$track_run/STAGE"
+node scripts/track/stage-native-harness.mjs "$track_run" > "$track_run/staging.log" 2>&1
+export SIGIL_TEST_HARNESS="$track_run/harness/bin/signal-live-ice-test"
+printf 'actual queued-stream dead-air test without a device\n' > "$track_run/STAGE"
+node scripts/track/native-audio.mjs "$track_run/audio" > "$track_run/live-audio.log" 2>&1
+printf 'native active and warning meshes on private Xvfb\n' > "$track_run/STAGE"
+node scripts/track/native-ice.mjs "$track_run/meshes" > "$track_run/meshes.log" 2>&1
+printf 'finished\n' > "$track_run/STAGE"

@@ -1,0 +1,15 @@
+#!/bin/sh
+# Phantom-only bounded candidate collection, never changes authored sources.
+set -eu
+cd "$(dirname "$0")/../.."
+track_run="$1"
+mkdir -p "$track_run"
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'track_code=$?; printf "RESULT: placement candidate scan exit %s; proposals need joint acceptance\n" "$track_code" > "$track_run/RESULT"' EXIT
+for track_id in quayside basin; do
+  printf 'actual D37 all-layout placement candidates: %s\n' "$track_id" > "$track_run/STAGE"
+  timeout 260 node scripts/track/placement-candidates.mjs "tracks/$track_id.json" "$track_run/$track_id.json" \
+    > "$track_run/$track_id.log" 2>&1
+done
+printf 'finished\n' > "$track_run/STAGE"

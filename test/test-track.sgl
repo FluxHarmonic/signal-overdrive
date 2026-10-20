@@ -75,4 +75,39 @@
 
   (test "the loop has four boost pads and a repair strip"
     (assert-equal 4 (length (track-boost T)))
-    (assert-equal 1 (length (track-repair T)))))
+    (assert-equal 1 (length (track-repair T))))
+
+  (test "generated tracks carry5120 worlds; explicit rectangular bounds stay separate"
+    (let* ((o (track-named 'oval))
+           (r (make-track (track-samples o) (track-step o)
+                          (track-boost o) (track-repair o) 'rectangle
+                          (track-ice o) 8192 4096)))
+      (assert-equal 5120 (track-world-width T))
+      (assert-equal 5120 (track-world-height o))
+      (assert-equal 8192 (track-world-width r))
+      (assert-equal 4096 (track-world-height r))
+      (assert-equal 5120 (track-world-width (straight-track)))))
+
+  (test "generated runtime reads its schedule and leaves live tracer activation disabled on the oval"
+    (let* ((o (track-named 'oval))
+           (schedule (track-ice-schedule o))
+           (crossings '(500 2300 4100 #f)))
+      (assert-equal 1 (car schedule))
+      (assert-equal 27 (car (list-ref schedule 4)))
+      (assert-equal (track-ice o)
+                    (map (lambda (owned) (list-ref owned 3))
+                         (track-live-ice-at o crossings 0 4400)))
+      (assert-false (track-tracer-slot o crossings 0 4400 3000.0 0.0 '()))))
+
+  ;; The generated data is (name samples step boost repair ice world-width
+  ;; world-height district schedule): the district 9th, the schedule 10th.
+  ;; Data left in an older layout puts the schedule where the district is
+  ;; read, and the track loses its schedule without an error.
+  (test "every generated track, the retired loop too, reads its district 9th and its schedule 10th"
+    (for-each
+      (lambda (name)
+        (let ((t (if (eq? name 'loop) (loop-track) (track-named name))))
+          (assert-equal (list name 'docklands) (list name (track-district t)))
+          (assert-true (pair? (track-ice-schedule t)))
+          (assert-equal (list name 1) (list name (car (track-ice-schedule t))))))
+      (cons 'loop TRACKS))))

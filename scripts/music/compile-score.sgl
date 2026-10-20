@@ -1,9 +1,26 @@
-;;; Build-time entry. Compiles Carrier (music/carrier/race.cts and cues.sgl) by
-;;; default; any tune and cue sheet on the contract can stand in, without code changes.
+;;; Build-time entry.
+;;;
+;;;   compile-score.sgl -- --all
+;;;     Every race song in SONGS: Carrier (music/carrier/) to
+;;;     src/signal/music/score.sgl, each other song ID (music/ID/) to
+;;;     src/signal/music/score/ID.sgl, and src/signal/music/scores.sgl, which
+;;;     lists them with the song each track in tracks/*.json binds. A track
+;;;     that binds a song not in SONGS fails the build.
+;;;
+;;;   compile-score.sgl -- TUNE CUES OUT
+;;;     One tune and cue sheet on the contract to OUT as (signal music score),
+;;;     without code changes (the diagnostic placeholder, a check's copy).
 (import (sigil process)
         (sigil fs)
+        (sigil string)
+        (sigil list)
+        (sigil json)
         (motif tune)
         (signal music compile))
+
+;; The race songs the game carries. Carrier is the default: a track with
+;; no song binding plays it.
+(define SONGS '(carrier carrier-a carrier-b carrier-c))
 
 (define arguments
   (let find ((remaining (cdr (command-line))))
@@ -11,14 +28,65 @@
       ((null? remaining) '())
       ((string=? (car remaining) "--") (cdr remaining))
       (else (find (cdr remaining))))))
-(define tune-path (if (pair? arguments) (car arguments) "music/carrier/race.cts"))
-(define cues-path (if (> (length arguments) 1) (cadr arguments) "music/carrier/cues.sgl"))
-(define output-path (if (> (length arguments) 2) (caddr arguments) "src/signal/music/score.sgl"))
 
-(define score (compile-score (read-tune-file tune-path) (read-score-cues cues-path)))
-(write-file-string output-path (score-module-string score))
-(display "Compiled score: ")
-(display (score-field score 'id))
-(display " / onsets: ")
-(display (length (score-field score 'onsets)))
-(newline)
+(define (say . xs) (for-each display xs) (newline))
+
+(define (compile-one tune-path cues-path)
+  (compile-score (read-tune-file tune-path) (read-score-cues cues-path)))
+
+(define (report score)
+  (say "Compiled score: " (score-field score 'id) " / onsets: " (length (score-field score 'onsets))))
+
+(define (song-dir id) (string-append "music/" (symbol->string id)))
+
+;; ((track . song) ...) from tracks/*.json, those with a song binding
+(define (track-songs)
+  (if (not (file-exists? "tracks"))
+      '()
+      (let loop ((files (list-sort string<? (filter (lambda (f) (string-ends-with? f ".json"))
+                                                    (directory-list "tracks"))))
+                 (acc '()))
+        (if (null? files)
+            (reverse acc)
+            (let* ((j (json-decode (read-file-string (string-append "tracks/" (car files)))))
+                   (track (json-get-in j '("id") #f))
+                   (song (json-get-in j '("song" "id") #f)))
+              (cond
+                ((not song) (loop (cdr files) acc))
+                ((not (memq (string->symbol song) SONGS))
+                 (error "a track binds a song the game does not carry (add it to SONGS in scripts/music/compile-score.sgl)"
+                        (car files) song))
+                (else (loop (cdr files) (cons (cons (string->symbol track) (string->symbol song)) acc)))))))))
+
+(define (compile-all)
+  (let ((bindings (track-songs)))
+    (ensure-directory "src/signal/music/score")
+    (let ((libraries
+           (map (lambda (id)
+                  (let* ((dir (song-dir id))
+                         (score (compile-one (string-append dir "/race.cts") (string-append dir "/cues.sgl"))))
+                    (unless (eq? (score-field score 'id) id)
+                      (error "a song's cue sheet names another song" id (score-field score 'id)))
+                    (report score)
+                    (if (eq? id 'carrier)
+                        (begin
+                          (write-file-string "src/signal/music/score.sgl" (score-module-string score))
+                          (cons "(signal music score)" "SCORE"))
+                        (let ((library (string-append "(signal music score " (symbol->string id) ")"))
+                              (prefix (string-append "SCORE-" (string-upcase (symbol->string id)))))
+                          (write-file-string (string-append "src/signal/music/score/" (symbol->string id) ".sgl")
+                                             (score-module-string score library prefix))
+                          (cons library prefix)))))
+                SONGS)))
+      (write-file-string "src/signal/music/scores.sgl" (scores-module-string libraries bindings))
+      (say "Songs: " (length libraries) " / track bindings: " bindings))))
+
+(cond
+  ((equal? arguments '("--all")) (compile-all))
+  (else
+   (let* ((tune-path (if (pair? arguments) (car arguments) "music/carrier/race.cts"))
+          (cues-path (if (> (length arguments) 1) (cadr arguments) "music/carrier/cues.sgl"))
+          (output-path (if (> (length arguments) 2) (caddr arguments) "src/signal/music/score.sgl"))
+          (score (compile-one tune-path cues-path)))
+     (write-file-string output-path (score-module-string score))
+     (report score))))

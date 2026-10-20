@@ -21,13 +21,19 @@
 //              of them from two rules (Pages joins repeated values with a
 //              comma, and Chrome reads "same-origin, same-origin" as no COOP)
 //   em-dash    no em dash in the site's own text files
+//   news       the tree has /news/, a page per post, feed.xml (RSS 2.0) and
+//              feed.json (JSON Feed 1.1), each listing every news/*.md post
+//              newest first; the landing's latest-post link names the newest
+//              post's page, with its title and summary; / and /news/ carry
+//              the two feeds' <link rel="alternate">, and the landing links
+//              /news/ and the RSS feed
 //   analytics  every HTML page in the tree, the game's page included, carries
 //              the Plausible snippet in its gated form (the script tag is
 //              added only on signaloverdrive.net) with the site's script ID,
 //              exactly once, in <head>, and no other site's
 //                (scripts/plausible-check.mjs, shared with the other game sites)
 // In headless Chrome (muted, into the worker-null sink), with plausible.io
-// stood in for so nothing reaches the internet:
+// stood in for so nothing reaches the internet (see live):
 //   landing    /: the title, the logo (291x27, alt "Signal Overdrive"), the
 //              three JetBrains Mono faces loaded, every image decoded and the
 //              pictures 480x270, the reactive-music section, the How it's
@@ -49,9 +55,16 @@
 //              changes by itself
 //   contrast   every text role on / and the 404 meets 4.5:1 (3:1 for large
 //              text) against the background behind it
-//   version    no version number in the title, meta or rendered copy
-//   phone      at 390 CSS px (a phone, emulated), / and the 404 have no
-//              horizontal scroll, and the logo and GET IN fit on screen
+//   version    no version number in the title, meta or rendered copy, but
+//              for the landing's latest-post box (build-news writes it from
+//              the newest post at every stage, so the copy around it still
+//              never needs changing per release)
+//   news-pages /news/ and the feeds answer 200 with their types, a click on
+//              the landing's latest post opens that post's page (its title in
+//              the h1), and /news/ lists every post
+//   phone      at 390 CSS px (a phone, emulated), /, the 404, /news/ and the
+//              newest post have no horizontal scroll, and the logo and GET IN
+//              fit on screen
 //   404        a missing page shows the 404's number and a link home, and the
 //              same 404, styled, under the game's path
 //   local      every leg above ran at the loopback host, as a private preview
@@ -70,6 +83,12 @@
 //              itself reports its audio ring as "worklet-sab" (the bridge's
 //              SharedArrayBuffer path). The control: / is NOT isolated and
 //              has no SharedArrayBuffer, so the probe can tell the two apart.
+//   live       no request went to the real signaloverdrive.net: every one the
+//              page or a worker made for it was answered by a stub or the
+//              site's own worker (the PWA worker's sw.js, fetched by the
+//              browser, and its precache, fetched by the worker, are stubbed
+//              on their own CDP sessions); the live site and plausible.io do
+//              not resolve in this Chrome, so a request no stub answers fails
 //   console    no console error, exception or failed request on /, the 404 or
 //              the game, at either host
 // Exit 0 green, 1 red, 2 setup failed (the line starts SETUP-FAILED).
@@ -78,6 +97,7 @@ import os from "node:os";
 import path from "node:path";
 import zlib from "node:zlib";
 import { spawn, spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { auditTree, plausibleStub, isPlausibleFailure, PRIVACY } from "./plausible-check.mjs";
 
 const PLAUSIBLE_ID = "pa-GCzY0KZPnFuB1DEsbPead";
@@ -142,7 +162,7 @@ function readPNG(file) {
   const want = ["index.html", "404.html", "style.css", "logo.png", "logo-glitch.js", ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => `logo-glitch-${n}.png`),
                 "favicon.png", "favicon.ico", "apple-touch-icon.png", "mark.png", "shots/og.png",
                 "fonts/OFL.txt", "fonts/JetBrainsMono-Regular.woff2", "fonts/JetBrainsMono-Bold.woff2", "fonts/JetBrainsMono-Italic.woff2",
-                `${SLUG}/index.html`];
+                `${SLUG}/index.html`, "news/index.html", "news/feed.xml", "news/feed.json"];
   const missing = want.filter((f) => !files.includes(f));
   missing.length ? bad("tree", `missing: ${missing.join(", ")}`) : ok("tree", `the site's ${want.length} named files are staged`);
 }
@@ -206,6 +226,77 @@ function readPNG(file) {
   dashed.length ? bad("em-dash", `an em dash in ${dashed.join(", ")}`) : ok("em-dash", `none in the site's ${mine.length} text files`);
 }
 
+// ---- news: /news/, the feeds, the landing's latest post (no browser) ---------------------
+// The posts are news/*.md beside this script (the tree's source); each must
+// be in /news/, both feeds, and have its page; the newest is the landing's.
+const NEWS_SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "news");
+let newsPosts = [];   // [{ slug, title, date, version, summary }], newest first
+{
+  const detail = [];
+  const has = (f) => files.includes(f);
+  for (const f of ["news/index.html", "news/feed.xml", "news/feed.json"]) if (!has(f)) detail.push(`${f} is not in the tree`);
+  if (!fs.existsSync(NEWS_SRC)) detail.push(`${NEWS_SRC} missing (the posts' source)`);
+  else {
+    for (const f of fs.readdirSync(NEWS_SRC).filter((f) => f.endsWith(".md")).sort()) {
+      const m = fs.readFileSync(path.join(NEWS_SRC, f), "utf8").match(/^---\n([\s\S]*?)\n---\n/);
+      const fm = m ? Object.fromEntries(m[1].split("\n").filter((l) => l.trim()).map((l) => { const i = l.indexOf(":"); return [l.slice(0, i).trim(), l.slice(i + 1).trim()]; })) : {};
+      newsPosts.push({ slug: f.slice(0, -3), title: fm.title, date: fm.date, version: fm.version, summary: fm.summary });
+    }
+    newsPosts.sort((a, b) => (b.date + b.version).localeCompare(a.date + a.version));
+    if (!newsPosts.length) detail.push("news/ has no posts");
+  }
+  const SITE = "https://signaloverdrive.net";
+  const want = newsPosts.map((p) => `${SITE}/news/${p.slug}/`);
+  for (const p of newsPosts) if (!has(`news/${p.slug}/index.html`)) detail.push(`news/${p.slug}/index.html (news/${p.slug}.md's page) is not in the tree`);
+  if (has("news/feed.json")) {
+    let jf = null;
+    try { jf = JSON.parse(text("news/feed.json")); } catch (e) { detail.push(`feed.json does not parse: ${e.message}`); }
+    if (jf) {
+      if (jf.version !== "https://jsonfeed.org/version/1.1") detail.push(`feed.json is version ${jf.version}, not JSON Feed 1.1`);
+      if (jf.feed_url !== `${SITE}/news/feed.json`) detail.push(`feed.json's feed_url is ${jf.feed_url}`);
+      const urls = (jf.items || []).map((i) => i.url);
+      if (urls.join() !== want.join()) detail.push(`feed.json lists ${urls.join(" ") || "nothing"} (want ${want.join(" ")}, newest first)`);
+    }
+  }
+  if (has("news/feed.xml")) {
+    const x = text("news/feed.xml");
+    if (!/^<\?xml version="1\.0" encoding="UTF-8"\?>\s*<rss version="2\.0"/.test(x)) detail.push("feed.xml is not an RSS 2.0 document");
+    const links = [...x.matchAll(/<item><title>[\s\S]*?<\/title><link>([^<]+)<\/link>/g)].map((m) => m[1]);
+    if (links.join() !== want.join()) detail.push(`feed.xml lists ${links.join(" ") || "nothing"} (want ${want.join(" ")}, newest first)`);
+  }
+  if (has("news/index.html")) {
+    const listed = [...text("news/index.html").matchAll(/<li data-version="[^"]+"><a href="(\/news\/[a-z0-9-]+\/)">/g)].map((m) => m[1]);
+    if (listed.join() !== newsPosts.map((p) => `/news/${p.slug}/`).join()) detail.push(`/news/ lists ${listed.join(" ") || "nothing"}`);
+  }
+  const alternates = (f) => {
+    const t = text(f);
+    return /<link rel="alternate" type="application\/rss\+xml" title="[^"]+" href="\/news\/feed\.xml">/.test(t)
+      && /<link rel="alternate" type="application\/feed\+json" title="[^"]+" href="\/news\/feed\.json">/.test(t);
+  };
+  for (const f of ["index.html", "news/index.html"]) if (has(f) && !alternates(f)) detail.push(`${f} lacks the feeds' <link rel="alternate">`);
+  // the landing's latest post: build-news's box, naming the newest post
+  const landing = text("index.html");
+  const box = (landing.match(/<!-- news:latest -->([\s\S]*?)<!-- \/news:latest -->/) || [])[1] || "";
+  const newest = newsPosts[0];
+  if (!box) detail.push("the landing has no latest-post box (<!-- news:latest -->)");
+  else if (newest) {
+    const link = box.match(/<a class="latest-post" href="([^"]+)">([^<]+)<\/a>/);
+    if (!link) detail.push("the landing's latest-post box has no post link (build-news did not run?)");
+    else {
+      if (link[1] !== `/news/${newest.slug}/`) detail.push(`the landing's latest post links ${link[1]} (want /news/${newest.slug}/)`);
+      if (link[2] !== newest.title) detail.push(`the landing's latest post is titled "${link[2]}" (want "${newest.title}")`);
+    }
+    if (!box.includes(`datetime="${newest.date}"`)) detail.push(`the landing's latest post has no date ${newest.date}`);
+    // the summary as read: tags dropped and entities decoded in the box, the Markdown's marks dropped in the source
+    const plain = (s) => s.replace(/<[^>]+>/g, "").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/\s+/g, " ");
+    const said = newest.summary.replace(/\[([^\]]+)\]\([^)\s]+\)/g, "$1").replace(/\*+/g, "");
+    if (!plain(box).includes(said)) detail.push("the landing's latest post lacks the post's summary");
+    if (!/href="\/news\/"/.test(box) || !/href="\/news\/feed\.xml"/.test(box)) detail.push("the latest-post box does not link /news/ and the RSS feed");
+  }
+  detail.length ? bad("news", detail.slice(0, 8).join("; "))
+    : ok("news", `/news/, ${newsPosts.length} post page(s), feed.xml and feed.json list ${newsPosts.map((p) => p.slug).join(", ")} newest first; the landing's latest post is /news/${newest.slug}/ "${newest.title}" (${newest.date}); feed alternates on / and /news/`);
+}
+
 // ---- analytics (no browser) ------------------------------------------------------------
 {
   // every page carries the gated snippet: the script tag is added only on
@@ -227,6 +318,10 @@ spawnSync("sh", ["-c", "pactl list short sinks 2>/dev/null | grep -q worker-null
 const chrome = spawn("google-chrome", [
   "--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--mute-audio", "--autoplay-policy=no-user-gesture-required",
   "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--enable-webgl", "--ignore-gpu-blocklist",
+  // the backstop: the live site and plausible.io do not resolve, so a request
+  // no stub answers fails here instead of reaching the internet (the stubs
+  // answer before name resolution; the "live" leg below counts any such failure)
+  `--host-resolver-rules=MAP ${PLAUSIBLE_DOMAIN} ~NOTFOUND, MAP www.${PLAUSIBLE_DOMAIN} ~NOTFOUND, MAP plausible.io ~NOTFOUND`,
   "--remote-debugging-port=0", `--user-data-dir=${udd}`, "--window-size=1100,900", "about:blank",
 ], { stdio: "ignore", detached: true, env: { ...process.env, PULSE_SINK: "worker-null" } });
 const killChrome = () => { try { process.kill(-chrome.pid, "SIGKILL"); } catch { /* gone */ } try { fs.rmSync(udd, { recursive: true, force: true }); } catch { /* scratch */ } };
@@ -247,11 +342,26 @@ const ws = new WebSocket(pageWs);
 let msgId = 0; const pending = new Map();
 const consoleLines = [], consoleErrors = [];
 const net = new Map();
+// every request for the live site, from the page's session and every
+// worker's, keyed "<session>:<requestId>", so the "live" leg can tell a
+// stub's answer from one that went for the network
+const LIVE = new RegExp(`^https://(www\\.)?${PLAUSIBLE_DOMAIN.replace(/\./g, "\\.")}(/|$)`);
+const liveReqs = new Map(), stubbedIds = new Set(), browserIds = new Set();   // browserIds: the browser session's pauses, by networkId
+const noteLive = (sid, msg) => {
+  const p = msg.params || {};
+  if (msg.method === "Fetch.requestPaused" && LIVE.test(p.request.url) && p.networkId) stubbedIds.add(`${sid}:${p.networkId}`);
+  if (msg.method === "Network.requestWillBeSent" && LIVE.test(p.request.url)) liveReqs.set(`${sid}:${p.requestId}`, { url: p.request.url, sid, status: null, fromSW: false, cache: false, failed: null });
+  const r = liveReqs.get(`${sid}:${p.requestId}`);
+  if (!r) return;
+  if (msg.method === "Network.responseReceived") { r.status = p.response.status; r.fromSW = !!p.response.fromServiceWorker; r.cache = !!(p.response.fromDiskCache || p.response.fromPrefetchCache); }
+  if (msg.method === "Network.loadingFailed") r.failed = p.errorText;
+};
 let stub = null;
 ws.addEventListener("message", (ev) => {
   const msg = JSON.parse(ev.data);
   if (msg.id && pending.has(msg.id)) { const { res, rej } = pending.get(msg.id); pending.delete(msg.id); msg.error ? rej(new Error(JSON.stringify(msg.error))) : res(msg.result); return; }
   if (stub) stub.onMessage(msg);
+  noteLive("page", msg);
   const p = msg.params || {};
   if (msg.method === "Runtime.consoleAPICalled") {
     const t = (p.args || []).map((a) => a.value ?? a.description ?? "").join(" ");
@@ -275,6 +385,70 @@ await send("Page.enable"); await send("Runtime.enable"); await send("Network.ena
 await send("Network.setCacheDisabled", { cacheDisabled: true });
 // plausible.io, stood in for: no leg reaches the internet
 stub = await plausibleStub(send, { mode: "stub", sites: { [REAL]: BASE } });
+
+// ---- the requests the page's session does not see ---------------------------------------
+// plausibleStub's Fetch is the page session's, and pauses only the page's own
+// requests. A service worker's script (its install, and every update check)
+// is fetched by the browser, and only the browser session's Fetch pauses it;
+// the worker's own fetches (its precache) pause only on the worker's session,
+// with Fetch enabled while it waits for the debugger at its start (measured
+// 2026-10-20, Chrome on Phantom). Without this the PWA's worker at
+// https://signaloverdrive.net asked the live site for its sw.js (a 404 from
+// 0.1, which has none). Both are answered here as the stub answers the page:
+// the site from BASE, whole (Fetch.fulfillRequest), and plausible.io refused
+// (the worker passes cross-origin requests through to the page's own path,
+// so none of its own is expected).
+const bver = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
+const bws = new WebSocket(bver.webSocketDebuggerUrl);
+let bId = 0; const bPending = new Map();
+const bsend = (method, params = {}, sessionId) => new Promise((res, rej) => { const id = ++bId; bPending.set(id, { res, rej }); bws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
+const PATTERNS = [{ urlPattern: `${REAL}/*`, requestStage: "Request" }, { urlPattern: "https://plausible.io/*", requestStage: "Request" }];
+const workers = new Map(), workerSetup = [], workerServed = [], workerRefused = [];
+const where = (sid) => sid ? `${workers.get(sid)?.type || "worker"} ${workers.get(sid)?.url || ""}`.trim() : "browser";
+const answer = async (sid, { requestId, request }) => {
+  try {
+    if (!request.url.startsWith(REAL + "/")) {
+      workerRefused.push(`${where(sid)}: ${request.url}`);
+      await bsend("Fetch.failRequest", { requestId, errorReason: "ConnectionRefused" }, sid);
+      return;
+    }
+    const r = await fetch(BASE + request.url.slice(REAL.length), { method: request.method, redirect: "manual",
+      headers: Object.fromEntries(Object.entries(request.headers).filter(([k]) => !/^(host|connection|content-length)$/i.test(k))),
+      body: /^(GET|HEAD)$/.test(request.method) ? undefined : request.postData });
+    const body = Buffer.from(await r.arrayBuffer());
+    const responseHeaders = [];
+    r.headers.forEach((value, name) => {
+      if (/^(content-encoding|content-length|transfer-encoding|connection)$/i.test(name)) return;   // fetch decoded the body
+      responseHeaders.push({ name, value: name.toLowerCase() === "location" ? value.replace(BASE, REAL) : value });
+    });
+    await bsend("Fetch.fulfillRequest", { requestId, responseCode: r.status, responseHeaders, body: body.toString("base64") }, sid);
+    workerServed.push({ by: sid ? "worker" : "browser", url: request.url, status: r.status });
+  } catch { /* the worker went away mid-request */ }
+};
+bws.addEventListener("message", async (ev) => {
+  const msg = JSON.parse(ev.data);
+  if (msg.id && bPending.has(msg.id)) { const { res, rej } = bPending.get(msg.id); bPending.delete(msg.id); msg.error ? rej(new Error(JSON.stringify(msg.error))) : res(msg.result); return; }
+  const p = msg.params || {};
+  if (msg.method === "Target.attachedToTarget") {
+    const sid = p.sessionId;
+    workers.set(sid, { type: p.targetInfo.type, url: p.targetInfo.url });
+    try {
+      await bsend("Network.enable", {}, sid);
+      await bsend("Network.setCacheDisabled", { cacheDisabled: true }, sid);
+      await bsend("Fetch.enable", { patterns: PATTERNS }, sid);
+    } catch (e) { if (!/navigated or closed|No target with given id|Session with given id not found/.test(e.message)) workerSetup.push(`${where(sid)}: ${e.message}`); }   // a worker gone already makes no request
+    await bsend("Runtime.runIfWaitingForDebugger", {}, sid).catch(() => { /* not waiting */ });
+    return;
+  }
+  if (msg.method === "Fetch.requestPaused") { if (!msg.sessionId && p.networkId && LIVE.test(p.request.url)) browserIds.add(p.networkId); answer(msg.sessionId, p); }
+  if (msg.sessionId) noteLive(msg.sessionId, msg);
+});
+try {
+  await new Promise((res, rej) => { bws.addEventListener("open", res); bws.addEventListener("error", rej); });
+  await bsend("Fetch.enable", { patterns: PATTERNS });
+  await bsend("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true,
+    filter: [{ type: "service_worker" }, { type: "shared_worker" }, { type: "worker" }] });
+} catch (e) { stub.close(); setup(`the browser session's stub for workers did not start: ${e.message || e}`); }
 const evalJS = async (expr) => {
   const r = await send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true });
   if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 300));
@@ -488,7 +662,7 @@ try {
   {
     const detail = [], got = [];
     await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-    for (const p of ["/", MISSING]) {
+    for (const p of ["/", MISSING, "/news/", ...(newsPosts[0] ? [`/news/${newsPosts[0].slug}/`] : [])]) {
       await visit(p);
       await sleep(300);
       const m = await evalJS(`(() => { const d = document.documentElement;
@@ -520,7 +694,9 @@ try {
       const lum = (c) => { const [r, g, b] = c.map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
       const bgOf = (e) => { for (let x = e; x; x = x.parentElement) { const b = rgb(getComputedStyle(x).backgroundColor); if (b.a > 0) return b.c; } return rgb(getComputedStyle(document.documentElement).backgroundColor).c; };
       const out = [];
-      for (const sel of [".tagline", ".pitch p", ".pitch a", ".carousel .caption", ".play a", ".play .how", "h2", ".music p", ".early", ".made p", "footer p", "footer a", "h1.name", ".lost p", ".lost a"]) {
+      for (const sel of [".tagline", ".pitch p", ".pitch a", ".carousel .caption", ".play a", ".play .how", "h2", ".music p", ".early", ".made p", "footer p", "footer a", "h1.name", ".lost p", ".lost a",
+                         ".latest h3 a", ".latest .date", ".latest article p:not(.date)", ".latest .news-links", ".latest .news-links a",
+                         ".news .back", ".news .back a", ".news h1", ".news .date", ".news .feeds", ".news .feeds a", ".post-list li > a", ".post-list time", ".post-list p", ".post p", ".post li", ".post a", ".post h2"]) {
         const e = document.querySelector(sel); if (!e) continue;
         const cs = getComputedStyle(e), px = parseFloat(cs.fontSize), bold = Number(cs.fontWeight) >= 700;
         const fg = rgb(cs.color).c, bg = bgOf(e), L1 = lum(fg), L2 = lum(bg);
@@ -528,7 +704,7 @@ try {
       }
       return { out };
     })()`;
-    for (const [p, floor] of [["/", 12], [MISSING, 3]]) {
+    for (const [p, floor] of [["/", 16], [MISSING, 3], ["/news/", 8], ...(newsPosts[0] ? [[`/news/${newsPosts[0].slug}/`, 8]] : [])]) {
       await visit(p);
       const m = await evalJS(measure);
       if (m.out.length < floor) detail.push(`${p}: ${m.out.length} text roles measured (want at least ${floor})`);
@@ -548,7 +724,11 @@ try {
     const LICENSE = /\bCC BY(?:-(?:SA|NC|ND))*\s+\d+\.\d+\b/g;
     for (const p of ["/", MISSING]) {
       await visit(p);
-      const t = (await evalJS(`[document.title, (document.querySelector('meta[name="description"]') || {}).content || "", ...[...document.querySelectorAll('meta[property^="og:"], meta[name^="twitter:"]')].map((m) => m.content), document.body.innerText].join("\\n")`)).replace(LICENSE, "");
+      // the latest-post box (.latest) is set aside: build-news writes it from
+      // the newest post at every stage, so its title may name the release
+      const t = (await evalJS(`(() => { const l = document.querySelector(".latest"); if (l) l.hidden = true;
+        const r = [document.title, (document.querySelector('meta[name="description"]') || {}).content || "", ...[...document.querySelectorAll('meta[property^="og:"], meta[name^="twitter:"]')].map((m) => m.content), document.body.innerText].join("\\n");
+        if (l) l.hidden = false; return r; })()`)).replace(LICENSE, "");
       const hits = [...new Set(t.match(VER) || [])];
       if (hits.length) detail.push(`${p} names ${hits.join(", ")}`);
       if (!t.length) detail.push(`${p}: no text read`);
@@ -576,6 +756,36 @@ try {
       ...badRequests(netSince(n1).filter((r) => !(r.status === 404 && r.url === BASE + sub))).map((r) => `request ${fmtReq(r)}`)];
   }
 
+  // ---- news-pages: /news/, the feeds, and the landing's latest post, served -------------------
+  {
+    const detail = [];
+    const e0 = consoleErrors.length, n0 = net.size;
+    for (const [p, type] of [["/news/", /^text\/html/], ["/news/feed.xml", /xml/], ["/news/feed.json", /json/]]) {
+      const r = await fetch(BASE + p);
+      if (r.status !== 200) detail.push(`${p} answered ${r.status}`);
+      else if (!type.test(r.headers.get("content-type") || "")) detail.push(`${p} is served as ${r.headers.get("content-type")}`);
+    }
+    const newest = newsPosts[0];
+    await visit("/");
+    const link = await evalJS(`(() => { const a = document.querySelector(".latest a.latest-post"); return a && { href: new URL(a.href).pathname, text: a.textContent.trim() }; })()`);
+    if (!link) detail.push("the landing shows no latest post link");
+    else if (newest) {
+      if (link.href !== `/news/${newest.slug}/`) detail.push(`the latest post links ${link.href} (want /news/${newest.slug}/)`);
+      const xy = await evalJS(`(() => { const a = document.querySelector(".latest a.latest-post"); a.scrollIntoView({block: "center"}); const r = a.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+      for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: xy[0], y: xy[1], button: "left", clickCount: 1 });
+      const landed = await waitFor(async () => (await evalJS("location.pathname + '|' + document.readyState")) === `/news/${newest.slug}/|complete`, 15000);
+      const h1 = await evalJS(`(document.querySelector("main.news h1") || {}).textContent || ""`);
+      if (!landed) detail.push(`a click on the latest post went to ${await evalJS("location.pathname")}`);
+      else if (h1 !== newest.title) detail.push(`the post's page says "${h1}" (want "${newest.title}")`);
+    }
+    await visit("/news/");
+    const listed = await evalJS(`[...document.querySelectorAll(".post-list li > a")].map((a) => new URL(a.href).pathname)`);
+    if (listed.join() !== newsPosts.map((p) => `/news/${p.slug}/`).join()) detail.push(`/news/ shows ${listed.join(" ") || "no posts"}`);
+    note("/news/ and the latest post", e0, n0);
+    detail.length ? bad("news-pages", detail.join("; "))
+      : ok("news-pages", `/news/, feed.xml and feed.json answer 200 with their types; a click on the landing's latest post opens /news/${newest?.slug}/ ("${newest?.title}"); /news/ shows all ${listed.length} post(s)`);
+  }
+
   // ---- isolation: the game's path, and the landing as the control --------------------------
   {
     const detail = [];
@@ -590,13 +800,16 @@ try {
     if (!g.sab) detail.push("no working SharedArrayBuffer");
     if (!ready) detail.push("the game never said ready in 60 s");
     // the game's own word on its audio ring: worklet-sab is the bridge's
-    // SharedArrayBuffer path (anything else is a fallback)
+    // SharedArrayBuffer path (anything else is a fallback). The probe line
+    // has more than one " mode " (the flow's comes first: "... sel 0 mode run
+    // tier ..."); the ring's is the one after its underrun count
+    // ("... underruns-all 0 mode worklet-sab cues ...")
     let mode = null;
     if (ready) {
       const l1 = consoleLines.length;
       await evalJS(`(globalThis.SigilWebApp).dispatch("probe", "")`);
       const probe = await waitFor(async () => consoleLines.slice(l1).find((l) => /signal-overdrive: probe /.test(l)), 10000);
-      mode = probe ? (probe.match(/ mode (\S+)/) || [])[1] : null;
+      mode = probe ? (probe.match(/ underruns-all \S+ mode (\S+)/) || [])[1] : null;
       if (mode !== "worklet-sab") detail.push(`the game's audio ring is ${mode ?? "unreported"} (want worklet-sab)${probe ? "" : ": no probe line"}`);
     }
     const wasm = netSince(n0).filter((r) => /\.wasm$/.test(new URL(r.url).pathname));
@@ -711,6 +924,38 @@ try {
     stub.setMode("stub");
     detail.length ? bad("analytics-down", detail.join("; "))
       : ok("analytics-down", `with plausible.io refused (${stub.failed.length - f0} requests), / renders and /${SLUG}/ starts, isolated, with no other error`);
+  }
+
+  // ---- live: no request went to the real signaloverdrive.net -------------------------------
+  // Every request for the live site that the page or a worker made must have
+  // been answered by a stub (paused and fulfilled from BASE: on its own
+  // session, or, for one its session did not pause, on the browser session,
+  // matched by networkId) or by the site's own worker; the browser session's
+  // own requests (worker scripts) are all answered by construction. One
+  // that was neither went for the network, where the resolver backstop failed
+  // it: that is a leak (as the worker's sw.js was before this leg). A request
+  // abandoned before any of that (ERR_ABORTED, no response) went nowhere.
+  // The positive control: the worker's script and its own fetches were
+  // answered here, so the leg saw the paths it guards.
+  {
+    const detail = [];
+    const kind = (k, r) => stubbedIds.has(k) ? "stub" : browserIds.has(k.slice(k.indexOf(":") + 1)) ? "browser-stub" : r.fromSW ? "worker" : r.cache ? "cache"
+      : r.status === null && /ERR_ABORTED/.test(r.failed || "") ? "abandoned" : "leak";
+    const tally = {};
+    const leaks = [];
+    for (const [k, r] of liveReqs) { const c = kind(k, r); tally[c] = (tally[c] || 0) + 1; if (c === "leak") leaks.push(r); }
+    if (leaks.length) detail.push(`${leaks.length} request(s) for the live site no stub answered: ${leaks.slice(0, 4).map((r) => `${r.sid === "page" ? "page" : where(r.sid)} ${r.url} ${r.status ?? r.failed ?? "no answer"}`).join(", ")}`);
+    if (tally.cache) detail.push(`${tally.cache} answered from the HTTP cache (the cache is disabled; the leg cannot tell where those came from)`);
+    if (workerSetup.length) detail.push(`a worker's session refused the stub: ${workerSetup.slice(0, 2).join("; ")}`);
+    if (workerRefused.length) detail.push(`a worker asked plausible.io itself (refused): ${workerRefused.slice(0, 2).join(", ")}`);
+    const scripts = workerServed.filter((s) => s.by === "browser" && s.url === `${REAL}/${SLUG}/sw.js`);
+    const own = workerServed.filter((s) => s.by === "worker");
+    if (!scripts.length) detail.push(`the browser session answered no ${REAL}/${SLUG}/sw.js (the leg saw no worker install at the live origin)`);
+    if (!own.length) detail.push("no worker's own fetch at the live origin was answered (the leg saw no precache)");
+    const errs = workerServed.filter((s) => s.status >= 400);
+    if (errs.length) detail.push(`BASE answered ${errs.length} worker request(s) with an error: ${errs.slice(0, 3).map((s) => `${s.url.replace(REAL, "")} ${s.status}`).join(", ")}`);
+    detail.length ? bad("live", detail.join("; "))
+      : ok("live", `0 requests reached ${REAL}: ${liveReqs.size} from the page and workers (${Object.entries(tally).map(([c, n]) => `${n} ${c}`).join(", ")}), and ${workerServed.filter((s) => s.by === "browser").length} worker script fetches (${scripts.length} of /${SLUG}/sw.js) and ${own.length} of the workers' own fetches answered from ${BASE}`);
   }
 
   // ---- console -----------------------------------------------------------------------------

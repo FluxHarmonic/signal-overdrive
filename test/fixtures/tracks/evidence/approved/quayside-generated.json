@@ -1,0 +1,476 @@
+{
+  "id": "quayside",
+  "seed": 0,
+  "world": {
+    "width": 5120,
+    "height": 5120
+  },
+  "canvasBytes": 104857600,
+  "mapTiles": {
+    "width": 160,
+    "height": 160
+  },
+  "memory": {
+    "maxRSSKiB": 228856,
+    "externalBytes": 118832031
+  },
+  "selectedLayouts": [
+    "harbour-wall/left",
+    "back-basin/left"
+  ],
+  "liveICE": {
+    "version": 1,
+    "length": 16891.117,
+    "halfWidth": 88,
+    "bpm": 140,
+    "rules": {
+      "lane": 27,
+      "neighbour": 960,
+      "padding": 300,
+      "tracerHalfLength": 460,
+      "tracerHalfWidth": 34,
+      "tracerAhead": 600,
+      "tracerLifeTicks": 6,
+      "telegraphBars": 1,
+      "reserveBars": 1
+    },
+    "layers": [
+      {
+        "id": "$road",
+        "kind": "seeded-static",
+        "fromLap": 1,
+        "phraseBars": 0,
+        "upBars": 1,
+        "downBars": 0,
+        "phaseBars": 0,
+        "layouts": [
+          {
+            "id": "fixed",
+            "zones": [
+              [
+                4053.868,
+                4391.69,
+                0.1,
+                0.9
+              ],
+              [
+                14357.45,
+                14695.272,
+                -0.9,
+                -0.1
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "id": "harbour-wall",
+        "kind": "firewall",
+        "fromLap": 3,
+        "phraseBars": 4,
+        "upBars": 1,
+        "downBars": 1,
+        "phaseBars": 0,
+        "layouts": [
+          {
+            "id": "left",
+            "zones": [
+              [
+                6756.447,
+                7347.636,
+                -1,
+                0.2
+              ]
+            ]
+          },
+          {
+            "id": "right",
+            "zones": [
+              [
+                6756.447,
+                7347.636,
+                -0.2,
+                1
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "id": "back-basin",
+        "kind": "firewall",
+        "fromLap": 3,
+        "phraseBars": 4,
+        "upBars": 1,
+        "downBars": 1,
+        "phaseBars": 1,
+        "layouts": [
+          {
+            "id": "left",
+            "zones": [
+              [
+                10556.948,
+                11063.682,
+                -1,
+                0.2
+              ]
+            ]
+          },
+          {
+            "id": "right",
+            "zones": [
+              [
+                10556.948,
+                11063.682,
+                -0.2,
+                1
+              ]
+            ]
+          },
+          {
+            "id": "none",
+            "zones": []
+          }
+        ]
+      }
+    ],
+    "stretches": [
+      {
+        "id": 0,
+        "from": 2627.938,
+        "to": 5131.938,
+        "owners": [
+          "$road"
+        ]
+      },
+      {
+        "id": 1,
+        "from": 5731.903,
+        "to": 7947.903,
+        "owners": [
+          "harbour-wall"
+        ]
+      },
+      {
+        "id": 2,
+        "from": 9907.854,
+        "to": 11835.854,
+        "owners": [
+          "back-basin"
+        ]
+      },
+      {
+        "id": 3,
+        "from": 13219.786,
+        "to": 15371.786,
+        "owners": [
+          "$road"
+        ]
+      },
+      {
+        "id": 4,
+        "from": 1968,
+        "to": 2627.938,
+        "owners": []
+      },
+      {
+        "id": 5,
+        "from": 5131.938,
+        "to": 5731.903,
+        "owners": []
+      },
+      {
+        "id": 6,
+        "from": 7947.903,
+        "to": 9907.854,
+        "owners": []
+      },
+      {
+        "id": 7,
+        "from": 11835.854,
+        "to": 13219.786,
+        "owners": []
+      },
+      {
+        "id": 8,
+        "from": 15371.786,
+        "to": 16831.706,
+        "owners": []
+      },
+      {
+        "id": 9,
+        "from": 16831.706,
+        "to": 18859.117,
+        "owners": []
+      }
+    ],
+    "tracer": {
+      "enabled": true,
+      "fromLap": 3,
+      "periodBars": 1
+    }
+  },
+  "draft": false,
+  "gates": {
+    "radius": {
+      "pass": true,
+      "minimum": 342.56365922652253,
+      "required": 140.8
+    },
+    "trueRadius": {
+      "pass": true,
+      "minimum": 153.46567453412493,
+      "required": 140.8,
+      "witness": {
+        "segment": 6,
+        "t": 0.995,
+        "point": [
+          3579.398454558345,
+          3520.5982233474638
+        ]
+      },
+      "method": "unsmoothed circumradius of consecutive dense spline samples (200 samples/control interval)"
+    },
+    "separation": {
+      "pass": true,
+      "minimum": 270.0510609104333,
+      "required": 244
+    },
+    "world": {
+      "pass": true,
+      "width": 5120,
+      "height": 5120,
+      "margin": 445.31930926163915,
+      "required": 288
+    },
+    "readability": {
+      "pass": true,
+      "ahead": 1900,
+      "continuation": 96,
+      "curvatureThreshold": 0.0002,
+      "bends": 5,
+      "events": [
+        {
+          "sample": 123,
+          "s": 1967.9997258446026,
+          "fraction": 0.11651092748693734,
+          "direction": "left",
+          "observer": {
+            "x": 1229.999725844602,
+            "y": 3589.9999999999995,
+            "tx": 1,
+            "ty": 0
+          },
+          "entrance": {
+            "x": 3129.954891825929,
+            "y": 3592.6462057020503,
+            "tx": 0.9989727277273269,
+            "ty": 0.0453154417061544
+          },
+          "continuation": {
+            "x": 3225.85092337434,
+            "y": 3597.10694720261,
+            "tx": 0.9992336523202986,
+            "ty": 0.039142152095106506
+          },
+          "entry": {
+            "x": 240.4080703192954,
+            "y": 86.24819031081145,
+            "depth": 1984.7319427828686,
+            "along": 2003.955165981327,
+            "visible": true
+          },
+          "cue": {
+            "x": 241.04606257305787,
+            "y": 85.96372236160667,
+            "depth": 2079.40312149491,
+            "along": 2099.851197529738,
+            "visible": true
+          },
+          "pass": true
+        },
+        {
+          "sample": 302,
+          "s": 4831.937702378234,
+          "fraction": 0.2860638321591121,
+          "direction": "left",
+          "observer": {
+            "x": 3652.582688373049,
+            "y": 3040.486227346241,
+            "tx": -0.04294701031926074,
+            "ty": -0.9990773515122026
+          },
+          "entrance": {
+            "x": 3652.9096422459797,
+            "y": 1140.5569237450948,
+            "tx": 0.023130350594081528,
+            "ty": -0.9997324576512432
+          },
+          "continuation": {
+            "x": 3654.559585536623,
+            "y": 1044.572102183446,
+            "tx": 0.007125502204481818,
+            "ty": -0.9999746132869243
+          },
+          "entry": {
+            "x": 252.6445793771591,
+            "y": 86.25376738020076,
+            "depth": 1982.9619716452928,
+            "along": 2002.1622950109017,
+            "visible": true
+          },
+          "cue": {
+            "x": 252.9189424231481,
+            "y": 85.96900328642599,
+            "depth": 2077.5634221302626,
+            "along": 2097.9876961905557,
+            "visible": true
+          },
+          "pass": true
+        },
+        {
+          "sample": 478,
+          "s": 7647.902533415424,
+          "fraction": 0.45277659635623807,
+          "direction": "left",
+          "observer": {
+            "x": 3230.4987324984136,
+            "y": 453.0777106594723,
+            "tx": -0.9943737077596526,
+            "ty": -0.10592888801606762
+          },
+          "entrance": {
+            "x": 1330.8445727973808,
+            "y": 447.8494410106354,
+            "tx": -0.999949822169814,
+            "ty": -0.01001764156662636
+          },
+          "continuation": {
+            "x": 1234.8461690274755,
+            "y": 447.4847700704554,
+            "tx": -0.9999855131775843,
+            "ty": 0.005382697740256082
+          },
+          "entry": {
+            "x": 209.61265721142857,
+            "y": 86.28079124530868,
+            "depth": 1974.430037571557,
+            "along": 1993.5199750331124,
+            "visible": true
+          },
+          "cue": {
+            "x": 209.54664691762676,
+            "y": 85.99455683827713,
+            "depth": 2068.7072003838125,
+            "along": 2089.016892915987,
+            "visible": true
+          },
+          "pass": true
+        },
+        {
+          "sample": 721,
+          "s": 11535.854373416338,
+          "fraction": 0.6829539022543081,
+          "direction": "right",
+          "observer": {
+            "x": 791.5308344412807,
+            "y": 1727.4906754991284,
+            "tx": 0.8669610514489438,
+            "ty": 0.49837589756181244
+          },
+          "entrance": {
+            "x": 2675.1950484084,
+            "y": 1817.1533849392924,
+            "tx": 0.9998885159038535,
+            "ty": -0.01493170330501779
+          },
+          "continuation": {
+            "x": 2771.1904217234987,
+            "y": 1816.3061623989472,
+            "tx": 0.9999999587234675,
+            "ty": 0.0002873204890019948
+          },
+          "entry": {
+            "x": 90.71998900416449,
+            "y": 87.02460317150197,
+            "depth": 1765.3641909287246,
+            "along": 1781.749240812748,
+            "visible": true
+          },
+          "cue": {
+            "x": 89.27736559601107,
+            "y": 86.71372701249823,
+            "depth": 1847.1085987512354,
+            "along": 1864.5512553022604,
+            "visible": true
+          },
+          "pass": true
+        },
+        {
+          "sample": 942,
+          "s": 15071.78588153306,
+          "fraction": 0.8922906486627245,
+          "direction": "left",
+          "observer": {
+            "x": 2995.759713031249,
+            "y": 2769.8711525788935,
+            "tx": -0.9849178859294382,
+            "ty": 0.17302242044395985
+          },
+          "entrance": {
+            "x": 1096.4641785263432,
+            "y": 2777.17215628814,
+            "tx": -0.9997459798604204,
+            "ty": -0.022538317437821167
+          },
+          "continuation": {
+            "x": 1000.4789347678137,
+            "y": 2775.539723466514,
+            "tx": -0.9999715805613627,
+            "ty": -0.007539102705897289
+          },
+          "entry": {
+            "x": 290.26872651764467,
+            "y": 86.33657469077167,
+            "depth": 1957.0483265216137,
+            "along": 1975.9133799332383,
+            "visible": true
+          },
+          "cue": {
+            "x": 290.70652346180856,
+            "y": 86.04896615091974,
+            "depth": 2050.099568265625,
+            "along": 2070.168515818301,
+            "visible": true
+          },
+          "pass": true
+        }
+      ],
+      "failed": 0,
+      "firstFailure": null,
+      "occlusion": "flat ground only; future terrain/crests require line-of-sight occlusion"
+    },
+    "freeLane": {
+      "pass": true,
+      "combinations": 1,
+      "required": 27,
+      "narrowest": 96.80000000000001,
+      "witness": {
+        "layouts": [],
+        "at": 0.24,
+        "active": [
+          [
+            0.1,
+            0.9
+          ]
+        ]
+      },
+      "scope": "permanent road ICE and seeded-static layers only; live hazards require the combined schedule gate"
+    },
+    "tiles": {
+      "pass": true,
+      "count": 2176,
+      "maximum": 4096
+    }
+  }
+}

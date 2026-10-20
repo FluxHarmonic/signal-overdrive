@@ -1,0 +1,17 @@
+#!/bin/sh
+# Phantom-only simulation checkpoint. No device, server, build or fetch.
+set -eu
+cd "$(dirname "$0")/../.."
+track_run="$1"
+mkdir -p "$track_run"
+trap 'track_code=$?; printf "RESULT: named pair/wake verification exit %s; inspect STAGE and logs\n" "$track_code" > "$track_run/RESULT"' EXIT
+track_sigil="$HOME/.sigil/versions/0.22.11/sigil"
+for track_suite in ice-placement ice-runtime ice-race race; do
+  printf 'named pair and shared admission suite: %s\n' "$track_suite" > "$track_run/STAGE"
+  timeout 180 "$track_sigil" -L src -L .sigil/deps/sigil-test/src \
+    eval "(begin (load \"test/test-$track_suite.sgl\") (unless (run-tests) (error \"named pair checks failed\")))" \
+    > "$track_run/$track_suite.log" 2>&1
+done
+printf 'canonical diagnostic tamper refusal\n' > "$track_run/STAGE"
+node --test scripts/track/scheduler-check.test.mjs > "$track_run/oracle-test.log" 2>&1
+printf 'finished\n' > "$track_run/STAGE"

@@ -1,0 +1,19 @@
+#!/bin/sh
+# Phantom-only current review build. No server, publish, merge or deployment.
+# Caller must bound the whole job to finish before the quiet window.
+set -eu
+cd "$(dirname "$0")/../.."
+track_run="$1"
+mkdir -p "$track_run"
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'track_code=$?; printf "RESULT: current native/web review builds exit %s; inspect STAGE and artifacts\n" "$track_code" > "$track_run/RESULT"' EXIT
+track_sigil="$HOME/.sigil/versions/0.22.11/sigil"
+export SIGIL_JOBS=1
+printf 'current native release application\n' > "$track_run/STAGE"
+timeout 1500 scripts/dev "$track_sigil" build --config release --verbose > "$track_run/native-build.log" 2>&1
+printf 'current native private-display smoke\n' > "$track_run/STAGE"
+node scripts/track/native-world.mjs "$track_run/native" > "$track_run/native-smoke.log" 2>&1
+printf 'current web compilation, no deployment\n' > "$track_run/STAGE"
+timeout 2100 scripts/dev "$track_sigil" build --config web --verbose > "$track_run/web-build.log" 2>&1
+printf 'finished; review artifacts only\n' > "$track_run/STAGE"

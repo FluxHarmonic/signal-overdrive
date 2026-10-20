@@ -1,0 +1,81 @@
+;;; (signal flow tierdata) - The three tiers as the flow sees them, and the
+;;; one hook that turns a mode and a tier into the race's tuning.
+;;;
+;;; LEARNER, COURIER and ELITE rename Crash's ladder (design P24, the 0.2
+;;; scope decision), keeping its shape: the tier scales numbers the races
+;;; already have, with no new mechanics per tier.
+;;;
+;;; What the flow owns here: the order, the names, the lines that describe
+;;; each tier, and the cup's rules for a corrupt delivery (P24's retries
+;;; column). It selects a tier and passes it on; it never sets a number
+;;; from it. ONE owner (the leader's ruling, 2026-10-19): the tooling
+;;; worker's (signal tiers) data and its race decide rival pace, ICE
+;;; density and meter forgiveness from the tier.
+;;;
+;;; The race gets them from race-new's tier: and mode: keywords, which
+;;; flow-race-new in (signal shell core) passes (the one place the flow
+;;; builds a race; race-start keeps them on restarts). race-new's
+;;; time-trial empties the field and the ICE itself (P26), so the session's
+;;; field of rivals stays in the tuning across modes. The mode and the tier
+;;; also ride in the tuning alist as two plain entries, (race-mode .
+;;; run|time-trial) and (race-tier . learner|courier|elite): not knobs, so
+;;; the overlay and the URL never show them. The flow calls TIME TRIAL
+;;; 'trial; the race's name for it is 'time-trial (tier-race-mode).
+;;;
+;;; The order and the labels are (signal tiers)'s TIERS and labels.
+
+(define-library (signal flow tierdata)
+  (import (sigil core)
+          (signal tuning)
+          (only (signal tiers) TIERS tier-parameters))
+
+  (export TIER-IDS tier-label tier-lines tier-retransmits tier-corrupt-ends-cup?
+          tier-race-tuning tier-race-mode tuning-with tier-index)
+
+  (begin
+    (define TIER-IDS TIERS)
+
+    (define (tier-index id)
+      (let loop ((ts TIER-IDS) (i 0))
+        (cond ((null? ts) 0) ((eq? (car ts) id) i) (else (loop (cdr ts) (+ i 1))))))
+
+    ;; (signal tiers)'s label; an unknown id (a damaged save) reads as COURIER
+    (define (tier-label id)
+      (cdr (assq 'label (tier-parameters (if (memq id TIERS) id 'courier)))))
+
+    ;; Two lines under the tier menu, in the flat system register.
+    (define (tier-lines id)
+      (case id
+        ((learner) '("SLOWER RIVALS. LIGHTER ICE." "RETRANSMIT AS OFTEN AS YOU NEED."))
+        ((courier) '("THE CITY AS DESIGNED." "THREE RETRANSMITS A CUP."))
+        ((elite) '("FASTER RIVALS. FULL ICE FROM THE FIRST DELIVERY." "NO RETRANSMITS. A CORRUPT DELIVERY ENDS THE CUP."))
+        (else '("" ""))))
+
+    ;; RETRANSMITs in a cup: #t for unlimited, else a count.
+    (define (tier-retransmits id)
+      (case id ((learner) #t) ((courier) 3) (else 0)))
+
+    (define (tier-corrupt-ends-cup? id) (eq? id 'elite))
+
+    ;; The flow's mode to the race's: run, or time-trial for the flow's trial.
+    (define (tier-race-mode mode) (if (eq? mode 'trial) 'time-trial 'run))
+
+    ;; The tuning alist with key set to v, added when the knob table does
+    ;; not know the key (tuning-set ignores unknown keys).
+    (define (tuning-with t key v)
+      (cons (cons key v)
+            (let drop ((l t))
+              (cond ((null? l) '())
+                    ((eq? (caar l) key) (drop (cdr l)))
+                    (else (cons (car l) (drop (cdr l))))))))
+
+    ;; --- the hook: mode and tier to the race's tuning -----------------------------
+    ;; base: (rivals . n), the session's own field (a URL or the overlay may
+    ;; have set it), in every mode: race-new's time-trial empties the field
+    ;; itself. The tier only rides along as (race-tier . id): the rival pace
+    ;; stays the session's (the race's tier data scales it, not this).
+    (define (tier-race-tuning t base mode tier)
+      (let* ((rivals (cdr (assq 'rivals base)))
+             (t (tuning-set t 'rivals rivals))
+             (t (tuning-with t 'race-mode (tier-race-mode mode))))
+        (tuning-with t 'race-tier tier)))))

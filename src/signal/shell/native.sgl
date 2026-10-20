@@ -2,12 +2,14 @@
 ;;; scales of the 480x270 view (x3 the first time, then remembered), the
 ;;; textures read from assets/signal/ (run it from the package root).
 ;;;
-;;;   signal-overdrive [--KNOB=VALUE ...] [--autopilot] [--start] [--quit-after S]
+;;;   signal-overdrive [--KNOB=VALUE ...] [--autopilot] [--start] [--focus=ignore] [--quit-after S]
 ;;;                    [--shots DIR --shot-times "T1,T2,..."] [--knobs]
 ;;;
 ;;; Every knob of (signal tuning) can be set from the command line exactly
 ;;; as from the URL: --grip=8.5 --top=600. --autopilot drives the player on
-;;; the racing line (for checks); --start skips the title; --quit-after
+;;; the racing line (for checks); --start skips the title; --focus=ignore
+;;; runs on without the window's focus (frame-time runs on a locked
+;;; display, where the game would pause); --quit-after
 ;;; quits after S seconds of wall time. --shots writes DIR/shot-T.png when
 ;;; the race clock passes each T seconds (so an autopilot run shoots the same
 ;;; places every time), then quits. --knobs prints the knob table as markdown.
@@ -35,12 +37,13 @@
           (signal mode7 decal)
           (signal track)
           (signal music reference)
+          (only (signal music song) song-override! song-select!)
           (signal shell core))
 
   (export native-main)
 
   (begin
-    (define KEYS '(left right up down a d w s c space return shift tab p slash r 0 escape f3 f4 f5 e f2 f6 f7 f8 f9 f10))
+    (define KEYS '(left right up down a d w s c space return shift tab p slash r 0 escape backspace f3 f4 f5 e f2 f6 f7 f8 f9 f10))
 
     (define (texture name)
       (let* ((img (load-image (string-append "assets/signal/" name)))
@@ -88,7 +91,8 @@
                                     (texture (string-append n "-avg.png")))))
                           TRACKS)
                      (texture "sky.png") (texture "machines.png")
-                     (list (cons 'embers (texture "lut-embers.png")) (cons 'crash (texture "lut-crash.png"))))
+                     (list (cons 'embers (texture "lut-embers.png")) (cons 'crash (texture "lut-crash.png"))
+                           (cons 'docklands (texture "lut-docklands.png"))))
         (title-set-logo! (texture "title-logo.png"))
         (decal-init! VIEW-W VIEW-H)
         (intro-set-mark! (texture "fh-mark.png"))
@@ -126,7 +130,7 @@
                     (keys-poll! (core-keys) KEYS)
                     (keys-clear! (core-keys))))
               (when (< n 4) (core-startup-mark! (string-append "focus-and-keys-" (number->string n))))
-              (when (keys-pressed? (core-keys) 'escape) (request-quit))
+              (when (and (keys-pressed? (core-keys) 'escape) (core-escape-quits?)) (request-quit))
               (when (and quit-after (> (- (current-second) t0) quit-after)) (request-quit))
               (core-frame! dt (frame-width) (frame-height) #t)
               (when (< n 4) (core-startup-mark! (string-append "frame-" (number->string n))))
@@ -162,7 +166,14 @@
               (error "usage: --music-reference PLAN PCM FRAMES [RATE]"))
             (when (audio-initialized?)
               (error "offline reference must not initialize audio"))
-            (reference-render! (cadr reference) (caddr reference)
+            ;; the race song the capture's game played (its log names it)
+            (for-each (lambda (a)
+                        (when (and (> (string-length a) 7) (string=? (substring a 0 7) "--song="))
+                          (let ((id (string->symbol (substring a 7 (string-length a)))))
+                            (song-override! id)
+                            (song-select! id))))
+                      args)
+            (reference-render!(cadr reference) (caddr reference)
                                (string->number (cadddr reference))
                                rate: (if (= (length reference) 5)
                                          (string->number (list-ref reference 4))

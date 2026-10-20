@@ -1,0 +1,55 @@
+#!/bin/sh
+# Phantom-only proof: real native checks, diagnostic sabotage, then default CLI.
+set -eu
+cd "$(dirname "$0")/../.."
+track_run="$1"
+mkdir -p "$track_run"
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'track_code=$?; printf "RESULT: native isolation/default suite proof exit %s; inspect STAGE and individual logs\n" "$track_code" > "$track_run/RESULT"' EXIT
+export SIGIL_JOBS=1
+export PATH="$HOME/.sigil/versions/0.22.11:$PATH"
+unset SIGIL_TEST_HARNESS SIGNAL_ICE_PRIVATE_DISPLAY SIGNAL_ICE_NATIVE_SABOTAGE DISPLAY WAYLAND_DISPLAY SIGIL_AUDIO_BACKEND
+printf 'actual native queued audio and curved meshes via check-native-direct\n' > "$track_run/STAGE"
+sh scripts/track/check-native-direct "$track_run/native" > "$track_run/native.log" 2>&1
+export SIGIL_TEST_HARNESS="$track_run/native/harness/bin/signal-live-ice-test"
+printf 'actual complete game scene via native-scene.mjs\n' > "$track_run/STAGE"
+node scripts/track/native-scene.mjs "$track_run/scenes" > "$track_run/scenes.log" 2>&1
+printf 'sabotage: omit contact mute; real queued audio must fail loudly\n' > "$track_run/STAGE"
+track_code=0
+SIGNAL_ICE_NATIVE_SABOTAGE=audio-mute node scripts/track/native-audio.mjs "$track_run/audio-sabotage" \
+  > "$track_run/audio-sabotage.log" 2>&1 || track_code="$?"
+printf '%s\n' "$track_code" > "$track_run/audio-sabotage-status"
+test "$track_code" -eq 1
+rg -q 'FAIL live ICE audio: contact must immediately silence the queued ring.*actual=' \
+  "$track_run/audio-sabotage/game.log"
+if rg -q 'SKIP native ICE test:' "$track_run/audio-sabotage/game.log"; then exit 1; fi
+printf 'broken explicit harness must fail, never skip, in all three native files\n' > "$track_run/STAGE"
+for track_test in ice-draw ice-scene live-ice-audio; do
+  track_code=0
+  SIGIL_AUDIO_BACKEND=invalid timeout 60 scripts/dev "$SIGIL_TEST_HARNESS" \
+    --sgl --no-strict "test/test-$track_test.sgl" \
+    > "$track_run/broken-$track_test.log" 2>&1 || track_code="$?"
+  printf '%s\n' "$track_code" > "$track_run/broken-$track_test-status"
+  test "$track_code" -eq 1
+  rg -q 'requires SIGIL_AUDIO_BACKEND=null' "$track_run/broken-$track_test.log"
+  if rg -q 'SKIP native ICE test:' "$track_run/broken-$track_test.log"; then exit 1; fi
+done
+printf 'default full suite: scripts/dev sigil test, no native harness/display/backend flags\n' > "$track_run/STAGE"
+unset SIGIL_TEST_HARNESS SIGNAL_ICE_PRIVATE_DISPLAY SIGNAL_ICE_NATIVE_SABOTAGE DISPLAY WAYLAND_DISPLAY SIGIL_AUDIO_BACKEND
+track_code=0
+timeout 1800 scripts/dev sigil test > "$track_run/default-full.log" 2>&1 || track_code="$?"
+printf '%s\n' "$track_code" > "$track_run/default-full-status"
+test "$track_code" -eq 0
+node --input-type=module - "$track_run/default-full.log" <<'JS'
+import fs from "node:fs";
+import assert from "node:assert/strict";
+const log = fs.readFileSync(process.argv[2], "utf8").replace(/\x1b\[[0-9;]*m/g, "");
+assert.match(log, /All tests passed/);
+assert.match(log, /3 skipped/);
+for (const name of ["ice-draw", "ice-scene", "live-ice-audio"])
+  assert.match(log, new RegExp(`SKIP native ICE test: test-${name}:.*requires staged SIGIL_TEST_HARNESS`));
+assert.doesNotMatch(log, /NATIVE ICE TEST RUN:/);
+console.log("PASS: actual default full suite green with all three named native skips");
+JS
+printf 'finished; default full suite green, native checks green, sabotage/broken harness RED\n' > "$track_run/STAGE"

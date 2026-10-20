@@ -19,6 +19,11 @@
 #   thrust  (the machines' thrusters) glow steady, no flicker
 #   popup   (the damage popups beside the meter) appear in place, each in a
 #           row of its own (a slot), and fade, without rising
+#   reflect (0.2: the water mirroring the skyline) stays, standing still:
+#           no ripple, no rolling bands
+#   wet     (0.2: the wet ground's faint mirror) stays, standing still
+#   rain    (0.2: the streaks, and the splash rings) shows nothing at all;
+#           the wet ground and the water carry the weather
 #
 # How: the web build (default build/web), with no machines (?nosprites:
 # their thrusters flicker) but for the thrusters' own case. The effects run on the race's title phase with
@@ -62,6 +67,8 @@
 # Renders on the GPU when GPU=1 (default), SwiftShader with GPU=0.
 # MOTION_OUT names a fresh directory for the captures (default: a new
 # /tmp/gate-motion-XXXXXX).
+# MOTION_PORT and MOTION_CDP set fx-check's ports (default 8493, 9493), for
+# a second run on one machine at once.
 set -eu
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="${1:-$REPO/build/web}"
@@ -87,7 +94,7 @@ run() {
   d="$OUT/$1-$2"; mkdir -p "$d"
   printf '%s\n' "$3" > "$d/steps.json"
   if ! node "$REPO/scripts/fx-check.mjs" "$BUILD" "$d/steps.json" $GPUFLAG --scale $SCALE \
-       --query "mute&motion=$2&$4" --out "$d" > "$d/run.log" 2>&1; then
+       --query "mute&motion=$2&$4" --out "$d" --port "${MOTION_PORT:-8493}" --cdp "${MOTION_CDP:-9493}" > "$d/run.log" 2>&1; then
     echo "SETUP-FAILED: the $1 capture ($2) did not run cleanly; $d/run.log:"; cat "$d/run.log"; exit 2
   fi
 }
@@ -105,13 +112,15 @@ burst() {
   run "$1" "$2" "$steps]" "$4"
   for i in 0 1 2 3 4 5 6 7 8 9; do [ -s "$OUT/$1-$2/t$i.png" ] || { echo "SETUP-FAILED: no $1-$2 t$i.png"; exit 2; }; done
 }
-# texts NAME MOTION X Y W H COLOUR: each burst shot's count of the colour in
-# the box (view pixels), space-separated
+# texts NAME MOTION X Y W H COLOUR [shadow]: each burst shot's count of the
+# colour in the box (view pixels), space-separated; with "shadow", only the
+# text's glyph edges over its #0D0A1A shadow (png-count --shadow), not the
+# colour in the world under the box
 texts() {
   out=""
   for i in 0 1 2 3 4 5 6 7 8 9; do
     f="$OUT/$1-$2/t$i.png"
-    out="$out $(node "$REPO/scripts/png-count.mjs" "$f" $(($3 * SCALE)) $(($4 * SCALE)) $(($5 * SCALE)) $(($6 * SCALE)) "$7")"
+    out="$out $(node "$REPO/scripts/png-count.mjs" "$f" $(($3 * SCALE)) $(($4 * SCALE)) $(($5 * SCALE)) $(($6 * SCALE)) "$7" ${8:+--shadow $SCALE "#0D0A1A"})"
   done
   echo $out
 }
@@ -128,6 +137,13 @@ capture dip    reduce fx-dip    "nohud&fx-solo=1&fx-hold=1"
 capture dip    full   fx-dip    "nohud&fx-solo=1&fx-hold=1"
 capture lines  reduce speed-lines "nohud&fx-solo=1&fx-dip=0&fx-speed=1"
 capture lines  full   speed-lines "nohud&fx-solo=1&fx-dip=0&fx-speed=1"
+# the weather (0.2), each alone, in a forced downpour
+capture reflect reduce fx-reflect "nohud&fx-solo=8&fx-weather=1"
+capture reflect full   fx-reflect "nohud&fx-solo=8&fx-weather=1"
+capture wet    reduce fx-wet    "nohud&fx-solo=9&fx-weather=1"
+capture wet    full   fx-wet    "nohud&fx-solo=9&fx-weather=1"
+capture rain   reduce fx-rain   "nohud&fx-solo=10&fx-weather=1"
+capture rain   full   fx-rain   "nohud&fx-solo=10&fx-weather=1"
 KICK='[{"wait": 2500}, {"shot": "pre.png"}, {"param": "fx-fire=drop"}, {"wait": 30}, {"shot": "k1.png"}, {"wait": 60}, {"shot": "k2.png"}]'
 run kick reduce "$KICK" "title=0&nosprites&nohud&fx-solo=1"
 run kick full   "$KICK" "title=0&nosprites&nohud&fx-solo=1"
@@ -163,15 +179,27 @@ D_CTRL=$(count "$OUT/dip-full/on1.png" "$OUT/dip-full/off.png" $H 0)
 L_STILL=$(count "$OUT/lines-reduce/on1.png" "$OUT/lines-reduce/on2.png" $H 0)
 L_CUE=$(count "$OUT/lines-reduce/on1.png" "$OUT/lines-reduce/off.png" $H 0)
 L_CTRL=$(count "$OUT/lines-full/on1.png" "$OUT/lines-full/on2.png" $H 0)
+RF_STILL=$(count "$OUT/reflect-reduce/on1.png" "$OUT/reflect-reduce/on2.png" $H 0)
+RF_CUE=$(count "$OUT/reflect-reduce/on1.png" "$OUT/reflect-reduce/off.png" $H 0)
+RF_CTRL=$(count "$OUT/reflect-full/on1.png" "$OUT/reflect-full/on2.png" $H 0)
+WT_STILL=$(count "$OUT/wet-reduce/on1.png" "$OUT/wet-reduce/on2.png" $H 0)
+WT_CUE=$(count "$OUT/wet-reduce/on1.png" "$OUT/wet-reduce/off.png" $H 0)
+WT_CTRL=$(count "$OUT/wet-full/on1.png" "$OUT/wet-full/on2.png" $H 0)
+RN_SHOW=$(count "$OUT/rain-reduce/on1.png" "$OUT/rain-reduce/off.png" $H 0)
+RN_STILL=$(count "$OUT/rain-reduce/on1.png" "$OUT/rain-reduce/on2.png" $H 0)
+RN_CTRL=$(count "$OUT/rain-full/on1.png" "$OUT/rain-full/on2.png" $H 0)
 for f in pre k1 k2; do for m in reduce full; do
   [ -s "$OUT/kick-$m/$f.png" ] || { echo "SETUP-FAILED: no kick-$m $f.png"; exit 2; }; done; done
 K_1=$(count "$OUT/kick-reduce/pre.png" "$OUT/kick-reduce/k1.png" $H 0)
 K_2=$(count "$OUT/kick-reduce/pre.png" "$OUT/kick-reduce/k2.png" $H 0)
 K_CTRL=$(count "$OUT/kick-full/pre.png" "$OUT/kick-full/k1.png" $H 0)
 # the boxes: the race's title prompt (row 120, size 2), the title screen's
-# (row 206, size 2), TRACED. (row 36, size 2); in view pixels
+# (row 206, size 2), TRACED. (row 36, size 2); in view pixels. The title
+# screen's camera flies over the Docklands' opening boost pads, whose
+# #FFCC33 stripes cross its box (since fc3665e, 2026-10-20: a steady prompt
+# read as blinking), so it counts the glyphs' edges over their shadow only
 P_R=$(texts prompt reduce 90 118 300 18 "#FFCC33"); P_F=$(texts prompt full 90 118 300 18 "#FFCC33")
-T_R=$(texts title reduce 60 204 360 18 "#FFCC33");  T_F=$(texts title full 60 204 360 18 "#FFCC33")
+T_R=$(texts title reduce 60 204 360 18 "#FFCC33" shadow);  T_F=$(texts title full 60 204 360 18 "#FFCC33" shadow)
 R_R=$(texts traced reduce 180 34 120 18 "#FF5959"); R_F=$(texts traced full 180 34 120 18 "#FF5959")
 # the thrusters: still with reduced motion, and the machines drawn in the
 # frame full motion shows between flickers; flickering in full motion
@@ -199,6 +227,9 @@ echo "warp:   still $W_STILL cue $W_CUE (full: moved $W_CTRL)"
 echo "interf: still $I_STILL cue $I_CUE (full: moved $I_CTRL)"
 echo "dip:    shown $D_SHOW still $D_STILL (full: $D_CTRL)"
 echo "lines:  still $L_STILL cue $L_CUE (full: moved $L_CTRL)"
+echo "reflect: still $RF_STILL cue $RF_CUE (full: moved $RF_CTRL)"
+echo "wet:    still $WT_STILL cue $WT_CUE (full: moved $WT_CTRL)"
+echo "rain:   shown $RN_SHOW still $RN_STILL (full: moved $RN_CTRL)"
 echo "kick:   moved $K_1 then $K_2 (full: $K_CTRL)"
 echo "prompt: $P_R (full: $P_F; shown from $P_T)"
 echo "title:  $T_R (full: $T_F; shown from $T_T)"
@@ -208,11 +239,13 @@ echo "popup:  in the slots' rows $PP_R; off them (above, gaps) $PP_RH (full, abo
 echo "(pixels at scale $SCALE; captures in $OUT)"
 for v in "$G_SHOW" "$G_STILL" "$G_CTRL" "$W_STILL" "$W_CUE" "$W_CTRL" "$I_STILL" "$I_CUE" "$I_CTRL" \
          "$D_SHOW" "$D_STILL" "$D_CTRL" "$L_STILL" "$L_CUE" "$L_CTRL" "$K_1" "$K_2" "$K_CTRL" \
-         "$TH_1" "$TH_2"; do
+         "$TH_1" "$TH_2" "$RF_STILL" "$RF_CUE" "$RF_CTRL" "$WT_STILL" "$WT_CUE" "$WT_CTRL" \
+         "$RN_SHOW" "$RN_STILL" "$RN_CTRL"; do
   [ -n "$v" ] || { echo "SETUP-FAILED: a count is empty (is ImageMagick reachable?)"; exit 2; }
 done
 if [ "$G_CTRL" -eq 0 ] || [ "$W_CTRL" -eq 0 ] || [ "$I_CTRL" -eq 0 ] || [ "$D_CTRL" -eq 0 ] ||
-   [ "$L_CTRL" -eq 0 ] || [ "$K_CTRL" -eq 0 ] || [ "$TH_CTRL" -eq 0 ] || [ "$(max $PP_FH)" -eq 0 ]; then
+   [ "$L_CTRL" -eq 0 ] || [ "$K_CTRL" -eq 0 ] || [ "$TH_CTRL" -eq 0 ] || [ "$(max $PP_FH)" -eq 0 ] ||
+   [ "$RF_CTRL" -eq 0 ] || [ "$WT_CTRL" -eq 0 ] || [ "$RN_CTRL" -eq 0 ]; then
   echo "SETUP-FAILED: with full motion an effect did not move or show; the gate cannot see motion"; exit 2
 fi
 for b in "$P_F" "$T_F" "$R_F"; do
@@ -232,6 +265,12 @@ red=""
 [ "$L_STILL" -eq 0 ] || red="$red; the speed lines move ($L_STILL px)"
 [ "$L_CUE" -ge $CUE ] || red="$red; the speed lines are gone ($L_CUE px)"
 [ "$K_1" -eq 0 ] && [ "$K_2" -eq 0 ] || red="$red; the camera kicks ($K_1, $K_2 px)"
+[ "$RF_STILL" -eq 0 ] || red="$red; the water's reflection moves ($RF_STILL px)"
+[ "$RF_CUE" -ge $CUE ] || red="$red; the water's reflection is gone ($RF_CUE px)"
+[ "$WT_STILL" -eq 0 ] || red="$red; the wet ground moves ($WT_STILL px)"
+[ "$WT_CUE" -ge $CUE ] || red="$red; the wet ground is gone ($WT_CUE px)"
+[ "$RN_SHOW" -eq 0 ] || red="$red; the rain still shows ($RN_SHOW px)"
+[ "$RN_STILL" -eq 0 ] || red="$red; the rain's frame moves ($RN_STILL px)"
 [ "$(min $P_R)" -ge $P_T ] || red="$red; the race's title prompt blinks ($P_R)"
 [ "$(min $T_R)" -ge $T_T ] || red="$red; the title screen's prompt blinks ($T_R)"
 [ "$(min $R_R)" -ge $R_T ] || red="$red; TRACED. blinks ($R_R)"
@@ -242,4 +281,4 @@ red=""
 # unsteered drive, can cover part of it)
 [ "$(max $PP_R)" -ge 20 ] || red="$red; the popup is not shown in a slot ($PP_R)"
 if [ -n "$red" ]; then echo "RED: with reduced motion${red#;}"; exit 1; fi
-echo "GREEN: with reduced motion the glitch and the dip show nothing, the camera does not kick, the warp's reticle, the interference's colour and the speed lines stand still, the prompts, TRACED. and the thrusters hold steady, and the popups stay in their row"
+echo "GREEN: with reduced motion the glitch and the dip show nothing, the camera does not kick, the warp's reticle, the interference's colour and the speed lines stand still, the prompts, TRACED. and the thrusters hold steady, the popups stay in their row, the water and the wet ground keep their reflections standing still, and no rain falls"

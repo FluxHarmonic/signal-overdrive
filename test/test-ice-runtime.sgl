@@ -1,0 +1,157 @@
+;;; Shared difficulty and the pair's mutually exclusive phrase hand-off.
+(import (sigil test)
+        (signal tiers)
+        (signal rivals turns)
+        (signal rivals tactics)
+        (signal ice tier)
+        (signal ice runtime)
+        (signal ice schedule))
+
+(test-group "runtime: pair turns"
+  (test "only one attacker, with the hand-off exactly at eight bars"
+    (for-each
+      (lambda (bar)
+        (assert-true
+          (not (eq? (rival-attacking? "NULL" #t bar)
+                    (rival-attacking? "VOID" #t bar)))))
+      '(0 1 7 8 9 15 16 23 24 1000))
+    (assert-equal 'null (pair-attacker 7))
+    (assert-equal 'void (pair-attacker 8))
+    (assert-false (pair-handoff? 6 7))
+    (assert-true (pair-handoff? 7 8))
+    (assert-true (pair-handoff? 15 16)))
+
+  (test "outside the finale both named rivals race clean"
+    (for-each
+      (lambda (bar)
+        (assert-false (rival-attacking? "NULL" #f bar))
+        (assert-false (rival-attacking? "VOID" #f bar))
+        (assert-false (rival-attacking? "VEX" #t bar)))
+      '(0 7 8 15 16))))
+
+(test-group "runtime: Null's announced swerves"
+  (test "warn a full beat before moving and keep the committed target"
+    (let* ((warn (null-step (null-plan) #t 100 100 126 0.6))
+           (during (null-step warn #t 125 100 126 -0.6))
+           (move (null-step during #t 126 126 152 -0.6)))
+      (assert-equal 0.0 (null-plan-lane warn))
+      (assert-equal 0.6 (null-plan-pending warn))
+      (assert-equal 126 (null-plan-flare-until warn))
+      (assert-equal 0.0 (null-plan-lane during))
+      (assert-equal 0.6 (null-plan-lane move))
+      (assert-equal #f (null-plan-pending move))))
+
+  (test "hand-off cancels an announced swerve instead of attacking beside Void"
+    (let* ((warn (null-step (null-plan) #t 100 100 126 0.6))
+           (off (null-step warn #f 110 100 126 0.6)))
+      (assert-equal #f (null-plan-pending off))
+      (assert-equal 0.0 (null-plan-lane off))
+      (assert-equal 0 (null-plan-flare-until off)))))
+
+(test-group "runtime: tier contract"
+  (define CONTRACT
+    '(1 12000.0 100.0 140
+        (27 960 300 460 34 600 6 1 1)
+        ((0 0.0 12000.0 ("wall")))
+        (("wall" "firewall" 1 4 1 1 0
+           (("left" ((1000.0 1100.0 -1.0 -0.2))))))
+        (#t 3 1)))
+
+  (test "difficulty preserves footprints and only removes authored live bars"
+    (let ((crossings '(0 2000 4000 6000)))
+      (for-each
+        (lambda (bar)
+          (let* ((tick (ice-bar->tick CONTRACT bar))
+                 (baseline (ice-zones-at CONTRACT crossings 0 tick)))
+            (for-each
+              (lambda (tier)
+                (let* ((contract (ice-tier-contract CONTRACT tier))
+                       (zones (ice-zones-at contract crossings 0 tick)))
+                  (assert-equal (list-ref CONTRACT 6) (list-ref contract 6))
+                  (assert-true (or (null? zones) (equal? baseline zones)))))
+              TIERS)))
+        '(0 1 2 3 4 5 6 7 8 9 10 11 12))))
+
+  (test "learner gets two full telegraph bars and slower tracer cadence"
+    (let ((learner (ice-tier-contract CONTRACT 'learner))
+          (elite (ice-tier-contract CONTRACT 'elite)))
+      (assert-equal 2 (list-ref (list-ref learner 4) 7))
+      (assert-equal 4 (caddr (list-ref learner 7)))
+      (assert-equal 1 (list-ref (list-ref elite 4) 7))
+      (assert-equal 1 (caddr (list-ref elite 7)))
+      (assert-equal 0.92 (tier-value 'learner 'rival-pace))
+      (assert-equal 0.97 (tier-value 'courier 'rival-pace))
+      (assert-equal 1.02 (tier-value 'elite 'rival-pace)))))
+
+(test-group "runtime: phase-balanced tier density"
+  (define PHASED
+    '(1 12000.0 100.0 140 (27 960 300 460 34 600 6 1 1)
+        ()
+        (("wall" "firewall" 1 4 1 1 0 (("left" ((1000.0 1100.0 -1.0 -0.2)))))
+         ("swarm" "drone" 1 4 1 1 1 (("left" ((5000.0 5100.0 -1.0 -0.2))))))
+        (#f 3 1)))
+  (test "an even density cannot erase the odd-phase swarm"
+    (let ((counts '()))
+      (for-each
+        (lambda (tier)
+          (let ((profile (ice-tier-contract PHASED tier)) (owners '()) (count 0))
+            (let observe ((bar 4))
+              (when (< bar 40)
+                (let* ((tick (ice-bar->tick PHASED bar))
+                       (zones (ice-zones-at profile '(0 #f #f #f) 0 tick))
+                       (authored (ice-zones-at PHASED '(0 #f #f #f) 0 tick)))
+                  (for-each
+                    (lambda (zone)
+                      (assert-true (and (member zone authored) #t))
+                      (set! owners (cons (car zone) owners))
+                      (set! count (+ count 1)))
+                    zones))
+                (observe (+ bar 1))))
+            (assert-true (and (member "wall" owners) #t))
+            (assert-true (and (member "swarm" owners) #t))
+            (set! counts (cons count counts))))
+        TIERS)
+      (assert-true (> (car counts) (cadr counts)))
+      (assert-true (> (cadr counts) (caddr counts))))))
+
+(test-group "runtime: automatic tracer"
+  (define OPEN
+    '(1 12000.0 100.0 140
+        (27 960 300 460 34 600 6 1 1)
+        ((0 0.0 12000.0 ()))
+        ()
+        (#t 3 1)))
+  (define CROSSINGS '(0 100 200 #f))
+  (define ANNOUNCED (ice-bar->tick OPEN 2))
+  (define STRIKE (ice-bar->tick OPEN 3))
+
+  (test "reticle is fixed for a full bar, then live for exactly six ticks"
+    (let* ((initial (ice-new OPEN 'elite 0))
+           (warn (ice-step initial ANNOUNCED CROSSINGS 3000.0 -0.5))
+           (trace (ice-state-tracer warn))
+           ;; The target now brakes and changes lane; the placed strip stays.
+           (during (ice-step warn (- STRIKE 1) CROSSINGS 3010.0 0.5))
+           (hit (ice-step during STRIKE CROSSINGS 3010.0 0.5))
+           (last (ice-step hit (+ STRIKE 5) CROSSINGS 3010.0 0.5))
+           (gone (ice-step last (+ STRIKE 6) CROSSINGS 3010.0 0.5)))
+      (assert-true trace)
+      (assert-equal STRIKE (tracer-strike trace))
+      (assert-equal ANNOUNCED (tracer-announced trace))
+      (assert-equal 3600.0 (tracer-center (ice-state-tracer during)))
+      (assert-equal '() (ice-state-active during))
+      (assert-equal 1 (length (ice-state-telegraphs during)))
+      (assert-equal '(tracer-strike) (ice-state-events hit))
+      (assert-equal 1 (length (ice-state-active hit)))
+      (assert-equal 1 (length (ice-state-active last)))
+      (assert-equal '() (ice-state-active gone))
+      (assert-equal #f (ice-state-tracer gone))
+      (assert-equal 1 (length (ice-state-reservations gone)))))
+
+  (test "finish clears warnings, active hazards and reservations"
+    (let* ((warn (ice-step (ice-new OPEN 'elite 0)
+                           ANNOUNCED CROSSINGS 3000.0 0.0))
+           (done (ice-step warn STRIKE (list 0 100 200 STRIKE) 3000.0 0.0)))
+      (assert-equal '() (ice-state-active done))
+      (assert-equal '() (ice-state-telegraphs done))
+      (assert-equal '() (ice-state-reservations done))
+      (assert-equal #f (ice-state-tracer done)))))

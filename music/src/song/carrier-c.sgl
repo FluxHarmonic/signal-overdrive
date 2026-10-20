@@ -1,0 +1,466 @@
+;;; (song carrier-c) - Carrier, variation C: "Slipstream"
+;;;
+;;; The Docklands theme for the cup's first delivery, out along the
+;;; breakwater with no corner to brake for. Carrier's call is played by a
+;;; bright square lead, and in the chorus, the drop and the uplink a twin
+;;; lead runs a third under it (a sixth under the held D), two couriers in
+;;; each other's slipstream. The drums are motorik: kick on one and three
+;;; with a push before three, snare on two and four, steady eighths in the
+;;; ticks. The bass rolls eighths between the root and its octave, with
+;;; Carrier's 3+3+2 kept in its 16th pickups. In the verse a pluck plays
+;;; the chord tones on the call's own accents. The verse turns on the
+;;; major chords (Dm C F G): the brightest of the Carrier variations.
+;;;
+;;; What stays Carrier: the call (D A C | B . . A | G), the answer missing
+;;; its D until the uplink (P13), the 3+3+2 accents, the click kit, D
+;;; Dorian's B natural (over G major in the chorus, the verse's last
+;;; chord), and Gibson's E-flat in traced.
+;;;
+;;;   mark     bars  loops     chords                        here
+;;;   calm      8    all 8     Dm C F G x2                   pad and pluck, the call once far off
+;;;   grid      4    -         Dm Dm Dm A                    the carrier tone, the count-in
+;;;   lap1     16    9 to 16   Dm C F G x4                   the verse: the call, the pluck
+;;;   lap2      8    all 8     G C F Am | G Em F A           the chorus: the twin lead, stabs
+;;;   hold      7    bar 7     F C G Em C A, A               a breath, the call at half speed; the riser
+;;;   fill      2    -         A A                           the snare roll, the bass climbing to D
+;;;   traced   16    9 to 16   Dm C Gm Eb (x3, then F|A)     the drop: Gibson's ICE, the answer up
+;;;   uplink    8    -         Dm C F|A Dm x2                the melody whole, in both leads
+;;;   results   8    all 8     Dm C F G x2                   the groove without the lead
+;;;
+;;;   (carrier-c-text) (carrier-c-cues-text) CARRIER-C-SECTIONS
+
+(define-library (song carrier-c)
+  (import (sigil core) (sigil string) (sigil list)
+          (theme notation)
+          (song kit))
+  (export carrier-c-text carrier-c-cues-text CARRIER-C-SECTIONS carrier-c-events)
+  (begin
+    (define CARRIER-C-SECTIONS
+      '((calm 8 (0 . 8) #f) (grid 4 #f lap1) (lap1 16 (8 . 16) #f) (lap2 8 (0 . 8) #f)
+        (hold 7 (6 . 7) #f) (fill 2 #f traced) (traced 16 (8 . 16) #f)
+        (uplink 8 #f results) (results 8 (0 . 8) #f)))
+    (define (start mark) (section-start CARRIER-C-SECTIONS mark))
+
+    ;; ------------------------------------------------------------
+    ;; Instruments: the race bank, then this variation's own
+    ;; ------------------------------------------------------------
+    (define I-SQUARE 14) (define I-TWIN 15) (define I-PLUCK 16) (define I-ROLL 17)
+
+    (define (bank)
+      (race-bank-text
+       (string-append
+        ;; 14: the square lead, a quiet detuned saw inside it for width
+        "    (instrument id: 14 name: \"square\" patch: (square-lead attack: 0.004 cutoff: 3400 decay: 0.25 osc-amp: 0.7 pulse-width: 0.32 release: 0.22 resonance: 0.2 sustain: 0.75)"
+        " volume: 40 gain: 0.5 send: 0.24 pan: 0.06 layers: ((chip-saw attack: 0.004 decay: 0.3 octave: 0 osc-amp: 0.5 release: 0.2 spread: 9 sustain: 0.6 unison: 3 volume: 0.18)))\n"
+        ;; 15: the twin: a rounder square (half width), darker, under the lead
+        "    (instrument id: 15 name: \"twin\" patch: (square-lead attack: 0.004 cutoff: 2400 decay: 0.25 osc-amp: 0.7 pulse-width: 0.5 release: 0.22 resonance: 0.15 sustain: 0.7)"
+        " volume: 32 gain: 0.5 send: 0.3 pan: -0.28)\n"
+        ;; 16: the pluck, on the chord tones
+        "    (instrument id: 16 name: \"pluck\" patch: (pluck attack: 0.001 cutoff-ratio: 4 decay: 0.28 release: 0.1 resonance: 0.2 saw-amp: 0.3 sustain: 0 tri-amp: 0.5)"
+        " volume: 34 gain: 0.6 send: 0.3 pan: -0.28)\n"
+        ;; 17: the rolling bass: Carrier's grit bass shorter, for eighths,
+        ;; with a sine an octave under it
+        "    (instrument id: 17 name: \"roll-bass\" patch: (fm4-grit-bass amp-attack: 0.002 amp-decay: 0.18 amp-release: 0.04 amp-sustain: 0.55 attack-index: 3.8 crush-bits: 12 drive: 1.1 index: 1.4 index-decay: 0.1)"
+        " volume: 40 gain: 0.6 pan: 0 layers: ((chip-sub drive: 0.3 octave: -1 volume: 0.3)))\n")))
+
+    ;; ------------------------------------------------------------
+    ;; The lead and its twin. The twin is the call a third under in D
+    ;; Dorian; its E ties under the call's last A and G, since the stab on
+    ;; 14 anticipates C or E minor. Under the answer it never plays the D,
+    ;; so no D sounds on a lead before the uplink but Carrier's own call:
+    ;; in the chorus F then a held C (F major's tones; an E under the G
+    ;; would rub the stab's F); in the drop F and C, then it drops out
+    ;; under the held E (a C there would muddy G minor); over a cadence
+    ;; bar F C E, then A major's C sharp.
+    ;; ------------------------------------------------------------
+    (define CALL-TWIN '((0 3 B 4 42) (3 3 F 5 38) (6 2 A 5 40) (8 6 G 5 44) (14 12 E 5 38)))
+    (define ANSWER-TWINS
+      '((chorus (0 3 F 5 42) (3 13 C 5 40))
+        (drop (0 3 F 5 42) (3 5 C 5 38))
+        (cadence (0 3 F 5 42) (3 3 C 5 38) (6 2 E 5 40) (8 8 Cs 5 42))))
+    (define (lead at notes up dvol) (phrase 6 I-SQUARE at notes up dvol))
+    (define (twin at notes up dvol end) (phrase 7 I-TWIN at (clip-phrase notes end) up dvol))
+    (define (call at up dvol) (append (lead at CALL up dvol) (twin at CALL-TWIN up (- dvol 4) 32)))
+    ;; kind: chorus, drop or cadence
+    (define (answer at up dvol kind)
+      (append (lead at ANSWER up dvol)
+              (twin at (cdr (assq kind ANSWER-TWINS)) up (- dvol 4) 16)))
+
+    ;; ------------------------------------------------------------
+    ;; The pluck: the chord's tones on the call's accents, rising then
+    ;; falling (root, third, fifth, octave, fifth, third)
+    ;; ------------------------------------------------------------
+    (define (pluck-bar at c vol)
+      (let* ((r (+ 12 (pad-root (car c)))) (t (chord-tones c r))
+             (tones (list (car t) (cadr t) (caddr t) (+ 12 (car t)) (caddr t) (cadr t))))
+        (cat (lambda (i) (note 7 (+ at (list-ref ACCENTS i)) (if (= i 3) 2 1.5) (list-ref tones i) I-PLUCK
+                               (if (memv i '(0 3)) (+ vol 4) vol)))
+             (range 6))))
+
+    ;; ------------------------------------------------------------
+    ;; The bass: eighths rolling root, octave; 16th pickups on 3 and 11
+    ;; keep Carrier's 3+3+2. The last eighth is the fifth, or approach.
+    ;; ------------------------------------------------------------
+    (define (roll-bar at r loud . approach)
+      (let ((n14 (if (pair? approach) (car approach) (+ r 7))))
+        (append
+         (cat (lambda (k)
+                (let ((pos (* 2 k)))
+                  (note 4 (+ at pos) 1.5 (cond ((= k 7) n14) ((odd? k) (+ r 12)) (else r)) I-ROLL
+                        (cond ((memv pos '(0 8)) (+ loud 6)) ((memv pos '(6 14)) (+ loud 3)) (else loud)))))
+              (range 8))
+         (note 4 (+ at 3) 0.75 r I-ROLL (+ loud 1))
+         (note 4 (+ at 11) 0.75 r I-ROLL (+ loud 1)))))
+    ;; the bass on long notes (calm, hold)
+    (define (roll-long at r vol) (append (note 4 at 6 r I-ROLL (+ vol 4)) (note 4 (+ at 8) 6 r I-ROLL vol)))
+
+    ;; ------------------------------------------------------------
+    ;; The motorik beat. opt: 'crash (no snare in the bar's first half,
+    ;; which would cut the crash short), 'fill (the snare is the long
+    ;; fill), 'drive (the drop: the kick takes the call's 3 and 11)
+    ;; ------------------------------------------------------------
+    (define MOTO-KICK '((0 46) (8 44) (10 34)))
+    (define DRIVE-KICK '((0 46) (3 30) (8 44) (10 36) (11 30)))
+    (define MOTO-SNARE '((4 42) (12 44)))
+    (define MOTO-TURN-SNARE '((4 42) (12 44) (14 24) (15 30)))
+    (define SNARE-FILL '((4 44) (7 14) (8 26) (10 30) (12 34) (13 36) (14 38) (14.5 40) (15 42) (15.5 44)))
+    (define EIGHTHS '(0 2 4 6 8 10 12 14))
+
+    (define (motorik at b . opt)
+      (let* ((sn (cond ((memq 'fill opt) SNARE-FILL)
+                       ((= 3 (modulo b 4)) MOTO-TURN-SNARE)
+                       (else MOTO-SNARE)))
+             (sn (if (memq 'crash opt) (filter (lambda (e) (>= (car e) 8)) sn) sn)))
+        (append (kick at (if (memq 'drive opt) DRIVE-KICK MOTO-KICK))
+                (snare at sn))))
+
+    ;; ------------------------------------------------------------
+    ;; Chords
+    ;; ------------------------------------------------------------
+    (define VERSE '((D . m) (C . M) (F . M) (G . M)))
+    (define (verse-chord b) (list-ref VERSE (modulo b 4)))
+    ;; the chorus opens on G major: the call's B natural is its third
+    (define CHORUS '((G . M) (C . M) (F . M) (A . m) (G . M) (E . m) (F . M) (A . M)))
+    (define (traced-chord b)
+      (list-ref (if (>= b 12) '((D . m) (C . M) (F . M) (Eb . M)) '((D . m) (C . M) (G . m) (Eb . M)))
+                (modulo b 4)))
+    (define UPLINK '((D . m) (C . M) (F . M) (D . m) (D . m) (C . M) (F . M) (D . m)))
+    (define HOLD '((F . M) (C . M) (G . M) (E . m) (C . M) (A . M) (A . M)))
+
+    (define (root c) (bass-root (car c)))
+
+    ;; the bass's last eighth under a stab that anticipates the next chord:
+    ;; that chord's fifth (the current chord's would sit under it)
+    (define (lead-in next) (+ (root next) 7))
+
+    ;; The cadence bar under an answer: F major for its first half, A
+    ;; major for its second (the held E over A, its C sharp leading to D).
+    ;; The bass's last eighth is A's fifth, E.
+    (define (cadence-bar at stabs?)
+      (let ((F (bass-root 'F)) (A (bass-root 'A)))
+        (append (half (roll-bar at F 42) at #t)
+                (half (roll-bar at A 42) at #f)
+                (if stabs? (append (stab at 0 4 '(F . M) 30) (stab at 8 2 '(A . M) 28) (stab at 12 2 '(A . M) 26))
+                    (append (pad at 8 '(F . M) 30) (pad (+ at 8) 8 '(A . M) 30))))))
+
+    ;; Carrier's stabs on the call's accents; next: the chord the last one
+    ;; anticipates, or #f (under an answer's held E, which E-flat would clash)
+    ;; The call's C on 6 would sound a minor ninth over a chord's B (G
+    ;; major, E minor): there the stabs leave 6 to it.
+    (define (stabs at c next vol)
+      (let ((b? (memv 11 (map (lambda (m) (modulo m 12)) (chord-tones c (midi (car c) 4))))))
+        (append (stab at 0 3 c vol)
+                (if b? (stab at 3 3 c (- vol 6)) (append (stab at 3 2 c (- vol 6)) (stab at 6 2 c (- vol 4))))
+                (stab at 8 3 c (- vol 2)) (stab at 11 2 c (- vol 6))
+                (if next (stab at 14 2 next (- vol 4)) '()))))
+
+    ;; ticks with an open tick on 14 in place of the closed one
+    (define (ticks-open at where accent soft open-vol)
+      (append (ticks-on at (filter (lambda (i) (not (= i 14))) where) ACCENTS accent soft)
+              (open-tick at 14 open-vol)))
+
+    ;; ------------------------------------------------------------
+    ;; calm: the menus. The pad, the pluck soft, the bass on long notes,
+    ;; soft eighths, a heartbeat kick, the call once, far off
+    ;; ------------------------------------------------------------
+    (define (calm-part s)
+      (cat (lambda (b)
+             (let* ((at (at-bar (+ s b))) (c (verse-chord b)))
+               (append (pad at 16 c 28)
+                       (pluck-bar at c 18)
+                       (roll-long at (root c) 26)
+                       (ticks-on at EIGHTHS ACCENTS 14 7)
+                       (if (even? b) (kick at '((0 30))) '())
+                       (if (= b 0) (lead at CALL 0 -14) '()))))
+           (range 8)))
+
+    ;; ------------------------------------------------------------
+    ;; grid: the carrier tone, the square holding D, the twin a sixth
+    ;; under it; the bass gathering into eighths; Carrier's count-in over A
+    ;; ------------------------------------------------------------
+    (define (grid-part s)
+      (let ((at (lambda (b) (at-bar (+ s b)))) (D2 (midi 'D 2)) (A1 (midi 'A 1)))
+        (append
+         (note 6 (at 0) 32 (midi 'D 5) I-SQUARE 30)
+         (note 7 (at 1) 16 (midi 'F 4) I-TWIN 20)
+         (pad (at 0) 48 '(D . m) 26)
+         (roll-long (at 0) D2 28) (roll-long (at 1) D2 30) (roll-bar (at 2) D2 34)
+         (roll-bar (at 3) A1 38 (midi 'E 2))
+         (ticks-on (at 0) EIGHTHS ACCENTS 16 8) (ticks-on (at 1) EIGHTHS ACCENTS 18 9)
+         (ticks-on (at 2) (range 16) ACCENTS 22 10) (ticks-on (at 3) (range 16) ACCENTS 26 12)
+         (kick (at 2) '((0 38) (8 34)))
+         (kick (at 3) '((0 42) (4 44) (8 46) (12 48)))
+         (snare (at 3) '((4 36) (8 40) (12 44)))
+         (stab (at 3) 4 2 '(A . M) 26) (stab (at 3) 8 2 '(A . M) 28) (stab (at 3) 12 2 '(A . M) 30))))
+
+    ;; ------------------------------------------------------------
+    ;; lap1: the verse, 16 bars, the loop is bars 9-16. Bars 1-4 open
+    ;; out: the kick on one and three, the pluck and the pad. The motorik
+    ;; beat comes in at bar 5. The call at bars 1, 5, 9 and 13, the lead
+    ;; alone; the two bars after each are the withheld answer, where only
+    ;; the pluck speaks.
+    ;; ------------------------------------------------------------
+    (define (lap1-part s)
+      (cat (lambda (b)
+             (let* ((at (at-bar (+ s b))) (c (verse-chord b)) (k (modulo b 4)) (open? (< b 4)))
+               (append
+                (roll-bar at (root c) (if open? 34 38))
+                (pad at 16 c (if open? 28 24))
+                (pluck-bar at c (if open? 22 26))
+                (if open?
+                    (append (kick at (if (= b 3) '((0 44) (8 42) (12 36) (14 40)) '((0 44) (8 40))))
+                            (if (= b 3) (snare at '((12 30) (13 34) (14 38) (15 42))) '())
+                            (ticks-on at EIGHTHS ACCENTS 22 10))
+                    (append (cond ((= b 15) (motorik at b 'fill))
+                                  ((= b 8) (motorik at b 'crash))
+                                  (else (motorik at b)))
+                            (if (odd? b) (ticks-open at EIGHTHS 28 14 20) (ticks-on at EIGHTHS ACCENTS 28 14))))
+                (if (= b 0) (crash at 40) '())
+                (if (= b 8) (crash at 34) '())
+                (if (= k 0) (lead at CALL 0 0) '()))))
+           (range 16)))
+
+    ;; ------------------------------------------------------------
+    ;; lap2: the chorus, 8 bars, all of it loops. The stabs take channel
+    ;; 5 on the call's accents; the twin joins the lead. The call over G
+    ;; major and C, the partial answer over F; bars 4 and 8 are where its
+    ;; D would be, and only the drums and the stabs speak there.
+    ;; ------------------------------------------------------------
+    (define (lap2-part s)
+      (cat (lambda (b)
+             (let* ((at (at-bar (+ s b))) (c (list-ref CHORUS b)) (next (list-ref CHORUS (modulo (+ b 1) 8)))
+                    (k (modulo b 4)))
+               (append
+                (if (= k 2) (roll-bar at (root c) 40) (roll-bar at (root c) 40 (lead-in next)))
+                (stabs at c (if (= k 2) #f next) 30)
+                (if (= b 0) (motorik at b 'crash) (motorik at b))
+                (if (odd? b) (ticks-open at (range 16) 30 14 24) (ticks-on at (range 16) ACCENTS 30 14))
+                (if (= b 0) (crash at 38) '())
+                (cond ((= k 0) (call at 0 0))
+                      ((= k 2) (answer at 0 0 'chorus))
+                      (else '())))))
+           (range 8)))
+
+    ;; ------------------------------------------------------------
+    ;; hold: the breakdown, 6 bars and the riser. Bar 1 is a breath; then
+    ;; the call at half speed in the square; the bass on long notes; the
+    ;; drums come back one at a time. Bar 7, the riser, loops until the
+    ;; fill is aimed.
+    ;; ------------------------------------------------------------
+    (define (hold-part s)
+      (let ((at (lambda (b) (at-bar (+ s b)))))
+        (append
+         (cat (lambda (b)
+                (let ((c (list-ref HOLD b)))
+                  (append (pad (at b) 16 c 30)
+                          (if (< b 4) (roll-long (at b) (root c) 30) (roll-bar (at b) (root c) 34))
+                          (if (>= b 2) (pluck-bar (at b) c 18) '())
+                          (cond ((< b 2) (ticks-on (at b) ACCENTS ACCENTS 16 16))
+                                ((< b 4) (ticks-on (at b) EIGHTHS ACCENTS 20 8))
+                                (else (ticks-on (at b) (range 16) ACCENTS 24 11)))
+                          (cond ((< b 2) '())
+                                ((< b 4) (kick (at b) '((0 38) (8 30))))
+                                ((= b 4) (append (kick (at b) MOTO-KICK) (snare (at b) '((12 34)))))
+                                (else (append (kick (at b) MOTO-KICK) (snare (at b) '((4 36) (12 40) (14 26) (15 32)))))))))
+              (range 6))
+         ;; the call at half speed from bar 2, inside bars 2-5
+         (lead (at 1) (clip-phrase (augment CALL 2) (* 16 4)) 0 -8)
+         (riser (at 6)))))
+
+    ;; the riser: A major, four on the floor, the snare building in
+    ;; eighths and 16ths, the chip arp sweeping up two octaves on channel 7
+    (define (riser at)
+      (let ((A1 (midi 'A 1)))
+        (append (pad at 16 '(A . M) 30)
+                (cat (lambda (k) (note 4 (+ at (* 2 k)) 1.5 (if (odd? k) (+ A1 12) A1) I-ROLL (+ 38 k))) (range 8))
+                (ticks-on at (range 16) ACCENTS 28 14)
+                (kick at '((0 44) (4 40) (8 44) (12 42)))
+                (snare at '((0 22) (2 24) (4 27) (6 29) (8 32) (10 34) (12 37) (13 39) (14 42) (15 45)))
+                (arp-sweep at '(A . M) 20 30 16))))
+
+    ;; 16ths climbing two octaves over the bar, a beat a step
+    (define (arp-sweep at c vol0 vol1 limit)
+      (let* ((r (midi (car c) 4))
+             (tones (append (chord-tones c r) (chord-tones c (+ r 12)) (list (+ r 24)))))
+        (cat (lambda (i)
+               (let ((beat (quotient i 4)) (k (modulo i 4)))
+                 (note 7 (+ at i) 0.75 (list-ref tones (+ beat k)) I-ARP
+                       (+ vol0 (quotient (* (- vol1 vol0) i) 15)))))
+             (range limit))))
+
+    ;; ------------------------------------------------------------
+    ;; fill: two bars into the drop. The motorik beat breaking into a
+    ;; roll, then 32nds; the bass climbs A Bb C C# under the drums alone;
+    ;; the last two 16ths are silent but for Gibson's first chirp
+    ;; ------------------------------------------------------------
+    (define (fill-part s)
+      (let ((at0 (at-bar s)) (at1 (at-bar (+ s 1))) (A1 (midi 'A 1)))
+        (append
+         (pad at0 16 '(A . M) 32)
+         (roll-bar at0 A1 42 (+ A1 12))
+         (cat (lambda (i) (note 4 (+ at1 (* 2 i)) 1.5
+                                (list-ref (list A1 A1 (midi 'Bb 1) (midi 'Bb 1) (midi 'C 2) (midi 'C 2) (midi 'Cs 2)) i)
+                                I-ROLL (+ 40 i)))
+              (range 7))
+         (ticks-on at0 (range 16) ACCENTS 30 15) (ticks-on at1 (range 14) ACCENTS 30 15)
+         (kick at0 '((0 46) (8 44) (10 40) (12 46)))
+         (kick at1 '((0 46) (4 44) (8 46) (10 40) (12 46) (13 42)))
+         (snare at0 '((4 40) (6 30) (7 32) (9 34) (10 36) (12 42) (13 36) (14 40) (15 44)))
+         (cat (lambda (k) (note 2 (+ at1 (* 0.5 k)) 0.5 SNARE-PITCH I-SNARE (+ 32 (quotient (* 20 k) 27))))
+              (range 28))
+         (arp-sweep at0 '(A . M) 24 32 16) (arp-sweep at1 '(A . M) 28 34 14)
+         (chirp at1 14 EB6 26))))
+
+    ;; ------------------------------------------------------------
+    ;; traced: the drop. Dm C Gm Eb: the call over D minor and C, the
+    ;; answer an octave up over G minor (its held E the minor chord's
+    ;; sixth), then E-flat and Gibson's own answer. The kick takes the
+    ;; call's accents. The last time round, F then A, as the uplink has it.
+    ;; ------------------------------------------------------------
+    (define (traced-ice at b)
+      (let ((k (modulo b 4)))
+        (cond ((= b 0) (cat (lambda (p) (ice at (car p) 1 EB6 (cdr p))) '((2 . 10) (6 . 14) (10 . 18) (14 . 22))))
+              ((= k 0) (ice at 14 1 EB6 18))
+              ((= k 1) (append (chirp at 11 EB6 22) (ice at 14 1 D6 20)))
+              ((and (= k 2) (>= b 8)) (append (ice at 9 1 EB6 16) (ice at 12 1 EB6 18)))
+              ((= k 3) (steal at))
+              (else '()))))
+
+    (define (traced-part s)
+      (cat (lambda (b)
+             (let* ((at (at-bar (+ s b))) (c (traced-chord b))
+                    (next (if (= b 15) '(D . m) (traced-chord (+ b 1))))
+                    (k (modulo b 4)) (crash? (memv b '(0 8))))
+               (append
+                (if (= b 14)
+                    (cadence-bar at #t)
+                    (append (if (= k 2) (roll-bar at (root c) 42) (roll-bar at (root c) 42 (lead-in next)))
+                            (stabs at c (if (= k 2) #f next) 30)))
+                (if (>= b 8)
+                    (append (ticks-on at '(0 1 3 4 5 7 8 9 11 12 13 15) ACCENTS 30 15)
+                            (open-tick at 2 16) (open-tick at 6 18) (open-tick at 10 16)
+                            (open-tick at 14 (if (= k 3) 26 18)))
+                    (ticks-on at (range 16) ACCENTS 30 15))
+                (if crash? (motorik at b 'crash 'drive) (motorik at b 'drive))
+                (if crash? (crash at 42) '())
+                (cond ((= k 0) (call at 0 0))
+                      ((= k 2) (answer at 12 -2 (if (= b 14) 'cadence 'drop)))
+                      (else '()))
+                (traced-ice at b))))
+           (range 16)))
+
+    ;; ------------------------------------------------------------
+    ;; uplink: the melody whole. Call, answer, and the D, over Dm C F|A
+    ;; Dm; then all of it an octave up. The twin holds F under the D.
+    ;; Gibson's lock-on is cut off as the D lands.
+    ;; ------------------------------------------------------------
+    (define (uplink-part s)
+      (cat (lambda (b)
+             (let* ((at (at-bar (+ s b))) (c (list-ref UPLINK b)) (next (list-ref UPLINK (modulo (+ b 1) 8)))
+                    (k (modulo b 4)) (crash? (memv b '(3 7))))
+               (append
+                (if (= k 2)
+                    (cadence-bar at #t)
+                    (append (roll-bar at (root c) 42 (lead-in next)) (stabs at c next (if crash? 32 30))))
+                (if (= b 7) (ticks-on at EIGHTHS ACCENTS 24 10) (ticks-on at (range 16) ACCENTS 30 15))
+                (cond ((= b 7) (kick at '((0 46))))
+                      (crash? (motorik at b 'crash 'drive))
+                      (else (motorik at b 'drive)))
+                (if crash? (crash at 44) '())
+                (case b
+                  ((0) (call at 0 0))
+                  ((2) (answer at 0 0 'cadence))
+                  ((3) (append (lead at '((0 14 D 5 48)) 0 0) (twin at '((0 14 F 4 44)) 0 -4 16)))
+                  ((4) (call at 12 -2))
+                  ((6) (answer at 12 -2 'cadence))
+                  ((7) (append (lead at '((0 16 D 6 46)) 0 0) (twin at '((0 16 F 5 42)) 0 -4 16)))
+                  (else '()))
+                (case b
+                  ((0) (ice at 14 1 EB6 20))
+                  ((1) (append (chirp at 11 EB6 22) (ice at 14 1 D6 20)))
+                  ((2) (lock-on at))
+                  (else '())))))
+           (range 8)))
+
+    ;; ------------------------------------------------------------
+    ;; results: the groove without the lead
+    ;; ------------------------------------------------------------
+    (define (results-part s)
+      (cat (lambda (b)
+             (let* ((at (at-bar (+ s b))) (c (verse-chord b)))
+               (append (pad at 16 c 28)
+                       (pluck-bar at c 20)
+                       (roll-bar at (root c) 34)
+                       (ticks-on at EIGHTHS ACCENTS 22 9)
+                       (kick at '((0 40) (8 36)))
+                       (snare at '((12 30))))))
+           (range 8)))
+
+    ;; ------------------------------------------------------------
+    ;; the twin and the pluck give way to the pad and the stabs where a
+    ;; tone sounds a semitone from them
+    (define (carrier-c-events)
+      (clear-clashes 7 '(5)
+      (append (calm-part (start 'calm))
+              (grid-part (start 'grid))
+              (lap1-part (start 'lap1))
+              (lap2-part (start 'lap2))
+              (hold-part (start 'hold))
+              (fill-part (start 'fill))
+              (traced-part (start 'traced))
+              (uplink-part (start 'uplink))
+              (results-part (start 'results)))))
+
+    ;; bars where an answer ends, and where a jump from them can land
+    (define (answer-bars)
+      (append (map (lambda (b) (+ (start 'lap2) b)) '(2 6))
+              (map (lambda (b) (+ (start 'traced) b)) '(2 6 10 14))))
+
+    (define (carrier-c-text)
+      (let ((events (carrier-c-events)))
+        (check-p13! CARRIER-C-SECTIONS events (answer-bars) '(hold))
+        (song-text "Carrier: Slipstream" CARRIER-C-SECTIONS events
+                   (race-bus-text (quote threshold) -16 (quote attack) 2 (quote makeup) 3.6) (bank)
+                   ;; channel 7 sounds as the pluck: the twin and the riser's arp take its send and pan
+                   (quote voices) (list (cons 7 I-PLUCK)))))
+
+    (define (with-cadence chords bars)
+      (let loop ((cs chords) (i 0) (acc '()))
+        (if (null? cs) (reverse acc)
+            (loop (cdr cs) (+ i 1) (cons (if (memv i bars) '((F . M) (A . M)) (car cs)) acc)))))
+
+    (define (chords-of mark)
+      (case mark
+        ((calm results) (map verse-chord (range 8)))
+        ((grid) '((D . m) (D . m) (D . m) (A . M)))
+        ((lap1) (map verse-chord (range 16)))
+        ((lap2) CHORUS)
+        ((hold) HOLD)
+        ((fill) '((A . M) (A . M)))
+        ((traced) (with-cadence (map traced-chord (range 16)) '(14)))
+        ((uplink) (with-cadence UPLINK '(2 6)))
+        (else (error "carrier-c: no chords for" mark))))
+
+    ;; the engine: top speed at A3 (the fifth), full boost at D4 (the tonic)
+    (define (carrier-c-cues-text)
+      (song-cues-text 'carrier-c CARRIER-C-SECTIONS chords-of "220.0" "293.664767917"))))

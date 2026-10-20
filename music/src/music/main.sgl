@@ -2,17 +2,20 @@
 ;;;
 ;;;   carrier theme ...    the main theme's tools, (theme main)
 ;;;   carrier race ...     Carrier's race arrangement, (race main)
+;;;   carrier song ...     the other race songs, (song main)
 ;;;   carrier ...          everything else is Carrier's, (carrier main)
 
 (define-library (music main)
   (import (sigil core) (sigil process)
           (rename (carrier main) (main carrier-main))
           (theme main)
-          (race main))
+          (race main)
+          (song main))
   (export main)
   (begin
     (define (main)
       (let ((args (cdr (command-line))))
         (cond ((and (pair? args) (equal? (car args) "theme")) (exit (theme-main (cdr args))))
               ((and (pair? args) (equal? (car args) "race")) (exit (race-main (cdr args))))
+              ((and (pair? args) (equal? (car args) "song")) (exit (song-main (cdr args))))
               (else (carrier-main)))))))

@@ -1,0 +1,162 @@
+{
+  "id": "basin",
+  "world": {
+    "width": 5120,
+    "height": 5120
+  },
+  "crossings": [
+    {
+      "lap": 1,
+      "tick": 459
+    },
+    {
+      "lap": 2,
+      "tick": 2409
+    },
+    {
+      "lap": 3,
+      "tick": 4297
+    },
+    {
+      "lap": 4,
+      "tick": 6180
+    }
+  ],
+  "pass": true,
+  "required": 27,
+  "narrowest": 29,
+  "combinations": 6,
+  "checkedStates": 354,
+  "ownershipProofs": 0,
+  "rules": {
+    "1": {
+      "pass": true,
+      "firstFailure": null
+    },
+    "2": {
+      "pass": true,
+      "firstFailure": null
+    },
+    "3": {
+      "pass": true,
+      "firstFailure": null
+    },
+    "4": {
+      "pass": true,
+      "firstFailure": null
+    },
+    "5": {
+      "pass": true,
+      "firstFailure": null
+    },
+    "6": {
+      "pass": true,
+      "firstFailure": null
+    }
+  },
+  "tracer": {
+    "attempts": 108,
+    "legalTargets": 44748,
+    "yieldedReservations": 3222,
+    "yieldedNeighbours": 4410,
+    "waitBars": 0
+  },
+  "narrowestScope": "finite layout/critical tracer witnesses; every admitted tracer target also passes the exact continuous corridor guard",
+  "stretches": [
+    {
+      "id": 0,
+      "from": 3763.941,
+      "to": 5739.941,
+      "owners": [
+        "gantry"
+      ]
+    },
+    {
+      "id": 1,
+      "from": 10355.737,
+      "to": 13131.736,
+      "owners": [
+        "$road"
+      ]
+    },
+    {
+      "id": 2,
+      "from": 13523.683,
+      "to": 15707.682,
+      "owners": [
+        "west-road"
+      ]
+    },
+    {
+      "id": 3,
+      "from": 16099.628,
+      "to": 18566.16,
+      "owners": [
+        "$road"
+      ]
+    },
+    {
+      "id": 4,
+      "from": 2156,
+      "to": 3763.941,
+      "owners": []
+    },
+    {
+      "id": 5,
+      "from": 5739.941,
+      "to": 7679.884,
+      "owners": []
+    },
+    {
+      "id": 6,
+      "from": 7679.884,
+      "to": 9375.884,
+      "owners": []
+    },
+    {
+      "id": 7,
+      "from": 9375.884,
+      "to": 10355.737,
+      "owners": []
+    },
+    {
+      "id": 8,
+      "from": 13131.736,
+      "to": 13523.683,
+      "owners": []
+    },
+    {
+      "id": 9,
+      "from": 15707.682,
+      "to": 16099.628,
+      "owners": []
+    }
+  ],
+  "firstFailure": null,
+  "laps": [
+    {
+      "lap": 1,
+      "fromTick": 459,
+      "toTick": 2409,
+      "narrowest": 92.4,
+      "pass": true
+    },
+    {
+      "lap": 2,
+      "fromTick": 2409,
+      "toTick": 4297,
+      "narrowest": 33.6,
+      "pass": true
+    },
+    {
+      "lap": 3,
+      "fromTick": 4297,
+      "toTick": 6180,
+      "narrowest": 29,
+      "pass": true
+    }
+  ],
+  "timing": "actual lap crossings and exact conductor bar ticks",
+  "policySource": "approved Neon Row bible section3, track-authored cadence",
+  "runtimeParity": "same compiled schedule data; pure runtime queries verified separately; visual/collision activation remains integration work"
+}

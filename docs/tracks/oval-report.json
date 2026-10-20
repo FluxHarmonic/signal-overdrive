@@ -1,0 +1,484 @@
+{
+  "id": "oval",
+  "gates": {
+    "radius": {
+      "pass": true,
+      "minimum": 732.891004741139,
+      "required": 147.20000000000002
+    },
+    "trueRadius": {
+      "pass": true,
+      "minimum": 483.1539541554686,
+      "required": 147.20000000000002,
+      "witness": {
+        "segment": 39,
+        "t": 0.005,
+        "point": [
+          890.6183866132479,
+          2758.3465936615085
+        ]
+      },
+      "method": "unsmoothed circumradius of consecutive dense spline samples (200 samples/control interval)"
+    },
+    "separation": {
+      "pass": true,
+      "minimum": 501.26080349312,
+      "required": 252
+    },
+    "world": {
+      "pass": true,
+      "width": 5120,
+      "height": 5120,
+      "margin": 358.14078069115635,
+      "required": 292
+    },
+    "readability": {
+      "pass": true,
+      "ahead": 1900,
+      "continuation": 96,
+      "curvatureThreshold": 0.0002,
+      "bends": 2,
+      "events": [
+        {
+          "sample": 108,
+          "s": 1727.9988963159471,
+          "fraction": 0.20453884560348165,
+          "direction": "left",
+          "observer": {
+            "x": 927.371321505454,
+            "y": 2767.5590317985284,
+            "tx": 0.9773134207654404,
+            "ty": 0.21179820016174256
+          },
+          "entrance": {
+            "x": 2825.9260531235605,
+            "y": 2788.4022193720816,
+            "tx": 0.9998304236700475,
+            "ty": 0.01841531709673629
+          },
+          "continuation": {
+            "x": 2921.9073878345694,
+            "y": 2790.231058123051,
+            "tx": 0.9999915438434219,
+            "ty": 0.004112449592338825
+          },
+          "entry": {
+            "x": 179.93520889344543,
+            "y": 86.3752170528063,
+            "depth": 1945.1859900197635,
+            "along": 1963.8975688818164,
+            "visible": true
+          },
+          "cue": {
+            "x": 179.8912804448296,
+            "y": 86.08435897134731,
+            "depth": 2038.1741039365143,
+            "along": 2058.088760193706,
+            "visible": true
+          },
+          "pass": true
+        },
+        {
+          "sample": 372,
+          "s": 5951.953434954233,
+          "fraction": 0.7045176286088471,
+          "direction": "left",
+          "observer": {
+            "x": 3168.804347425865,
+            "y": 1328.4767066777554,
+            "tx": -0.9772540006196248,
+            "ty": -0.21207220061323145
+          },
+          "entrance": {
+            "x": 1270.2531695666037,
+            "y": 1307.6011279226168,
+            "tx": -0.9998314658544335,
+            "ty": -0.01835864612042459
+          },
+          "continuation": {
+            "x": 1174.2718646753065,
+            "y": 1305.769775303396,
+            "tx": -0.9999910927302623,
+            "ty": -0.004220717964536384
+          },
+          "entry": {
+            "x": 179.85509618978327,
+            "y": 86.37555261544192,
+            "depth": 1945.08360960242,
+            "along": 1963.793863869741,
+            "visible": true
+          },
+          "cue": {
+            "x": 179.81108789818518,
+            "y": 86.08467845998837,
+            "depth": 2038.0670853850881,
+            "along": 2057.98035703951,
+            "visible": true
+          },
+          "pass": true
+        }
+      ],
+      "failed": 0,
+      "firstFailure": null,
+      "occlusion": "flat ground only; future terrain/crests require line-of-sight occlusion"
+    },
+    "freeLane": {
+      "pass": true,
+      "combinations": 1,
+      "required": 27,
+      "narrowest": 96.60000000000001,
+      "witness": {
+        "layouts": [],
+        "at": 0.6,
+        "active": [
+          [
+            -0.95,
+            -0.05
+          ]
+        ]
+      },
+      "scope": "permanent road ICE and seeded-static layers only; live hazards require the combined schedule gate"
+    }
+  },
+  "song": {
+    "description": "Ideal constant top-speed crossing predictions, quantized to nearest song bar. Actual autopilot conductor landings are a separate replay measurement.",
+    "lapSeconds": 15.086192091021465,
+    "gridSeconds": 6.85716,
+    "barSeconds": 1.71429,
+    "entries": [
+      {
+        "mark": "lap1",
+        "lap": 1,
+        "at": 0,
+        "bars": 16,
+        "loop": [
+          8,
+          16
+        ],
+        "next": null,
+        "targetSeconds": 6.85716,
+        "aimedSeconds": 6.85716,
+        "aimErrorSeconds": 0,
+        "lapAtAim": 1,
+        "fractionAtAim": 0
+      },
+      {
+        "mark": "lap2",
+        "lap": 2,
+        "at": 0,
+        "bars": 8,
+        "loop": [
+          0,
+          8
+        ],
+        "next": null,
+        "targetSeconds": 21.943352091021467,
+        "aimedSeconds": 22.28577,
+        "aimErrorSeconds": 0.34241790897853264,
+        "lapAtAim": 2,
+        "fractionAtAim": 0.022697437956018307
+      },
+      {
+        "mark": "hold",
+        "lap": 2,
+        "at": 0.5,
+        "bars": 5,
+        "loop": [
+          4,
+          5
+        ],
+        "next": null,
+        "targetSeconds": 29.4864481365322,
+        "aimedSeconds": 29.14293,
+        "aimErrorSeconds": -0.3435181365322002,
+        "lapAtAim": 2,
+        "fractionAtAim": 0.4772296326031378
+      },
+      {
+        "mark": "fill",
+        "targetLap": 3,
+        "targetAt": 0,
+        "leadBars": 2,
+        "bars": 2,
+        "loop": null,
+        "next": "traced",
+        "targetSeconds": 37.029544182042926,
+        "aimedSeconds": 34.2858,
+        "aimErrorSeconds": 0.6848358179570724,
+        "lapAtAim": 2,
+        "fractionAtAim": 0.8181287785884772
+      },
+      {
+        "mark": "traced",
+        "lap": 3,
+        "at": 0,
+        "bars": 16,
+        "loop": [
+          8,
+          16
+        ],
+        "next": null,
+        "targetSeconds": 37.029544182042926,
+        "aimedSeconds": 37.714380000000006,
+        "aimErrorSeconds": 0.6848358179570795,
+        "lapAtAim": 3,
+        "fractionAtAim": 0.04539487591203706
+      },
+      {
+        "mark": "uplink",
+        "lap": 4,
+        "at": 0,
+        "bars": 8,
+        "loop": null,
+        "next": "results",
+        "targetSeconds": 52.1157362730644,
+        "aimedSeconds": 51.428700000000006,
+        "aimErrorSeconds": -0.6870362730643933,
+        "lapAtAim": 3,
+        "fractionAtAim": 0.954459265206276
+      }
+    ]
+  },
+  "par": {
+    "pass": true,
+    "complete": true,
+    "seconds": 15.25,
+    "minimum": 25,
+    "maximum": 35,
+    "exempt": true,
+    "reason": "design section 6.1: handling fixture",
+    "method": "Best of three completed 60 Hz player-autopilot laps using actual race/handling, default tuning, racing-line AI and all six racers; seed 0. No manual boost."
+  },
+  "actual": {
+    "id": "oval",
+    "activeSong": "carrier",
+    "world": {
+      "width": 5120,
+      "height": 5120
+    },
+    "pass": true,
+    "threeLapsAllRacers": true,
+    "parGate": true,
+    "bestLapSeconds": 15.25,
+    "lapTicks": [
+      973,
+      915,
+      917
+    ],
+    "crossings": [
+      {
+        "lap": 1,
+        "tick": 466
+      },
+      {
+        "lap": 2,
+        "tick": 1439
+      },
+      {
+        "lap": 3,
+        "tick": 2354
+      },
+      {
+        "lap": 4,
+        "tick": 3271
+      }
+    ],
+    "landings": [
+      {
+        "mark": "lap1",
+        "tick": 412,
+        "lap": 0,
+        "s": 8368.27,
+        "x": 1014.68,
+        "y": 2816.19,
+        "progress": 0,
+        "finishTick": 0
+      },
+      {
+        "mark": "lap2",
+        "tick": 1440,
+        "lap": 2,
+        "s": 10.8836,
+        "x": 1108.79,
+        "y": 2789.84,
+        "progress": 8459.15,
+        "finishTick": 0
+      },
+      {
+        "mark": "hold",
+        "tick": 1852,
+        "lap": 2,
+        "s": 3834.76,
+        "x": 3360.86,
+        "y": 1423.8,
+        "progress": 12283,
+        "finishTick": 0
+      },
+      {
+        "mark": "fill",
+        "tick": 2160,
+        "lap": 2,
+        "s": 6721.27,
+        "x": 572.875,
+        "y": 1545.16,
+        "progress": 15169.5,
+        "finishTick": 0
+      },
+      {
+        "mark": "traced",
+        "tick": 2366,
+        "lap": 3,
+        "s": 107.633,
+        "x": 1205.65,
+        "y": 2794.1,
+        "progress": 17004.2,
+        "finishTick": 0
+      },
+      {
+        "mark": "uplink",
+        "tick": 3292,
+        "lap": 3,
+        "s": 191.595,
+        "x": 1289.6,
+        "y": 2794.46,
+        "progress": 25352.4,
+        "finishTick": 3271
+      },
+      {
+        "mark": "results",
+        "tick": 4115,
+        "lap": 3,
+        "s": 7831.36,
+        "x": 561.097,
+        "y": 2534.94,
+        "progress": 25352.4,
+        "finishTick": 3271
+      }
+    ]
+  },
+  "combinedICE": {
+    "id": "oval",
+    "world": {
+      "width": 5120,
+      "height": 5120
+    },
+    "crossings": [
+      {
+        "lap": 1,
+        "tick": 466
+      },
+      {
+        "lap": 2,
+        "tick": 1439
+      },
+      {
+        "lap": 3,
+        "tick": 2354
+      },
+      {
+        "lap": 4,
+        "tick": 3271
+      }
+    ],
+    "pass": true,
+    "required": 27,
+    "narrowest": 96.60000000000001,
+    "combinations": 1,
+    "checkedStates": 30,
+    "ownershipProofs": 0,
+    "rules": {
+      "1": {
+        "pass": true,
+        "firstFailure": null
+      },
+      "2": {
+        "pass": true,
+        "firstFailure": null
+      },
+      "3": {
+        "pass": true,
+        "firstFailure": null
+      },
+      "4": {
+        "pass": true,
+        "firstFailure": null
+      },
+      "5": {
+        "pass": true,
+        "firstFailure": null
+      },
+      "6": {
+        "pass": true,
+        "firstFailure": null
+      }
+    },
+    "tracer": {
+      "attempts": 0,
+      "legalTargets": 0,
+      "yieldedReservations": 0,
+      "yieldedNeighbours": 0,
+      "waitBars": 0
+    },
+    "narrowestScope": "finite layout/critical tracer witnesses; every admitted tracer target also passes the exact continuous corridor guard",
+    "stretches": [
+      {
+        "id": 0,
+        "from": 4115.954,
+        "to": 6251.953,
+        "owners": [
+          "$road"
+        ]
+      },
+      {
+        "id": 1,
+        "from": 191.999,
+        "to": 1727.999,
+        "owners": []
+      },
+      {
+        "id": 2,
+        "from": 1727.999,
+        "to": 4115.954,
+        "owners": []
+      },
+      {
+        "id": 3,
+        "from": 6251.953,
+        "to": 8640.267,
+        "owners": []
+      }
+    ],
+    "firstFailure": null,
+    "laps": [
+      {
+        "lap": 1,
+        "fromTick": 466,
+        "toTick": 1439,
+        "narrowest": 96.60000000000001,
+        "pass": true
+      },
+      {
+        "lap": 2,
+        "fromTick": 1439,
+        "toTick": 2354,
+        "narrowest": 96.60000000000001,
+        "pass": true
+      },
+      {
+        "lap": 3,
+        "fromTick": 2354,
+        "toTick": 3271,
+        "narrowest": 96.60000000000001,
+        "pass": true
+      }
+    ],
+    "timing": "actual lap crossings and exact conductor bar ticks",
+    "policySource": "approved Neon Row bible section3, track-authored cadence",
+    "runtimeParity": "same compiled schedule data; pure runtime queries verified separately; visual/collision activation remains integration work"
+  },
+  "acceptanceScope": "geometry, measured par and combined ICE; actual atlas/palette gates are checked separately by the strict painter and pipeline verifier",
+  "acceptance": {
+    "complete": true,
+    "pass": true
+  }
+}

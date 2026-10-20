@@ -1,0 +1,70 @@
+#!/bin/sh
+# Phantom-only complete world-size checkpoint. RED draft gates stay RED.
+set -eu
+cd "$(dirname "$0")/../.."
+track_run="$1"
+mkdir -p "$track_run"
+trap 'track_code=$?; printf "RESULT: world verification exit %s; inspect STAGE and per-track gates\n" "$track_code" > "$track_run/RESULT"' EXIT
+track_sigil="$HOME/.sigil/versions/0.22.11/sigil"
+track_root="$(pwd)"
+printf 'world format/gate sabotages\n' > "$track_run/STAGE"
+node --test scripts/track/gates.test.mjs scripts/track/combined-ice.test.mjs > "$track_run/tests.log" 2>&1
+printf 'regenerate retired loop at5120 with RED diagnostic retained\n' > "$track_run/STAGE"
+node scripts/art/gen-track.mjs --file test/fixtures/tracks/retired-loop.json \
+  --draft --output "$track_run/retired" --preview > "$track_run/loop-art.log" 2>&1
+cp "$track_run/retired/src/signal/track/loop-data.sgl" src/signal/track/
+cp "$track_run/retired/assets/signal/loop-atlas.png" "$track_run/retired/assets/signal/loop-map.png" \
+  "$track_run/retired/assets/signal/loop-avg.png" assets/signal/
+cp "$track_run/retired/docs/loop-preview.png" docs/
+printf 'all active/draft5120 gates: pipeline\n' > "$track_run/STAGE"
+track_code=0
+sh scripts/track/check-pipeline "$track_run/pipeline" > "$track_run/pipeline.log" 2>&1 || track_code="$?"
+test "$track_code" -eq 0
+cp "$track_run/pipeline/art/src/signal/track/oval-data.sgl" src/signal/track/
+cp "$track_run/pipeline/art/assets/signal/oval-atlas.png" "$track_run/pipeline/art/assets/signal/oval-map.png" \
+  "$track_run/pipeline/art/assets/signal/oval-avg.png" assets/signal/
+cp "$track_run/pipeline/art/docs/oval-preview.png" docs/
+printf 'retired loop actual AI/par and combined gate at5120\n' > "$track_run/STAGE"
+node scripts/track/runtime.mjs test/fixtures/tracks/retired-loop.json "$track_run/loop.sgv"
+"$track_sigil" -L src eval -f scripts/track/ai.sgl -- "$track_run/loop.sgv" > "$track_run/loop-ai.json" 2> "$track_run/loop-ai.log"
+track_code=0
+node scripts/track/combined-ice.mjs test/fixtures/tracks/retired-loop.json "$track_run/loop-ai.json" \
+  "$track_run/loop-combined.json" > "$track_run/loop-combined.log" 2>&1 || track_code="$?"
+printf '%s\n' "$track_code" > "$track_run/loop-combined-status"
+printf 'rectangular and maximum8192 generation probes\n' > "$track_run/STAGE"
+node --input-type=module - "$track_run" <<'JS'
+import fs from "node:fs";
+import { loadTrack } from "./scripts/track/format.mjs";
+for (const [name, world] of [["rectangle", {width:4128, height:5152}], ["maximum", {width:8192, height:8192}]]) {
+  fs.writeFileSync(`${process.argv[2]}/${name}.json`, JSON.stringify({...loadTrack("tracks/oval.json"), world}));
+}
+JS
+for track_probe in rectangle maximum; do
+  printf 'generation probe: %s\n' "$track_probe" > "$track_run/STAGE"
+  node scripts/art/gen-track.mjs \
+    --file "$track_run/$track_probe.json" --output "$track_run/$track_probe" --preview \
+    > "$track_run/$track_probe-art.log" 2>&1
+  node scripts/track/runtime.mjs "$track_run/$track_probe.json" "$track_run/$track_probe.sgv"
+  (
+    cd "$track_run"
+    "$track_sigil" -L "$track_run/$track_probe/src" -L "$track_run/pipeline/art/src" -L "$track_root/src" \
+      eval -f "$track_root/scripts/track/roundtrip.sgl" -- "$track_run/$track_probe.sgv"
+  ) > "$track_run/$track_probe-roundtrip.log" 2>&1
+done
+printf 'isolated source suites including world metadata\n' > "$track_run/STAGE"
+for track_suite in track handling race camera conductor; do
+  "$track_sigil" -L src -L .sigil/deps/sigil-test/src \
+    eval "(begin (load \"test/test-$track_suite.sgl\") (run-tests))" > "$track_run/$track_suite-tests.log" 2>&1
+done
+printf 'world/regeneration report consistency\n' > "$track_run/STAGE"
+node scripts/track/verify-world.mjs "$track_run" > "$track_run/verify-world.log" 2>&1
+printf 'native release build\n' > "$track_run/STAGE"
+timeout 1200 scripts/dev "$track_sigil" build --config release > "$track_run/build.log" 2>&1
+printf 'muted native headless smoke\n' > "$track_run/STAGE"
+env SIGIL_AUDIO_BACKEND=null SIGIL_APP_PLATFORM=x11 DISPLAY= WAYLAND_DISPLAY= \
+  timeout 60 scripts/dev ./build/release/bin/signal-overdrive \
+  --music-headless --mute --start --autopilot --track=oval --quit-after 2 > "$track_run/headless.log" 2>&1
+rg -q 'headless race complete; audio uninitialized' "$track_run/headless.log"
+printf 'private-display native graphical shader smoke\n' > "$track_run/STAGE"
+node scripts/track/native-world.mjs "$track_run/native"
+printf 'finished; approved scheduled candidates accepted, retired loop geometry remains RED\n' > "$track_run/STAGE"

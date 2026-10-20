@@ -1,0 +1,50 @@
+;;; Phantom-only: link the standard Sigil test harness against already-built
+;;; native archives. Do not rebuild the entire dev dependency module graph.
+;;; The harness still executes the real test runner and native device APIs.
+(import (sigil io)
+        (sigil fs)
+        (sigil path)
+        (sigil list)
+        (sigil package)
+        (sigil build)
+        (sigil build deps)
+        (sigil build native))
+
+(define root (current-directory))
+(define app (load-package "package.sgl"))
+(define dependencies
+  (filter-map
+    (lambda (name)
+      (let ((manifest (path-join root ".sigil/deps" name "package.sgl")))
+        (and (file-exists? manifest) (load-package manifest))))
+    (directory-list ".sigil/deps")))
+(define packages
+  (let loop ((remaining (cons app dependencies)) (unique '()))
+    (if (null? remaining)
+        (reverse unique)
+        (let ((name (package-name (car remaining))))
+          (loop (cdr remaining)
+                (if (assoc name unique) unique
+                    (cons (cons name (car remaining)) unique)))))))
+(define ordered
+  (map (lambda (name) (cdr (assoc name packages)))
+       (get-build-order-for (package-name app) packages #t)))
+(define (release-archive pkg)
+  (path-join "build/release/native"
+             (string-append "lib" (package-name pkg) ".a")))
+
+;;; Installed manifests include development-only native packages. The release
+;;; archive inventory is authoritative here; retain dependency order for linking.
+(define native-packages
+  (filter (lambda (pkg) (file-exists? (release-archive pkg)))
+          (find-native-packages ordered)))
+(when (null? native-packages)
+  (error "no release native archives; build the release before linking its harness"))
+(for-each
+  (lambda (pkg)
+    (display "Native harness release archive: ")
+    (display (release-archive pkg))
+    (newline))
+  native-packages)
+(build-test-runtime (resolve-config app 'release) native-packages
+  "signal-live-ice-test" "build/release" #t (path-join root ".sigil/deps/sigil-lib"))

@@ -35,6 +35,10 @@
 (define (last-of l) (car (reverse l)))
 (define (ticks s) (exact (round (* 60.0 s))))
 (define (knob k) (tuning-ref TUNING k))
+;; Every track the game can select, as tuning indices.
+(define ALL-TRACKS
+  (let loop ((i (- (length TRACKS) 1)) (acc '()))
+    (if (< i 0) acc (loop (- i 1) (cons (exact->inexact i) acc)))))
 (define W 480)
 (define H 270)
 
@@ -298,7 +302,7 @@
                      (assert-true (or (< (cadr z) (- MARK-S (* 0.5 h) 8.0))
                                       (> (car z) (+ MARK-S (* 0.5 h) 8.0)))))
                    (append (track-boost tr) (track-repair tr) (track-ice tr)))))
-     '(0.0 1.0)))
+     ALL-TRACKS))
   (test "PRESENTS is in the decal's picture: under the mark, centred, inside it"
     (assert-true (>= PRESENTS-Y (+ MARK-ART-H 8)))
     (assert-true (<= (+ PRESENTS-Y PRESENTS-H) MARK-PX-H))

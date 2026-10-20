@@ -8,7 +8,6 @@
 ;;; half-width. Its textures are assets/signal/loop-{atlas,map,avg}.png.
 
 (define-library (signal track loop-data)
-  (import (sigil core))
   (export loop-track-data)
   (begin
     (define CHUNKS
@@ -1027,9 +1026,10 @@
                     (vector-set! v (+ k i) (vector-ref c i))
                     (copy (+ i 1))))
                 (loop (cdr cs) (+ k (vector-length c))))))))
-    ;; (name samples step boost repair ice)
+    ;; (name samples step boost repair ice world-width world-height district schedule)
     (define (loop-track-data)
       (list 'loop (join CHUNKS) 16.0
             '((726.907 826.907 -0.55 0.05) (2980.32 3080.32 -0.1 0.55) (8141.362 8241.362 -0.3 0.3) (11048.992 11148.992 0.0 0.6))
             '((13157.023 14320.075 -1.0 -0.42))
-            '((4797.588 5161.042 0.0 0.9) (10176.703 10540.156 -0.9 0.0))))))
+            '((4797.588 5161.042 0.0 0.9) (10176.703 10540.156 -0.9 0.0)) 5120 5120 'docklands
+            '(1 14538.147 78 140 (27 960 300 460 34 600 6 1 1) ((0 3731.947 7803.792 ("$road")) (1 8835.657 12443.581 ("$road")) (2 447.995 1823.994 ()) (3 1823.994 3731.947 ()) (4 7803.792 8835.657 ()) (5 12443.581 13279.531 ()) (6 13279.531 13439.53 ()) (7 13439.53 14986.141 ())) (("$road" "seeded-static" 1 0 1 0 0 (("fixed" ((4797.588 5161.042 0 0.9) (10176.703 10540.156 -0.9 0)))))) (#t 3 1))))))

@@ -8,7 +8,9 @@
   Touch schemes (?touch=zones|drag|stick, or the SCHEME button on a phone).
   Every scheme accelerates on its own; each sends the whole touch state as
   ("touch", "steer,throttle,brake,boost,drift") when it changes, and
-  ("tap", "") when a finger lands (a start on the title and end screens).
+  ("tap", "FX,FY") when a finger lands (a start on the title and end screens),
+  FX and FY its place as fractions of the canvas, so the game's menus take
+  the row it lands on. A mouse click on the canvas sends the same.
     zones   a thumb on the left half steers left, on the right half right;
             both thumbs down brakes; the BOOST button boosts
     drag    one finger anywhere steers by how far it has moved sideways
@@ -24,13 +26,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-  <meta name="theme-color" content="#000000">
+  <meta name="theme-color" content="#0D0A1A">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="substratic-version" content="__VERSION__">
   <title>__TITLE__</title>
-  <link rel="icon" href="data:,">
+  <link rel="manifest" href="assets/pwa/manifest.webmanifest">
+  <link rel="icon" href="assets/pwa/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="assets/pwa/icon-180.png">
   <!-- Privacy-friendly analytics by Plausible (on signaloverdrive.net only: a copy played elsewhere, such as the itch.io build, sends nothing) -->
   <script>
     if (/^(www\.)?signaloverdrive\.net$/.test(location.hostname)) (function (s) { s.async = true; s.src = "https://plausible.io/js/pa-GCzY0KZPnFuB1DEsbPead.js"; document.head.appendChild(s); })(document.createElement("script"));
@@ -222,6 +226,15 @@
       el("so-zl").classList.remove("on"); el("so-zr").classList.remove("on"); ring.style.display = knob.style.display = "none"; }
 
     var canvas = el("stage");
+    // where a tap or click lands, as fractions of the canvas
+    function tapAt(p) {
+      var b = canvas.getBoundingClientRect();
+      if (!p || !b.width || !b.height) return "";
+      return ((p.clientX - b.left) / b.width).toFixed(4) + "," + ((p.clientY - b.top) / b.height).toFixed(4);
+    }
+    canvas.addEventListener("pointerdown", function (e) {
+      if (e.pointerType === "mouse" && e.button === 0) send("tap", tapAt(e));
+    });
     canvas.addEventListener("touchstart", function (e) {
       document.body.classList.add("so-touch");
       var half = window.innerWidth / 2;
@@ -232,7 +245,7 @@
         // a boost as a finger lands: drag's second finger, stick's right thumb
         if ((scheme === "drag" && n >= 1) || (scheme === "stick" && t.clientX >= half)) boostPulse = true;
       }
-      send("tap", "");
+      send("tap", tapAt(e.changedTouches[0]));
       // the pulse must reach the game as its own message, then clear
       update(); if (last.split(",")[3] === "1") { last = ""; update(); }
       e.preventDefault();
@@ -301,14 +314,29 @@
       { k: "fx-sky", name: "SKYLINE LIFE", max: 1 },
       { k: "fx-glitch", name: "ICE GLITCH", max: 1, fire: "wall", label: "WALL HIT" },
       { k: "fx-warp", name: "ICE WARP", max: 1, fire: "ice", label: "ICE STRIKE" },
-      { k: "fx-interf", name: "INTERFERENCE", max: 1, fire: "tier", label: "NEXT TIER" }
+      { k: "fx-interf", name: "INTERFERENCE", max: 1, fire: "tier", label: "NEXT TIER" },
+      { k: "fx-reflect", name: "REFLECTIONS", max: 1 },
+      { k: "fx-wet", name: "WET GROUND", max: 1 },
+      { k: "fx-rain", name: "RAIN", max: 2 }
     ];
-    var MANAGED = ["fx-dip", "fx-pools", "fx-chase", "fx-sky", "fx-glitch", "fx-warp", "fx-interf", "fx-solo", "fx-showcase", "fx-tier", "showcase"];
+    // 0.2's district look: the weather and the far ground's filter, as
+    // choices (each an fx- knob, so changing one never restarts the race)
+    var LOOK = [
+      { k: "fx-weather", name: "WEATHER", d: -1, opts: [["SECTION", -1], ["DRY", 0], ["DRIZZLE", 0.25], ["DOWNPOUR", 1]] },
+      { k: "fx-rain-guard", name: "RAIN GUARD", d: 1, opts: [["OFF", 0], ["ON", 1]] },
+      { k: "fx-rain-debug", name: "RAIN DEBUG", d: 0, opts: [["OFF", 0], ["ON", 1]] },
+      { k: "fx-ground-taps", name: "FAR GROUND", d: 4, opts: [["0.1", 0], ["2", 2], ["4", 4], ["8", 8]] },
+      { k: "fx-ground-aniso", name: "STRETCH", d: 8, opts: [["4", 4], ["8", 8], ["16", 16], ["32", 32]] },
+      { k: "fx-ground-bias", name: "MIP BIAS", d: 0, opts: [["-1", -1], ["-0.5", -0.5], ["0", 0], ["+0.5", 0.5], ["+1", 1]] }
+    ];
+    var MANAGED = ["fx-dip", "fx-pools", "fx-chase", "fx-sky", "fx-glitch", "fx-warp", "fx-interf", "fx-reflect", "fx-wet", "fx-rain", "fx-solo", "fx-showcase", "fx-tier", "showcase"]
+      .concat(LOOK.map(function (l) { return l.k; }));
     var TIERS = [["REAL", -1], ["WORN", 70], ["DAMAGED", 45], ["FAILING", 20], ["CRITICAL", 5]];
     var num = function (k, d) { var v = parseFloat(params.get(k)); return isNaN(v) ? d : v; };
     var state = { solo: num("fx-solo", 0), showcase: num("fx-showcase", params.has("showcase") ? 1 : 0), tier: num("fx-tier", -1) };
     var last = {};
     FX.forEach(function (f) { state[f.k] = num(f.k, 1); last[f.k] = state[f.k] > 0 ? state[f.k] : 1; });
+    LOOK.forEach(function (l) { state[l.k] = num(l.k, l.d); });
 
     var app = globalThis.SigilWebApp && globalThis.SigilWebApp.started ? globalThis.SigilWebApp : null, queue = [];
     document.addEventListener("sigil-web-app-ready", function (e) { app = e.detail; queue.forEach(function (q) { app.dispatch(q[0], q[1]); }); queue = []; }, { once: true });
@@ -329,6 +357,7 @@
       if (state.solo) q.push("fx-solo=" + fmt(state.solo));
       if (state.showcase) q.push("fx-showcase=1");
       if (state.tier >= 0) q.push("fx-tier=" + fmt(state.tier));
+      LOOK.forEach(function (l) { if (state[l.k] !== l.d) q.push(l.k + "=" + fmt(state[l.k])); });
       history.replaceState(null, "", location.pathname + (q.length ? "?" + q.join("&") : ""));
     }
     var KNOB = { solo: "fx-solo", showcase: "fx-showcase", tier: "fx-tier" };
@@ -381,6 +410,18 @@
         var b = button(a[0], k === 2 && state.showcase ? "on" : "", a[1]); b.dataset.id = "all:" + k; all.appendChild(b);
       });
       panel.appendChild(all);
+      panel.appendChild(el("h2", { style: "margin-top: 10px" }, "DISTRICT LOOK (0.2)"));
+      LOOK.forEach(function (l) {
+        var row = el("div", { "class": "row" });
+        row.appendChild(el("span", { "class": "name" }, l.name));
+        l.opts.forEach(function (o) {
+          var b = button(o[0], state[l.k] === o[1] ? "on" : "", function () { set(l.k, o[1]); });
+          b.dataset.id = l.k + ":" + o[0]; b.setAttribute("aria-label", l.name + " " + o[0]); row.appendChild(b);
+        });
+        panel.appendChild(row);
+      });
+      panel.appendChild(el("div", { "class": "note" },
+        "WEATHER: SECTION is the race's own rain (heaviest in the breakdown). RAIN GUARD keeps the road ahead clear of streaks. RAIN DEBUG paints the road ahead green and the rain red. FAR GROUND: 0.1 is the old far fade; 2 to 8 are the filter's taps along the view. STRETCH and MIP BIAS tune its sharpness."));
       panel.appendChild(el("div", { "class": "note" },
         "The URL keeps this setup. SOLO shows one effect alone. INTEGRITY SEEN changes only what the effects see, never the race. The showcase drives on the autopilot."));
       if (focused) { var f2 = panel.querySelector('[data-id="' + focused + '"]'); if (f2) f2.focus(); }
@@ -413,6 +454,7 @@
     window.SignalOverdriveFx = { state: function () { return JSON.parse(JSON.stringify(state)); }, open: open };
   })();
   </script>
+  <script src="assets/pwa/update.js"></script>
   <!--sigil:app-->
 </body>
 </html>
