@@ -34,7 +34,25 @@ archive=$dist_dir/$pack_name.tar.gz
 [ ! -e "$archive" ] || die "$archive exists; preserve existing review artifacts"
 task_work=$(mktemp -d "${TMPDIR:-/tmp}/signal-native-pack.XXXXXX")
 archive_part=
-trap 'rm -rf "$task_work"; if [ -n "$archive_part" ]; then rm -f "$archive_part"; fi' EXIT HUP INT TERM
+cleanup() {
+  cleanup_status=$?
+  trap - EXIT HUP INT TERM
+  # Extracted Guix store directories retain mode 0555. Only make our
+  # private temporary directories writable; find does not follow symlinks
+  # into the real store. File permissions need no change for removal.
+  if [ -d "$task_work" ]; then
+    find "$task_work" -type d -exec chmod u+w {} + || cleanup_status=1
+    rm -rf "$task_work" || cleanup_status=1
+  fi
+  if [ -n "$archive_part" ]; then
+    rm -f "$archive_part" || cleanup_status=1
+  fi
+  exit "$cleanup_status"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 payload=$task_work/payload
 mkdir -p "$payload/bin"
 cp "$release_dir/bin/signal-overdrive" "$payload/bin/"
