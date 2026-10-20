@@ -45,7 +45,7 @@
       }, 5000);
     }
   }
-  status.check = () => status.registration?.update();
+  status.check = () => Promise.resolve();
   function query(worker, type) {
     return new Promise(resolve => {
       if (!worker) { resolve(null); return; }
@@ -104,9 +104,20 @@
       const registration = await navigator.serviceWorker.register("sw.js", { updateViaCache: "none" });
       status.registration = registration;
       status.state = "registered";
-      const watch = worker => worker?.addEventListener("statechange", () => {
-        if (worker.state === "installed") offer(registration.waiting);
-      });
+      let checking = null;
+      const watch = worker => {
+        if (!worker) return;
+        let completed = ["installed", "activating", "activated"].includes(worker.state);
+        worker.addEventListener("statechange", () => {
+          if (worker.state === "installed") {
+            completed = true;
+            offer(registration.waiting);
+          }
+          // Recover failed registration installs too. A successfully installed
+          // worker later replaced by the player's choice needs no recovery.
+          if (worker.state === "redundant" && !completed && !checking) check();
+        });
+      };
       offer(registration.waiting);
       watch(registration.installing);
       registration.addEventListener("updatefound", () => watch(registration.installing));
@@ -120,10 +131,51 @@
         if (registration.waiting) offer(registration.waiting);
         else if (info?.available) offer(current);
       };
-      const check = async () => {
-        try { await registration.update(); await inspect(); }
-        catch (error) { console.log("signal: update check unavailable " + error.message); }
+      const installed = worker => new Promise((resolve, reject) => {
+        if (!worker) { resolve(); return; }
+        const changed = () => {
+          if (["installed", "activating", "activated", "redundant"].includes(worker.state)) {
+            worker.removeEventListener("statechange", changed);
+            if (worker.state === "redundant") reject(Object.assign(
+              new Error("update installation interrupted"), { installationInterrupted: true }));
+            else resolve();
+          }
+        };
+        worker.addEventListener("statechange", changed);
+        changed();
+      });
+      const check = () => {
+        if (checking) return checking;
+        checking = (async () => {
+          try {
+            // register() and browser checks can already be installing. Join
+            // that install; update() itself resolves before installation ends.
+            for (let attempt = 0; attempt < 2; attempt++) {
+              try {
+                if (!registration.installing || registration.installing.state === "redundant") {
+                  await registration.update();
+                }
+                await installed(registration.installing);
+                await inspect();
+                return;
+              } catch (error) {
+                if (!error.installationInterrupted || attempt !== 0) throw error;
+                // A native browser interruption need not mean a bad build.
+                // Keep all callers joined through one bounded retry; the
+                // worker still verifies every byte and never auto-applies.
+                console.log("signal: update install interrupted; retrying once");
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              }
+            }
+          } catch (error) {
+            console.log("signal: update check unavailable " + error.message);
+          } finally {
+            checking = null;
+          }
+        })();
+        return checking;
       };
+      status.check = check;
       await inspect();
       setInterval(check, 15 * 60 * 1000);
       document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });

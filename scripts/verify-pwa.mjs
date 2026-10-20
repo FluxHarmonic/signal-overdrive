@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Phantom only. Harkfell's same-profile install/render/offline/update shape.
-// node scripts/verify-pwa.mjs STAGED-SITE [--restart] [--sabotage no-worker|frozen-worker]
+// node scripts/verify-pwa.mjs STAGED-SITE [--restart] [--diagnostics]
+//   [--sabotage no-worker|frozen-worker|mixed-deployment]
 // Sabotaged runs MUST exit nonzero. No screenshots, video or production host.
 import fs from "node:fs";
 import path from "node:path";
@@ -13,8 +14,9 @@ import { fileURLToPath } from "node:url";
 const args = process.argv.slice(2);
 const input = path.resolve(args[0] || "build/site");
 const sabotage = args.includes("--sabotage") ? args[args.indexOf("--sabotage") + 1] : null;
-if (sabotage && !["no-worker", "frozen-worker"].includes(sabotage)) throw new Error("Unknown sabotage arm");
+if (sabotage && !["no-worker", "frozen-worker", "mixed-deployment"].includes(sabotage)) throw new Error("Unknown sabotage arm");
 const restart = args.includes("--restart");
+const diagnostics = args.includes("--diagnostics");
 const source = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "signal-pwa-acceptance-"));
 const profile = path.join(scratch, "profile");
@@ -23,6 +25,10 @@ const deadline = Date.now() + 8 * 60 * 1000;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let revision = 0, offline = false, chrome, identity, ws;
 const requests = [], lines = [], errors = [], pending = new Map();
+const workerRequests = [];
+const serverFailures = [];
+const workerErrors = [];
+const workerRegistrations = new Set();
 let sequence = 0;
 function admitted(pid) {
   try {
@@ -43,12 +49,12 @@ async function until(fn, label, milliseconds = 60000) {
   }
   throw new Error(`Timed out: ${label}`);
 }
-function send(method, params = {}) {
+function send(method, params = {}, sessionId) {
   return new Promise((resolve, reject) => {
     const id = ++sequence;
     const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP timeout: ${method}`)); }, 30000);
     pending.set(id, { resolve, reject, timer });
-    ws.send(JSON.stringify({ id, method, params }));
+    ws.send(JSON.stringify({ id, method, params, sessionId }));
   });
 }
 async function evaluate(expression) {
@@ -77,6 +83,11 @@ const server = http.createServer((req, res) => {
   try {
     const pathname = decodeURIComponent(new URL(req.url, "http://localhost").pathname);
     requests.push(pathname);
+    if (pathname === "/drive/sw.js") {
+      const request = { at: Date.now(), revision, sabotage };
+      workerRequests.push(request);
+      if (diagnostics) console.log(`SW REQUEST ${JSON.stringify(request)}`);
+    }
     // Browser-level SW checks can bypass page offline emulation. Deny the
     // server too, proving the offline page cannot borrow any network bytes.
     if (offline) { res.writeHead(503).end(); return; }
@@ -89,7 +100,13 @@ const server = http.createServer((req, res) => {
     const file = path.resolve(served, "." + pathname, pathname.endsWith("/") ? "index.html" : "");
     if (!file.startsWith(served + path.sep)) { res.writeHead(403).end(); return; }
     fs.readFile(file, (error, bytes) => {
-      if (error) { res.writeHead(404).end(); return; }
+      if (error) {
+        serverFailures.push({ pathname, revision, error: error.code });
+        res.writeHead(404).end(); return;
+      }
+      if (sabotage === "mixed-deployment" && revision === 1 && pathname.endsWith(".wasm")) {
+        bytes[bytes.length - 1] ^= 1; // B alone has a bad large-resource digest.
+      }
       res.writeHead(200, { "content-type": types[path.extname(file)] || "application/octet-stream", ...headers(pathname) });
       res.end(bytes);
     });
@@ -178,12 +195,47 @@ try {
       if (message.error) call.reject(new Error(JSON.stringify(message.error))); else call.resolve(message.result);
     } else if (message.method === "Runtime.consoleAPICalled") {
       const line = message.params.args.map(value => value.value ?? value.description ?? "").join(" ");
-      lines.push(line);
-      if (message.params.type === "error") errors.push(line);
-    } else if (message.method === "Runtime.exceptionThrown") errors.push(message.params.exceptionDetails.exception?.description || message.params.exceptionDetails.text);
+      if (message.sessionId) console.log(`SW CONSOLE ${message.params.type}: ${line}`);
+      else {
+        lines.push(line);
+        if (message.params.type === "error") errors.push(line);
+      }
+    } else if (message.method === "Runtime.exceptionThrown") {
+      const error = message.params.exceptionDetails.exception?.description || message.params.exceptionDetails.text;
+      if (message.sessionId) console.error(`SW EXCEPTION: ${error}`);
+      else errors.push(error);
+    } else if (message.method === "ServiceWorker.workerRegistrationUpdated") {
+      for (const registration of message.params.registrations) {
+        if (registration.scopeURL === origin + "/drive/") workerRegistrations.add(registration.registrationId);
+      }
+    } else if (message.method === "ServiceWorker.workerErrorReported") {
+      const error = message.params.errorMessage;
+      if (error.sourceURL.startsWith(origin + "/drive/") || workerRegistrations.has(error.registrationId)) {
+        workerErrors.push(error);
+        console.error(`SW ERROR ${JSON.stringify(error)}`);
+      }
+    } else if (diagnostics && message.method === "ServiceWorker.workerVersionUpdated") {
+      console.log(`SW VERSIONS ${JSON.stringify(message.params.versions)}`);
+    } else if (diagnostics && message.method === "Target.targetCreated") {
+      const target = message.params.targetInfo;
+      if (target.type === "service_worker" && target.url.startsWith(origin + "/drive/")) {
+        console.log(`SW TARGET ${JSON.stringify(target)}`);
+        send("Target.attachToTarget", { targetId: target.targetId, flatten: true })
+          .then(({ sessionId }) => send("Runtime.enable", {}, sessionId))
+          .catch(error => console.error(`SW ATTACH: ${error.message}`));
+      }
+    } else if (diagnostics && message.method === "Target.targetDestroyed") {
+      console.log(`TARGET DESTROYED ${message.params.targetId}`);
+    }
   });
   await new Promise((resolve, reject) => { ws.addEventListener("open", resolve, { once: true }); ws.addEventListener("error", reject, { once: true }); });
   await send("Page.enable"); await send("Runtime.enable");
+  if (diagnostics) {
+    // Attaching a debugger can alter worker lifetime/timing. Keep this opt-in;
+    // acceptance must also pass without observing worker targets or Network.
+    await send("ServiceWorker.enable");
+    await send("Target.setDiscoverTargets", { discover: true });
+  }
   // First boot deliberately has no Network.enable: observing network can
   // mask Chrome's fetch-across-SW-activation failure (estate incident note).
   await boot();
@@ -205,8 +257,33 @@ try {
   // B lands while this document is still the first visit. Claim must not
   // turn its installed callback into a spurious first-visit update prompt.
   revision = 1;
-  await evaluate("SignalOverdriveUpdate.check()");
-  await until(() => evaluate("!!SignalOverdriveUpdate.registration?.waiting"), "B installed in A's existing browser profile");
+  await evaluate(`(() => {
+    const registration = SignalOverdriveUpdate.registration;
+    window.__pwaInstallStates = [];
+    registration.addEventListener('updatefound', () => {
+      const worker = registration.installing;
+      const record = () => __pwaInstallStates.push({ at: Date.now(), state: worker.state });
+      record(); worker.addEventListener('statechange', record);
+    });
+  })()`);
+  const completedWithWaiting = await evaluate(`(() => {
+    const first = SignalOverdriveUpdate.check();
+    const adjacent = SignalOverdriveUpdate.check();
+    if (first !== adjacent) throw new Error('adjacent update checks did not share completion');
+    return Promise.all([first, adjacent]).then(() => !!SignalOverdriveUpdate.registration.waiting);
+  })()`);
+  if (!sabotage) assert.equal(completedWithWaiting, true, "shared checks complete only after B is installed");
+  await until(async () => {
+    const state = await evaluate(`({
+      waiting: !!SignalOverdriveUpdate.registration?.waiting,
+      rejected: window.__pwaInstallStates?.some(item => item.state === 'redundant')
+    })`);
+    if (state.waiting) return true;
+    if (workerErrors.length) throw new Error(`B worker error: ${JSON.stringify(workerErrors)}`);
+    if (state.rejected) throw new Error("B install became redundant; inspect SW and server diagnostics");
+    return false;
+  }, "B installed in A's existing browser profile");
+  console.log("PASS adjacent update checks: one shared check includes B installation");
   assert.notEqual(await evaluate("SignalOverdriveUpdate.state"), "waiting");
   if (restart) {
     await send("Page.navigate", { url: "about:blank" });
@@ -271,6 +348,20 @@ try {
 } catch (error) {
   process.exitCode = 1;
   console.error(error.stack);
+  console.error(`SW REQUESTS ${JSON.stringify(workerRequests)}`);
+  console.error(`SERVER FAILURES ${JSON.stringify(serverFailures)}`);
+  if (ws?.readyState === WebSocket.OPEN) {
+    try {
+      console.error(`SW STATE ${JSON.stringify(await evaluate(`({
+        bridge: SignalOverdriveUpdate?.state,
+        active: SignalOverdriveUpdate?.registration?.active?.state,
+        installing: SignalOverdriveUpdate?.registration?.installing?.state,
+        waiting: SignalOverdriveUpdate?.registration?.waiting?.state,
+        transitions: window.__pwaInstallStates,
+        caches: await caches.keys()
+      })`))}`);
+    } catch (diagnosticError) { console.error(`SW STATE unavailable: ${diagnosticError.message}`); }
+  }
   console.error(lines.slice(-15).join("\n"));
   console.error("VERDICT RED" + (sabotage ? ` (sabotage ${sabotage})` : ""));
 } finally {
