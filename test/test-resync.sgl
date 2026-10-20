@@ -278,11 +278,29 @@
     (let ((out (make-bytevector (* 8 735) 0))
           (resyncs (list-ref (music-readout) 7))
           (cancels (list-ref (music-readout) 9)))
-      ;; one long frame the ring plays nothing of: the simulation is
-      ;; about 200 ms ahead of the ear after it (0.2 s less the nudge's
-      ;; 2% is 11 ticks and a remainder)
-      (core-headless-frame! 0.2)
-      (assert-equal 11 (conductor-tick (race-song (core-race))))
+      ;; The start hold caps simulation time at the audible position until
+      ;; the first tick, so a long frame at tick zero before the device
+      ;; plays no longer makes a lead (this test made its lead that way
+      ;; before the hold, and expected 11 ticks there; that is not to be
+      ;; restored). While it holds, pacing is not running either: no 2%
+      ;; nudge and no resync request before the device plays, since the
+      ;; hold itself keeps the simulation at the ear (a 0.2 s frame at tick
+      ;; zero with the clamp alone removed counts 12 ticks, not 11). Frames
+      ;; the ring plays start the clock, level with the ear, and the lead
+      ;; is made after them.
+      (let loop ((frame 0))
+        (when (< frame 8)
+          (%audio-stream-drain-for-test out 735 2)
+          (core-headless-frame! (/ 1.0 60.0))
+          (loop (+ frame 1))))
+      (let ((started (conductor-tick (race-song (core-race)))))
+        (assert-true (> started 0))
+        ;; then one long frame the ring plays nothing of: the simulation
+        ;; is about 200 ms ahead of the ear after it (0.2 s, less the
+        ;; nudge's 2% when it acts, is 11 or 12 ticks with the remainder)
+        (core-headless-frame! 0.2)
+        (let ((ticks (- (conductor-tick (race-song (core-race))) started)))
+          (assert-equal "11 or 12" (if (memv ticks '(11 12)) "11 or 12" (counts "ticks" ticks)))))
       (let loop ((frame 0))
         (when (< frame 480)
           (%audio-stream-drain-for-test out 735 2)
@@ -391,10 +409,18 @@
       (%audio-stream-drain-for-test out 6615 2)
       (wait-since (music-opened-jiffy) 0.15)
       (core-headless-frame! 0.15)
-      ;; 150 ms less the nudge's 2% is 8 ticks and a remainder; the first
-      ;; frame's real time since the opening can add one. Skipped, it was 0.
-      (let ((ticks (conductor-tick (race-song (core-race)))))
-        (assert-equal "8 or 9" (if (memv ticks '(8 9)) "8 or 9" (counts "ticks" ticks))))
+      ;; The ear is 35 ms behind the 150 ms played, and the start hold
+      ;; caps simulation time at the audible position until the first
+      ;; tick: 115 ms, 6 ticks and a remainder. Skipped (the bug this
+      ;; guards), it was 0. This test expected 8 or 9 before the start
+      ;; hold, the frame counted in full and the simulation up to 35 ms
+      ;; ahead of what the ear had heard; that is not to be restored.
+      (let ((ticks (conductor-tick (race-song (core-race))))
+            (heard (exact (floor (* 60.0 (music-audible-seconds))))))
+        (assert-equal "the ear's tick"
+                      (if (and (> ticks 0) (<= (abs (- ticks heard)) 1))
+                          "the ear's tick"
+                          (counts "ticks" ticks "heard" heard))))
       (assert-false (list-ref (music-readout) 8)))
     (music-close!)
     (assert-false (audio-initialized?)))
@@ -426,8 +452,18 @@
       (%audio-stream-drain-for-test out 6615 2)
       (wait-since (music-opened-jiffy) 0.15)
       (core-headless-frame! 0.15)
-      (let ((ticks (conductor-tick (race-song (core-race)))))
-        (assert-equal "8 or 9" (if (memv ticks '(8 9)) "8 or 9" (counts "ticks" ticks))))
+      ;; The ear is 35 ms behind the 150 ms played, and the start hold
+      ;; caps simulation time at the audible position until the first
+      ;; tick: 115 ms, 6 ticks and a remainder. Skipped (the bug this
+      ;; guards), it was 0. This test expected 8 or 9 before the start
+      ;; hold, the frame counted in full and the simulation up to 35 ms
+      ;; ahead of what the ear had heard; that is not to be restored.
+      (let ((ticks (conductor-tick (race-song (core-race))))
+            (heard (exact (floor (* 60.0 (music-audible-seconds))))))
+        (assert-equal "the ear's tick"
+                      (if (and (> ticks 0) (<= (abs (- ticks heard)) 1))
+                          "the ear's tick"
+                          (counts "ticks" ticks "heard" heard))))
       (assert-false (list-ref (music-readout) 8)))
     (music-close!)
     (assert-false (audio-initialized?))))
