@@ -26,13 +26,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-  <meta name="theme-color" content="#000000">
+  <meta name="theme-color" content="#0D0A1A">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="substratic-version" content="__VERSION__">
   <title>__TITLE__</title>
-  <link rel="icon" href="data:,">
+  <link rel="manifest" href="assets/pwa/manifest.webmanifest">
+  <link rel="icon" href="assets/pwa/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="assets/pwa/icon-180.png">
   <!-- Privacy-friendly analytics by Plausible (on signaloverdrive.net only: a copy played elsewhere, such as the itch.io build, sends nothing) -->
   <script>
     if (/^(www\.)?signaloverdrive\.net$/.test(location.hostname)) (function (s) { s.async = true; s.src = "https://plausible.io/js/pa-GCzY0KZPnFuB1DEsbPead.js"; document.head.appendChild(s); })(document.createElement("script"));
@@ -452,6 +454,7 @@
     window.SignalOverdriveFx = { state: function () { return JSON.parse(JSON.stringify(state)); }, open: open };
   })();
   </script>
+  <script src="assets/pwa/update.js"></script>
   <!--sigil:app-->
 </body>
 </html>

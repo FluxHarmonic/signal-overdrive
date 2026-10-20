@@ -34,8 +34,7 @@
 ;;; and the race's configuration is (flow-track f), (flow-mode f), (flow-tier f).
 
 (define-library (signal flow)
-  (import (sigil core)
-          (sigil struct)
+  (import (sigil struct)
           (sigil list)
           (signal track)
           (signal handling)
@@ -51,6 +50,7 @@
           flow-hit flow-hud-best flow-start-card flow-retry flow-unlock-all flow-trial-tracks
           flow-results-shown? flow-retransmits-left flow-gibson-line flow-describe
           flow-paused? flow-pause-box
+          flow-with-update flow-update-ready?
           nav nav? nav-up nav-down nav-left nav-right nav-confirm nav-back nav-pause nav-tap NAV-NONE nav-merge
           RESULTS-DELAY FADE-TICKS PLAYER-NAME MENU-Y0 MENU-STEP PANEL-Y0 BACK-ROW PAUSE-Y0)
 
@@ -83,6 +83,7 @@
     (define-struct flow
       (screen default: 'title)
       (sel default: 0)
+      (update-ready? default: #f)
       (mode default: 'run)
       (tier default: 'learner)
       (cup default: #f)
@@ -103,6 +104,16 @@
 
     (define (flow-new save) (flow save: save cup: (first-cup)))
     (define (flow-off f) (flow f screen: 'off commands: '()))
+
+    ;; Availability belongs to the page; this pure field only controls the
+    ;; main menu's row. Never treat arriving at the menu as a choice.
+    (define (flow-with-update f ready?)
+      (if (eqv? (flow-update-ready? f) ready?)
+          f
+          (let ((next (flow f update-ready?: ready?)))
+            (if (eq? (flow-screen next) 'mode)
+                (flow next sel: (min (flow-sel next) (- (length (flow-rows next)) 1)))
+                next))))
 
     (define (first-cup) (if (pair? (cup-ids)) (car (cup-ids)) #f))
 
@@ -156,7 +167,13 @@
     (define (flow-rows f)
       (let ((s (flow-save f)))
         (case (flow-screen f)
-          ((mode) (list (list 'run "RUN" (and (first-cup) #t)) (list 'trial "TIME TRIAL" (pair? (trial-tracks s)))))
+          ((mode)
+           (append
+            (list (list 'run "RUN" (and (first-cup) #t))
+                  (list 'trial "TIME TRIAL" (pair? (trial-tracks s))))
+            (if (flow-update-ready? f)
+                (list (list 'update "INSTALL UPDATE" #t))
+                '())))
           ((tier) (map (lambda (t) (list t (tier-label t) (save-tier-open? s t))) TIER-IDS))
           ((cup) (map (lambda (c) (list c (cup-name c) (save-cup-open? s (cup-ids) c))) (cup-ids)))
           ((trial) (map (lambda (t) (list t (track-title t) #t)) (trial-tracks s)))
@@ -339,6 +356,8 @@
         (case (flow-screen f)
           ((mode)
            (cond ((eq? id 'back) (to f 'title))
+                 ((and (eq? id 'update) (flow-update-ready? f))
+                  (cmd f 'update))
                  ((and (eq? id 'run) (row-enabled? f 'run))
                   (to (flow f mode: 'run) 'tier
                       ;; the last tier chosen, if it is open; else LEARNER

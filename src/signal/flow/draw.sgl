@@ -12,8 +12,7 @@
 ;;; motion), touch (the page says the pointer is coarse), web.
 
 (define-library (signal flow draw)
-  (import (sigil core)
-          (sigil list)
+  (import (sigil list)
           (signal scene)
           (signal flow)
           (signal flow cup)
@@ -84,7 +83,13 @@
                  ((trial)
                   ;; race-new's time-trial empties the field and clears the ICE
                   (centred! "NO RIVALS AND NO ICE." y PALE)
-                  (centred! "YOUR BEST LAP RACES YOU AS A GHOST." (+ y 11) LABEL))))
+                  (centred! "YOUR BEST LAP RACES YOU AS A GHOST." (+ y 11) LABEL))
+                 ((update)
+                  (centred! "NEW VERSION READY." y PALE)
+                  (centred! (if (opt opts 'update-blocked)
+                                "FINISH RACES IN OTHER WINDOWS FIRST."
+                                "SELECT TO INSTALL. YOUR PROGRESS IS KEPT.")
+                            (+ y 11) LABEL))))
              (hints!))
             ((tier)
              (centred! "CHOOSE YOUR TIER" 108 LABEL)
