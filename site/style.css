@@ -159,6 +159,12 @@ footer {
 footer .mark { display: inline-block; margin-bottom: 1.5rem; }
 footer .mark img { display: block; width: 190px; height: auto; }
 footer p { margin: 0 0 0.6em; }
+/* The "Created with Sigil" badge (usesigil.org/badge/), as on tesserawm.org:
+   centered on its own row at the bottom of the footer, at its real size of
+   78x51, with its 13 px of clear space as padding. */
+footer .foot-badge { display: flex; justify-content: center; padding: 13px; margin-top: 1rem; }
+footer .created-with-sigil { display: block; flex: none; line-height: 0; }
+footer .created-with-sigil img { display: block; width: 78px; height: 51px; }
 
 /* 404: the number in the accent, with the logo's cyan split as a hairline */
 .lost { min-height: 100vh; display: flex; flex-direction: column; justify-content: center; text-align: center; }
